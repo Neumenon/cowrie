@@ -253,7 +253,7 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
         }
         Value::Image(img) => {
             buf.push(tags::IMAGE);
-            buf.push(img.format);
+            buf.push(img.format as u8);
             buf.extend_from_slice(&img.width.to_le_bytes());
             buf.extend_from_slice(&img.height.to_le_bytes());
             write_uvarint(buf, img.data.len() as u64);
@@ -261,7 +261,7 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
         }
         Value::Audio(aud) => {
             buf.push(tags::AUDIO);
-            buf.push(aud.encoding);
+            buf.push(aud.encoding as u8);
             buf.extend_from_slice(&aud.sample_rate.to_le_bytes());
             buf.push(aud.channels);
             write_uvarint(buf, aud.data.len() as u64);

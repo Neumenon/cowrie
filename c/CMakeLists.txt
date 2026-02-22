@@ -25,6 +25,21 @@ add_library(cowrie_gen2
 )
 target_include_directories(cowrie_gen2 PUBLIC include)
 
+# zlib is required for framed compression (gzip)
+find_package(ZLIB REQUIRED)
+target_link_libraries(cowrie_gen2 PUBLIC ZLIB::ZLIB)
+
+# Optional: zstd support for framed compression
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(ZSTD QUIET libzstd)
+endif()
+if(ZSTD_FOUND)
+    target_compile_definitions(cowrie_gen2 PUBLIC COWRIE_HAS_ZSTD)
+    target_include_directories(cowrie_gen2 PUBLIC ${ZSTD_INCLUDE_DIRS})
+    target_link_libraries(cowrie_gen2 PUBLIC ${ZSTD_LIBRARIES})
+endif()
+
 # Combined library (convenience target)
 add_library(cowrie INTERFACE)
 target_link_libraries(cowrie INTERFACE cowrie_gen1 cowrie_gen2)

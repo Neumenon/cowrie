@@ -31,6 +31,16 @@ extern "C" {
 #define COWRIE_COMP_GZIP         1
 #define COWRIE_COMP_ZSTD         2
 
+/* Compression types for framed encoding */
+typedef enum {
+    COWRIE_COMPRESS_NONE = 0,
+    COWRIE_COMPRESS_GZIP = 1,
+    COWRIE_COMPRESS_ZSTD = 2
+} COWRIECompression;
+
+/* Decompression bomb limit */
+#define COWRIE_MAX_DECOMPRESSED_SIZE (256 * 1024 * 1024)
+
 /* Type tags - Core (0x00-0x1F) */
 typedef enum {
     SJT_NULL        = 0x00,
@@ -369,6 +379,9 @@ typedef struct {
 #define COWRIE_DEFAULT_MAX_OBJECT_LEN 10000000    /* 10M fields */
 #define COWRIE_DEFAULT_MAX_STRING_LEN 500000000   /* 500MB */
 #define COWRIE_DEFAULT_MAX_BYTES_LEN  1000000000  /* 1GB */
+#define COWRIE_DEFAULT_MAX_EXT_LEN    100000000   /* 100MB */
+#define COWRIE_DEFAULT_MAX_RANK       32
+#define COWRIE_DEFAULT_MAX_DICT_LEN   10000000    /* 10M */
 
 /* Decode options for configurable security limits */
 typedef struct {
@@ -377,6 +390,9 @@ typedef struct {
     size_t max_object_len;  /* Maximum object field count */
     size_t max_string_len;  /* Maximum string byte length */
     size_t max_bytes_len;   /* Maximum bytes length */
+    size_t max_ext_len;     /* Maximum ext payload length */
+    size_t max_dict_len;    /* Maximum dictionary entry count */
+    int    max_rank;        /* Maximum tensor rank (dimensions) */
     int unknown_ext;        /* Unknown ext behavior (0=keep,1=skip,2=error) */
 } COWRIEDecodeOpts;
 
@@ -392,6 +408,9 @@ static inline void cowrie_decode_opts_init(COWRIEDecodeOpts *opts) {
     opts->max_object_len = COWRIE_DEFAULT_MAX_OBJECT_LEN;
     opts->max_string_len = COWRIE_DEFAULT_MAX_STRING_LEN;
     opts->max_bytes_len = COWRIE_DEFAULT_MAX_BYTES_LEN;
+    opts->max_ext_len = COWRIE_DEFAULT_MAX_EXT_LEN;
+    opts->max_dict_len = COWRIE_DEFAULT_MAX_DICT_LEN;
+    opts->max_rank = COWRIE_DEFAULT_MAX_RANK;
     opts->unknown_ext = COWRIE_UNKNOWN_EXT_KEEP;
 }
 

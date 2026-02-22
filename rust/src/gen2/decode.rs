@@ -1,6 +1,6 @@
 //! Cowrie decoder.
 
-use super::types::{Value, CowrieError, DType, TensorData, TensorRef, ImageData, AudioData, AdjlistData, RichTextData, RichTextSpan, DeltaData, DeltaOp, DeltaOpCode, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData};
+use super::types::{Value, CowrieError, DType, TensorData, TensorRef, ImageFormat, ImageData, AudioEncoding, AudioData, AdjlistData, RichTextData, RichTextSpan, DeltaData, DeltaOp, DeltaOpCode, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData};
 use crate::{MAGIC, VERSION};
 use std::collections::BTreeMap;
 
@@ -41,8 +41,12 @@ const MAX_DEPTH: usize = 1000;
 
 /// Maximum array/object size.
 const MAX_SIZE: usize = 10_000_000;
+/// Maximum extension payload length (100MB) - prevents DoS from huge ext payloads.
+const MAX_EXT_LEN: usize = 100_000_000;
+/// Maximum dictionary entry count (10M) - same as Go DefaultMaxDictLen.
+const MAX_DICT_LEN: usize = 10_000_000;
 /// Maximum tensor rank (dimensions).
-const MAX_RANK: u64 = 32;
+const MAX_RANK: usize = 32;
 /// Maximum column hints.
 const MAX_HINT_COUNT: u64 = 10_000;
 
@@ -97,7 +101,7 @@ impl<'a> Reader<'a> {
 
         // Read dictionary
         let dict_len = self.read_uvarint()? as usize;
-        if dict_len > MAX_SIZE {
+        if dict_len > MAX_DICT_LEN {
             return Err(CowrieError::TooLarge);
         }
         self.dict = Vec::with_capacity(dict_len);
@@ -198,7 +202,7 @@ impl<'a> Reader<'a> {
             tags::EXT => {
                 let type_id = self.read_uvarint()?;
                 let len = self.read_uvarint()? as usize;
-                if len > MAX_SIZE {
+                if len > MAX_EXT_LEN {
                     return Err(CowrieError::TooLarge);
                 }
                 let payload = self.read_bytes(len)?;
@@ -207,6 +211,12 @@ impl<'a> Reader<'a> {
             tags::TENSOR => {
                 let dtype = DType::try_from(self.read_byte()?)?;
                 let rank = self.read_byte()? as usize;
+                if rank > MAX_RANK {
+                    return Err(CowrieError::InvalidData(format!(
+                        "tensor rank {} exceeds maximum {}",
+                        rank, MAX_RANK
+                    )));
+                }
                 let mut shape = Vec::with_capacity(rank);
                 for _ in 0..rank {
                     shape.push(self.read_uvarint()?);
@@ -228,7 +238,8 @@ impl<'a> Reader<'a> {
                 Value::TensorRef(TensorRef { store_id, key })
             }
             tags::IMAGE => {
-                let format = self.read_byte()?;
+                let format_byte = self.read_byte()?;
+                let format = ImageFormat::try_from(format_byte)?;
                 let width = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
                 let height = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
                 let data_len = self.read_uvarint()? as usize;
@@ -239,7 +250,8 @@ impl<'a> Reader<'a> {
                 Value::Image(ImageData { format, width, height, data })
             }
             tags::AUDIO => {
-                let encoding = self.read_byte()?;
+                let encoding_byte = self.read_byte()?;
+                let encoding = AudioEncoding::try_from(encoding_byte)?;
                 let sample_rate = u32::from_le_bytes(self.read_bytes_fixed::<4>()?);
                 let channels = self.read_byte()?;
                 let data_len = self.read_uvarint()? as usize;
@@ -480,7 +492,7 @@ impl<'a> Reader<'a> {
             let _field = self.read_string()?;
             let _typ = self.read_byte()?;
             let shape_len = self.read_uvarint()?;
-            if shape_len > MAX_RANK {
+            if shape_len > MAX_RANK as u64 {
                 return Err(CowrieError::TooLarge);
             }
             for _ in 0..shape_len {
@@ -705,6 +717,199 @@ mod tests {
             }
             _ => panic!("Expected NodeBatch, got {:?}", decoded),
         }
+    }
+
+    #[test]
+    fn test_roundtrip_image() {
+        use super::super::types::{ImageData, ImageFormat};
+
+        let val = Value::Image(ImageData {
+            format: ImageFormat::Png,
+            width: 640,
+            height: 480,
+            data: vec![0x89, 0x50, 0x4E, 0x47],
+        });
+
+        let encoded = encode(&val).expect("encode");
+        let decoded = decode(&encoded).expect("decode");
+
+        match decoded {
+            Value::Image(img) => {
+                assert_eq!(img.format, ImageFormat::Png);
+                assert_eq!(img.width, 640);
+                assert_eq!(img.height, 480);
+                assert_eq!(img.data, vec![0x89, 0x50, 0x4E, 0x47]);
+            }
+            _ => panic!("Expected Image, got {:?}", decoded),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_audio() {
+        use super::super::types::{AudioData, AudioEncoding};
+
+        let val = Value::Audio(AudioData {
+            encoding: AudioEncoding::Opus,
+            sample_rate: 48000,
+            channels: 2,
+            data: vec![0x01, 0x02, 0x03, 0x04],
+        });
+
+        let encoded = encode(&val).expect("encode");
+        let decoded = decode(&encoded).expect("decode");
+
+        match decoded {
+            Value::Audio(aud) => {
+                assert_eq!(aud.encoding, AudioEncoding::Opus);
+                assert_eq!(aud.sample_rate, 48000);
+                assert_eq!(aud.channels, 2);
+                assert_eq!(aud.data, vec![0x01, 0x02, 0x03, 0x04]);
+            }
+            _ => panic!("Expected Audio, got {:?}", decoded),
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_all_image_formats() {
+        use super::super::types::{ImageData, ImageFormat};
+
+        let formats = [
+            ImageFormat::Jpeg,
+            ImageFormat::Png,
+            ImageFormat::Webp,
+            ImageFormat::Avif,
+            ImageFormat::Bmp,
+        ];
+
+        for fmt in formats {
+            let val = Value::Image(ImageData {
+                format: fmt,
+                width: 100,
+                height: 200,
+                data: vec![0xFF],
+            });
+
+            let encoded = encode(&val).expect("encode");
+            let decoded = decode(&encoded).expect("decode");
+
+            match decoded {
+                Value::Image(img) => assert_eq!(img.format, fmt),
+                _ => panic!("Expected Image"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_all_audio_encodings() {
+        use super::super::types::{AudioData, AudioEncoding};
+
+        let encodings = [
+            AudioEncoding::PcmInt16,
+            AudioEncoding::PcmFloat32,
+            AudioEncoding::Opus,
+            AudioEncoding::Aac,
+        ];
+
+        for enc in encodings {
+            let val = Value::Audio(AudioData {
+                encoding: enc,
+                sample_rate: 44100,
+                channels: 1,
+                data: vec![0x00],
+            });
+
+            let encoded = encode(&val).expect("encode");
+            let decoded = decode(&encoded).expect("decode");
+
+            match decoded {
+                Value::Audio(aud) => assert_eq!(aud.encoding, enc),
+                _ => panic!("Expected Audio"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_invalid_image_format_rejected() {
+        // Craft a raw Cowrie payload with an invalid image format byte (0x00)
+        use crate::{MAGIC, VERSION};
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+        buf.push(0); // flags
+        buf.push(0); // dict len = 0
+        buf.push(0x22); // IMAGE tag
+        buf.push(0x00); // invalid format
+        buf.extend_from_slice(&100u16.to_le_bytes()); // width
+        buf.extend_from_slice(&200u16.to_le_bytes()); // height
+        buf.push(0); // data len = 0
+
+        let result = decode(&buf);
+        assert!(result.is_err(), "should reject invalid image format 0x00");
+    }
+
+    #[test]
+    fn test_invalid_audio_encoding_rejected() {
+        // Craft a raw Cowrie payload with an invalid audio encoding byte (0xFF)
+        use crate::{MAGIC, VERSION};
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+        buf.push(0); // flags
+        buf.push(0); // dict len = 0
+        buf.push(0x23); // AUDIO tag
+        buf.push(0xFF); // invalid encoding
+        buf.extend_from_slice(&44100u32.to_le_bytes()); // sample_rate
+        buf.push(2); // channels
+        buf.push(0); // data len = 0
+
+        let result = decode(&buf);
+        assert!(result.is_err(), "should reject invalid audio encoding 0xFF");
+    }
+
+    #[test]
+    fn test_tensor_rank_limit() {
+        // Craft a tensor with rank=33, which exceeds MAX_RANK=32
+        use crate::{MAGIC, VERSION};
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+        buf.push(0); // flags
+        buf.push(0); // dict len = 0
+        buf.push(0x20); // TENSOR tag
+        buf.push(0x01); // dtype = Float32
+        buf.push(33);   // rank = 33 (exceeds MAX_RANK=32)
+        // Shape: 33 dimensions all = 1
+        for _ in 0..33 {
+            buf.push(1); // uvarint 1
+        }
+        buf.push(0); // data len = 0
+
+        let result = decode(&buf);
+        assert!(result.is_err(), "should reject tensor rank > 32");
+    }
+
+    #[test]
+    fn test_tensor_rank_32_accepted() {
+        // Craft a tensor with rank=32, which is exactly at MAX_RANK
+        use crate::{MAGIC, VERSION};
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+        buf.push(0); // flags
+        buf.push(0); // dict len = 0
+        buf.push(0x20); // TENSOR tag
+        buf.push(0x01); // dtype = Float32
+        buf.push(32);   // rank = 32 (exactly MAX_RANK)
+        // Shape: 32 dimensions all = 1
+        for _ in 0..32 {
+            buf.push(1); // uvarint 1
+        }
+        // data_len = 4 bytes (1 float32 element = product of all dims * 4)
+        buf.push(4); // uvarint 4
+        buf.extend_from_slice(&1.0f32.to_le_bytes());
+
+        let result = decode(&buf);
+        assert!(result.is_ok(), "should accept tensor rank = 32");
     }
 
     #[test]

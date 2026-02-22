@@ -36,6 +36,8 @@ const Limits = {
   MAX_EXT_LEN: 100_000_000,      // 100MB extension payload
   MAX_RANK: 32,                  // Maximum tensor rank (dimensions)
   MAX_HINT_COUNT: 10_000,        // Maximum column hints
+  MAX_DICT_LEN: 10_000_000,      // 10M dictionary entries
+  MAX_DECOMPRESSED_SIZE: 256 * 1024 * 1024, // 256MB decompressed limit
 };
 
 export class SecurityLimitExceeded extends Error {
@@ -1212,8 +1214,8 @@ class Decoder {
 
     // Dictionary
     const dictLen = Number(this.readUvarint());
-    if (dictLen > Limits.MAX_OBJECT_LEN) {
-      throw new SecurityLimitExceeded(`Dictionary too large: ${dictLen} > ${Limits.MAX_OBJECT_LEN}`);
+    if (dictLen > Limits.MAX_DICT_LEN) {
+      throw new SecurityLimitExceeded('cowrie: dictionary too large');
     }
     for (let i = 0; i < dictLen; i++) {
       this.dict.push(this.readString());
@@ -2495,7 +2497,7 @@ export function encodeFramed(v: Value, compression: Compression = Compression.NO
 /**
  * Decode a framed Cowrie value, automatically decompressing if needed.
  */
-export function decodeFramed(data: Uint8Array, maxSize: number = Limits.MAX_BYTES_LEN): Value {
+export function decodeFramed(data: Uint8Array, maxSize: number = Limits.MAX_DECOMPRESSED_SIZE): Value {
   if (data.length < 4) {
     throw new Error("truncated data");
   }
@@ -2538,7 +2540,16 @@ export function decodeFramed(data: Uint8Array, maxSize: number = Limits.MAX_BYTE
       throw new Error("pako library required for gzip decompression");
     }
   } else if (compType === 2) {
-    throw new Error("zstd decompression not yet supported");
+    // ZSTD
+    try {
+      const fzstd = require('fzstd');
+      decompressed = fzstd.decompress(compressed);
+    } catch (e: any) {
+      if (e.code === 'MODULE_NOT_FOUND') {
+        throw new Error('zstd decompression requires the fzstd package: npm install fzstd');
+      }
+      throw e;
+    }
   } else {
     throw new Error(`Unknown compression type: ${compType}`);
   }

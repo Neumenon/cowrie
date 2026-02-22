@@ -62,11 +62,32 @@ MAX_BYTES_LEN = 1_000_000_000  # 1GB
 MAX_EXT_LEN = 100_000_000      # 100MB extension payload
 MAX_RANK = 32                  # Maximum tensor rank (dimensions)
 MAX_HINT_COUNT = 10_000        # Maximum column hints
+MAX_DECOMPRESSED_SIZE = 256 * 1024 * 1024  # 256MB
+MAX_DICT_LEN = 10_000_000     # 10M dictionary entries
 
 
 class SecurityLimitExceeded(ValueError):
     """Raised when a security limit is exceeded during decode."""
     pass
+
+
+@dataclass
+class DecodeOptions:
+    """Configurable security limits for decoding.
+
+    All fields have safe defaults matching the module-level constants.
+    Pass an instance to decode() or decode_framed() to override limits.
+    """
+    max_depth: int = 1000
+    max_array_len: int = 100_000_000
+    max_object_len: int = 10_000_000
+    max_string_len: int = 500_000_000
+    max_bytes_len: int = 1_000_000_000
+    max_ext_len: int = 100_000_000
+    max_dict_len: int = 10_000_000
+    max_rank: int = 32
+    max_hint_count: int = 10_000
+    max_decompressed_size: int = 256 * 1024 * 1024
 
 
 # Type tags - aligned with Go reference implementation
@@ -1194,12 +1215,14 @@ def encode(v: Value) -> bytes:
 # ============================================================
 
 class Decoder:
-    def __init__(self, data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.KEEP):
+    def __init__(self, data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.KEEP,
+                 opts: Optional[DecodeOptions] = None):
         self.data = data
         self.pos = 0
         self.dict: List[str] = []
         self.depth = 0
         self.on_unknown_ext = on_unknown_ext
+        self.opts = opts if opts is not None else DecodeOptions()
 
     def _read(self, n: int) -> bytes:
         if self.pos + n > len(self.data):
@@ -1218,14 +1241,14 @@ class Decoder:
 
     def _read_string(self) -> str:
         length = self._read_uvarint()
-        if length > MAX_STRING_LEN:
-            raise SecurityLimitExceeded(f"String too long: {length} > {MAX_STRING_LEN}")
+        if length > self.opts.max_string_len:
+            raise SecurityLimitExceeded(f"String too long: {length} > {self.opts.max_string_len}")
         return self._read(length).decode('utf-8')
 
     def _enter_nested(self) -> None:
         self.depth += 1
-        if self.depth > MAX_DEPTH:
-            raise SecurityLimitExceeded(f"Maximum nesting depth exceeded: {MAX_DEPTH}")
+        if self.depth > self.opts.max_depth:
+            raise SecurityLimitExceeded(f"Maximum nesting depth exceeded: {self.opts.max_depth}")
 
     def _exit_nested(self) -> None:
         self.depth -= 1
@@ -1255,8 +1278,8 @@ class Decoder:
             return Value.string(self._read_string())
         elif tag == Tag.BYTES:
             length = self._read_uvarint()
-            if length > MAX_BYTES_LEN:
-                raise SecurityLimitExceeded(f"Bytes too long: {length} > {MAX_BYTES_LEN}")
+            if length > self.opts.max_bytes_len:
+                raise SecurityLimitExceeded(f"Bytes too long: {length} > {self.opts.max_bytes_len}")
             return Value.bytes_(self._read(length))
         elif tag == Tag.DATETIME64:
             nanos = struct.unpack('<q', self._read(8))[0]
@@ -1269,8 +1292,8 @@ class Decoder:
         elif tag == Tag.EXT:
             ext_type = self._read_uvarint()
             length = self._read_uvarint()
-            if length > MAX_EXT_LEN:
-                raise SecurityLimitExceeded(f"Extension payload too large: {length} > {MAX_EXT_LEN}")
+            if length > self.opts.max_ext_len:
+                raise SecurityLimitExceeded(f"Extension payload too large: {length} > {self.opts.max_ext_len}")
             payload = self._read(length)
             if self.on_unknown_ext == UnknownExtBehavior.ERROR:
                 raise ValueError("Unknown extension type")
@@ -1279,16 +1302,16 @@ class Decoder:
             return Value.unknown_ext(ext_type, payload)
         elif tag == Tag.ARRAY:
             count = self._read_uvarint()
-            if count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
+            if count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Array too large: {count} > {self.opts.max_array_len}")
             self._enter_nested()
             items = [self._decode_value() for _ in range(count)]
             self._exit_nested()
             return Value.array(items)
         elif tag == Tag.OBJECT:
             count = self._read_uvarint()
-            if count > MAX_OBJECT_LEN:
-                raise SecurityLimitExceeded(f"Object too large: {count} > {MAX_OBJECT_LEN}")
+            if count > self.opts.max_object_len:
+                raise SecurityLimitExceeded(f"Object too large: {count} > {self.opts.max_object_len}")
             self._enter_nested()
             members = {}
             for _ in range(count):
@@ -1303,12 +1326,12 @@ class Decoder:
         elif tag == Tag.TENSOR:
             dtype = DType(self._read_byte())
             rank = self._read_byte()
-            if rank > MAX_RANK:
-                raise SecurityLimitExceeded(f"Tensor rank too large: {rank} > {MAX_RANK}")
+            if rank > self.opts.max_rank:
+                raise SecurityLimitExceeded(f"Tensor rank too large: {rank} > {self.opts.max_rank}")
             shape = [self._read_uvarint() for _ in range(rank)]
             data_len = self._read_uvarint()
-            if data_len > MAX_BYTES_LEN:
-                raise SecurityLimitExceeded(f"Tensor data too large: {data_len} > {MAX_BYTES_LEN}")
+            if data_len > self.opts.max_bytes_len:
+                raise SecurityLimitExceeded(f"Tensor data too large: {data_len} > {self.opts.max_bytes_len}")
             data = self._read(data_len)
             return Value.tensor(dtype, shape, data)
         elif tag == Tag.IMAGE:
@@ -1316,8 +1339,8 @@ class Decoder:
             width = struct.unpack('<H', self._read(2))[0]
             height = struct.unpack('<H', self._read(2))[0]
             data_len = self._read_uvarint()
-            if data_len > MAX_BYTES_LEN:
-                raise SecurityLimitExceeded(f"Image data too large: {data_len} > {MAX_BYTES_LEN}")
+            if data_len > self.opts.max_bytes_len:
+                raise SecurityLimitExceeded(f"Image data too large: {data_len} > {self.opts.max_bytes_len}")
             data = self._read(data_len)
             return Value.image(ImageFormat(format_byte), width, height, data)
         elif tag == Tag.AUDIO:
@@ -1325,25 +1348,25 @@ class Decoder:
             sample_rate = struct.unpack('<I', self._read(4))[0]
             channels = self._read_byte()
             data_len = self._read_uvarint()
-            if data_len > MAX_BYTES_LEN:
-                raise SecurityLimitExceeded(f"Audio data too large: {data_len} > {MAX_BYTES_LEN}")
+            if data_len > self.opts.max_bytes_len:
+                raise SecurityLimitExceeded(f"Audio data too large: {data_len} > {self.opts.max_bytes_len}")
             data = self._read(data_len)
             return Value.audio(AudioEncoding(encoding_byte), sample_rate, channels, data)
         elif tag == Tag.TENSOR_REF:
             store_id = self._read_byte()
             key_len = self._read_uvarint()
-            if key_len > MAX_STRING_LEN:
-                raise SecurityLimitExceeded(f"TensorRef key too long: {key_len} > {MAX_STRING_LEN}")
+            if key_len > self.opts.max_string_len:
+                raise SecurityLimitExceeded(f"TensorRef key too long: {key_len} > {self.opts.max_string_len}")
             key = self._read(key_len)
             return Value.tensor_ref(store_id, key)
         elif tag == Tag.ADJLIST:
             id_width = IDWidth(self._read_byte())
             node_count = self._read_uvarint()
-            if node_count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Adjlist node count too large: {node_count} > {MAX_ARRAY_LEN}")
+            if node_count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Adjlist node count too large: {node_count} > {self.opts.max_array_len}")
             edge_count = self._read_uvarint()
-            if edge_count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Adjlist edge count too large: {edge_count} > {MAX_ARRAY_LEN}")
+            if edge_count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Adjlist edge count too large: {edge_count} > {self.opts.max_array_len}")
             # Read row_offsets (node_count + 1 varints)
             row_offsets = [self._read_uvarint() for _ in range(node_count + 1)]
             # Read col_indices (edge_count * id_size bytes)
@@ -1353,8 +1376,8 @@ class Decoder:
         elif tag == Tag.RICHTEXT:
             # Text (readString format: len:varint + bytes)
             text_len = self._read_uvarint()
-            if text_len > MAX_STRING_LEN:
-                raise SecurityLimitExceeded(f"RichText text too long: {text_len} > {MAX_STRING_LEN}")
+            if text_len > self.opts.max_string_len:
+                raise SecurityLimitExceeded(f"RichText text too long: {text_len} > {self.opts.max_string_len}")
             text = self._read(text_len).decode('utf-8')
             # Read flags byte
             flags = self._read_byte()
@@ -1362,15 +1385,15 @@ class Decoder:
             tokens = None
             if flags & 0x01:
                 token_count = self._read_uvarint()
-                if token_count > MAX_ARRAY_LEN:
-                    raise SecurityLimitExceeded(f"RichText token count too large: {token_count} > {MAX_ARRAY_LEN}")
+                if token_count > self.opts.max_array_len:
+                    raise SecurityLimitExceeded(f"RichText token count too large: {token_count} > {self.opts.max_array_len}")
                 tokens = [struct.unpack('<i', self._read(4))[0] for _ in range(token_count)]
             # Read spans if present (flags & 0x02)
             spans = None
             if flags & 0x02:
                 span_count = self._read_uvarint()
-                if span_count > MAX_ARRAY_LEN:
-                    raise SecurityLimitExceeded(f"RichText span count too large: {span_count} > {MAX_ARRAY_LEN}")
+                if span_count > self.opts.max_array_len:
+                    raise SecurityLimitExceeded(f"RichText span count too large: {span_count} > {self.opts.max_array_len}")
                 spans = []
                 for _ in range(span_count):
                     start = self._read_uvarint()
@@ -1381,8 +1404,8 @@ class Decoder:
         elif tag == Tag.DELTA:
             base_id = self._read_uvarint()
             op_count = self._read_uvarint()
-            if op_count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Delta op count too large: {op_count} > {MAX_ARRAY_LEN}")
+            if op_count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Delta op count too large: {op_count} > {self.opts.max_array_len}")
             ops = []
             for _ in range(op_count):
                 op_code = DeltaOpCode(self._read_byte())
@@ -1401,26 +1424,26 @@ class Decoder:
             return Value.edge(edge.from_id, edge.to_id, edge.edge_type, edge.props)
         elif tag == Tag.NODE_BATCH:
             count = self._read_uvarint()
-            if count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Node batch count too large: {count} > {MAX_ARRAY_LEN}")
+            if count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Node batch count too large: {count} > {self.opts.max_array_len}")
             nodes = [self._decode_node() for _ in range(count)]
             return Value.node_batch(nodes)
         elif tag == Tag.EDGE_BATCH:
             count = self._read_uvarint()
-            if count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Edge batch count too large: {count} > {MAX_ARRAY_LEN}")
+            if count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Edge batch count too large: {count} > {self.opts.max_array_len}")
             edges = [self._decode_edge() for _ in range(count)]
             return Value.edge_batch(edges)
         elif tag == Tag.GRAPH_SHARD:
             # Decode nodes
             node_count = self._read_uvarint()
-            if node_count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Graph shard node count too large: {node_count} > {MAX_ARRAY_LEN}")
+            if node_count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Graph shard node count too large: {node_count} > {self.opts.max_array_len}")
             nodes = [self._decode_node() for _ in range(node_count)]
             # Decode edges
             edge_count = self._read_uvarint()
-            if edge_count > MAX_ARRAY_LEN:
-                raise SecurityLimitExceeded(f"Graph shard edge count too large: {edge_count} > {MAX_ARRAY_LEN}")
+            if edge_count > self.opts.max_array_len:
+                raise SecurityLimitExceeded(f"Graph shard edge count too large: {edge_count} > {self.opts.max_array_len}")
             edges = [self._decode_edge() for _ in range(edge_count)]
             # Decode metadata
             metadata = self._decode_props()
@@ -1432,8 +1455,8 @@ class Decoder:
         """Decode a node without tag byte."""
         id = self._read_string()
         label_count = self._read_uvarint()
-        if label_count > MAX_ARRAY_LEN:
-            raise SecurityLimitExceeded(f"Node label count too large: {label_count} > {MAX_ARRAY_LEN}")
+        if label_count > self.opts.max_array_len:
+            raise SecurityLimitExceeded(f"Node label count too large: {label_count} > {self.opts.max_array_len}")
         labels = [self._read_string() for _ in range(label_count)]
         props = self._decode_props()
         return NodeData(id=id, labels=labels, props=props)
@@ -1449,8 +1472,8 @@ class Decoder:
     def _decode_props(self) -> Dict[str, Value]:
         """Decode dictionary-coded properties."""
         prop_count = self._read_uvarint()
-        if prop_count > MAX_OBJECT_LEN:
-            raise SecurityLimitExceeded(f"Props count too large: {prop_count} > {MAX_OBJECT_LEN}")
+        if prop_count > self.opts.max_object_len:
+            raise SecurityLimitExceeded(f"Props count too large: {prop_count} > {self.opts.max_object_len}")
         props = {}
         for _ in range(prop_count):
             field_id = self._read_uvarint()
@@ -1463,14 +1486,14 @@ class Decoder:
 
     def _skip_hints(self) -> None:
         count = self._read_uvarint()
-        if count > MAX_HINT_COUNT:
-            raise SecurityLimitExceeded(f"Too many hints: {count} > {MAX_HINT_COUNT}")
+        if count > self.opts.max_hint_count:
+            raise SecurityLimitExceeded(f"Too many hints: {count} > {self.opts.max_hint_count}")
         for _ in range(count):
             _ = self._read_string()  # field name
             _ = self._read_byte()    # type
             shape_len = self._read_uvarint()
-            if shape_len > MAX_RANK:
-                raise SecurityLimitExceeded(f"Hint shape too large: {shape_len} > {MAX_RANK}")
+            if shape_len > self.opts.max_rank:
+                raise SecurityLimitExceeded(f"Hint shape too large: {shape_len} > {self.opts.max_rank}")
             for _ in range(shape_len):
                 _ = self._read_uvarint()
             _ = self._read_byte()    # flags
@@ -1492,17 +1515,24 @@ class Decoder:
 
         # Read dictionary
         dict_len = self._read_uvarint()
-        if dict_len > MAX_OBJECT_LEN:
-            raise SecurityLimitExceeded(f"Dictionary too large: {dict_len} > {MAX_OBJECT_LEN}")
+        if dict_len > self.opts.max_dict_len:
+            raise SecurityLimitExceeded(f"Dictionary too large: {dict_len} > {self.opts.max_dict_len}")
         self.dict = [self._read_string() for _ in range(dict_len)]
 
         # Decode root value
         return self._decode_value()
 
 
-def decode(data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.KEEP) -> Value:
-    """Decode Cowrie v2 binary data into a Value."""
-    return Decoder(data, on_unknown_ext=on_unknown_ext).decode()
+def decode(data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.KEEP,
+           opts: Optional[DecodeOptions] = None) -> Value:
+    """Decode Cowrie v2 binary data into a Value.
+
+    Args:
+        data: Raw Cowrie v2 binary data.
+        on_unknown_ext: Behavior for unknown extension types.
+        opts: Optional decode security limits. Uses safe defaults if None.
+    """
+    return Decoder(data, on_unknown_ext=on_unknown_ext, opts=opts).decode()
 
 
 # ============================================================
@@ -1542,8 +1572,20 @@ def encode_framed(v: Value, compression: Compression = Compression.ZSTD) -> byte
     return buf.getvalue()
 
 
-def decode_framed(data: bytes, max_size: int = MAX_BYTES_LEN) -> Value:
-    """Decode with automatic decompression and a maximum decompressed size limit."""
+def decode_framed(data: bytes, max_size: int = 0,
+                  opts: Optional[DecodeOptions] = None) -> Value:
+    """Decode with automatic decompression and decompression bomb protection.
+
+    Args:
+        data: Framed Cowrie v2 binary data (possibly compressed).
+        max_size: Legacy max decompressed size override. If 0, uses
+                  opts.max_decompressed_size instead.
+        opts: Optional decode security limits. Uses safe defaults if None.
+    """
+    if opts is None:
+        opts = DecodeOptions()
+    effective_max = max_size if max_size > 0 else opts.max_decompressed_size
+
     if len(data) < 4:
         raise ValueError("Data too short")
 
@@ -1556,35 +1598,36 @@ def decode_framed(data: bytes, max_size: int = MAX_BYTES_LEN) -> Value:
     flags = data[3]
 
     if not (flags & FLAG_COMPRESSED):
-        return decode(data)
+        return decode(data, opts=opts)
 
     comp_type = Compression((flags >> 1) & 0x03)
 
     orig_len, pos = decode_uvarint(data, 4)
-    if max_size > 0 and orig_len > max_size:
-        raise SecurityLimitExceeded(f"Decompressed size too large: {orig_len} > {max_size}")
+    if effective_max > 0 and orig_len > effective_max:
+        raise SecurityLimitExceeded(f"Decompressed size too large: {orig_len} > {effective_max}")
     compressed = data[pos:]
 
     if comp_type == Compression.GZIP:
         with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as gz:
-            decompressed = gz.read(max_size + 1 if max_size > 0 else -1)
+            decompressed = gz.read(effective_max + 1 if effective_max > 0 else -1)
     elif comp_type == Compression.ZSTD:
         if not HAS_ZSTD:
             raise ValueError("zstd not available")
         dctx = zstd.ZstdDecompressor()
         with dctx.stream_reader(io.BytesIO(compressed)) as reader:
-            decompressed = reader.read(max_size + 1 if max_size > 0 else -1)
+            decompressed = reader.read(effective_max + 1 if effective_max > 0 else -1)
     else:
         raise ValueError(f"Unsupported compression: {comp_type}")
 
-    if max_size > 0 and len(decompressed) > max_size:
-        raise SecurityLimitExceeded(f"Decompressed size too large: {len(decompressed)} > {max_size}")
+    if effective_max > 0 and len(decompressed) > effective_max:
+        raise SecurityLimitExceeded(f"cowrie: decompressed data exceeds size limit"
+                                    f" ({len(decompressed)} > {effective_max})")
     if len(decompressed) != orig_len:
         raise ValueError("Decompressed length mismatch")
 
     # Reconstruct full message
     full = MAGIC + bytes([VERSION, 0]) + decompressed
-    return decode(full)
+    return decode(full, opts=opts)
 
 
 # ============================================================

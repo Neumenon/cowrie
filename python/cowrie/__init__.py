@@ -45,6 +45,7 @@ from .gen2 import (
     Value,
     DType,
     TensorData,
+    DecodeOptions,
 )
 
 __all__ = [
@@ -59,4 +60,5 @@ __all__ = [
     "Value",
     "DType",
     "TensorData",
+    "DecodeOptions",
 ]

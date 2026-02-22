@@ -17,7 +17,7 @@ pub mod compress;
 pub mod json;
 
 // Re-export main types
-pub use types::{Value, DType, TensorData, CowrieError};
+pub use types::{Value, DType, TensorData, ImageFormat, AudioEncoding, CowrieError};
 pub use encode::{encode, encode_with_options, EncodeOptions};
 pub use decode::decode;
 pub use schema::{schema_fingerprint32, schema_fingerprint64, schema_equals};

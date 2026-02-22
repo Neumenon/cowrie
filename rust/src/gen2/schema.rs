@@ -110,11 +110,11 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
         }
 
         Value::Image(img) => {
-            h = fnv_hash_byte(h, img.format);
+            h = fnv_hash_byte(h, img.format as u8);
         }
 
         Value::Audio(aud) => {
-            h = fnv_hash_byte(h, aud.encoding);
+            h = fnv_hash_byte(h, aud.encoding as u8);
             h = fnv_hash_byte(h, aud.channels);
         }
 

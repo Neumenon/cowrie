@@ -250,18 +250,31 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             }))
         }
         Value::Image(img) => {
+            let format_str = match img.format {
+                super::types::ImageFormat::Jpeg => "jpeg",
+                super::types::ImageFormat::Png => "png",
+                super::types::ImageFormat::Webp => "webp",
+                super::types::ImageFormat::Avif => "avif",
+                super::types::ImageFormat::Bmp => "bmp",
+            };
             Ok(serde_json::json!({
                 "_type": "image",
-                "format": img.format,
+                "format": format_str,
                 "width": img.width,
                 "height": img.height,
                 "data": BASE64.encode(&img.data)
             }))
         }
         Value::Audio(aud) => {
+            let encoding_str = match aud.encoding {
+                super::types::AudioEncoding::PcmInt16 => "pcm_int16",
+                super::types::AudioEncoding::PcmFloat32 => "pcm_float32",
+                super::types::AudioEncoding::Opus => "opus",
+                super::types::AudioEncoding::Aac => "aac",
+            };
             Ok(serde_json::json!({
                 "_type": "audio",
-                "encoding": aud.encoding,
+                "encoding": encoding_str,
                 "sample_rate": aud.sample_rate,
                 "channels": aud.channels,
                 "data": BASE64.encode(&aud.data)

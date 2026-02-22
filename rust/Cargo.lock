@@ -33,6 +33,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "cowrie-codec"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "flate2",
+ "serde_json",
+ "zstd",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -190,16 +200,6 @@ name = "simd-adler32"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e320a6c5ad31d271ad523dcf3ad13e2767ad8b1cb8f047f75a8aeaf8da139da2"
-
-[[package]]
-name = "cowrie-codec"
-version = "0.1.0"
-dependencies = [
- "base64",
- "flate2",
- "serde_json",
- "zstd",
-]
 
 [[package]]
 name = "syn"

@@ -268,10 +268,66 @@ pub struct TensorRef {
     pub key: Vec<u8>,
 }
 
+/// Image format - aligned with Go reference implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum ImageFormat {
+    Jpeg = 0x01,
+    Png = 0x02,
+    Webp = 0x03,
+    Avif = 0x04,
+    Bmp = 0x05,
+}
+
+impl TryFrom<u8> for ImageFormat {
+    type Error = CowrieError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x01 => Ok(ImageFormat::Jpeg),
+            0x02 => Ok(ImageFormat::Png),
+            0x03 => Ok(ImageFormat::Webp),
+            0x04 => Ok(ImageFormat::Avif),
+            0x05 => Ok(ImageFormat::Bmp),
+            _ => Err(CowrieError::InvalidData(format!(
+                "invalid image format: 0x{:02x}",
+                value
+            ))),
+        }
+    }
+}
+
+/// Audio encoding - aligned with Go reference implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum AudioEncoding {
+    PcmInt16 = 0x01,
+    PcmFloat32 = 0x02,
+    Opus = 0x03,
+    Aac = 0x04,
+}
+
+impl TryFrom<u8> for AudioEncoding {
+    type Error = CowrieError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x01 => Ok(AudioEncoding::PcmInt16),
+            0x02 => Ok(AudioEncoding::PcmFloat32),
+            0x03 => Ok(AudioEncoding::Opus),
+            0x04 => Ok(AudioEncoding::Aac),
+            _ => Err(CowrieError::InvalidData(format!(
+                "invalid audio encoding: 0x{:02x}",
+                value
+            ))),
+        }
+    }
+}
+
 /// Image data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImageData {
-    pub format: u8,
+    pub format: ImageFormat,
     pub width: u16,
     pub height: u16,
     pub data: Vec<u8>,
@@ -280,7 +336,7 @@ pub struct ImageData {
 /// Audio data.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AudioData {
-    pub encoding: u8,
+    pub encoding: AudioEncoding,
     pub sample_rate: u32,
     pub channels: u8,
     pub data: Vec<u8>,
@@ -674,6 +730,60 @@ mod tests {
         let tensor = TensorData::new(DType::Float64, vec![2], vec![0u8; 16]);
         assert!(tensor.view_float32().is_none());
         assert!(tensor.view_int32().is_none());
+    }
+
+    #[test]
+    fn test_image_format_try_from() {
+        assert_eq!(ImageFormat::try_from(0x01).unwrap(), ImageFormat::Jpeg);
+        assert_eq!(ImageFormat::try_from(0x02).unwrap(), ImageFormat::Png);
+        assert_eq!(ImageFormat::try_from(0x03).unwrap(), ImageFormat::Webp);
+        assert_eq!(ImageFormat::try_from(0x04).unwrap(), ImageFormat::Avif);
+        assert_eq!(ImageFormat::try_from(0x05).unwrap(), ImageFormat::Bmp);
+        assert!(ImageFormat::try_from(0x00).is_err());
+        assert!(ImageFormat::try_from(0x06).is_err());
+        assert!(ImageFormat::try_from(0xFF).is_err());
+    }
+
+    #[test]
+    fn test_image_format_roundtrip_u8() {
+        let formats = [
+            ImageFormat::Jpeg,
+            ImageFormat::Png,
+            ImageFormat::Webp,
+            ImageFormat::Avif,
+            ImageFormat::Bmp,
+        ];
+        for fmt in formats {
+            let byte = fmt as u8;
+            let back = ImageFormat::try_from(byte).unwrap();
+            assert_eq!(fmt, back);
+        }
+    }
+
+    #[test]
+    fn test_audio_encoding_try_from() {
+        assert_eq!(AudioEncoding::try_from(0x01).unwrap(), AudioEncoding::PcmInt16);
+        assert_eq!(AudioEncoding::try_from(0x02).unwrap(), AudioEncoding::PcmFloat32);
+        assert_eq!(AudioEncoding::try_from(0x03).unwrap(), AudioEncoding::Opus);
+        assert_eq!(AudioEncoding::try_from(0x04).unwrap(), AudioEncoding::Aac);
+        assert!(AudioEncoding::try_from(0x00).is_err());
+        assert!(AudioEncoding::try_from(0x05).is_err());
+        assert!(AudioEncoding::try_from(0xFF).is_err());
+    }
+
+    #[test]
+    fn test_audio_encoding_roundtrip_u8() {
+        let encodings = [
+            AudioEncoding::PcmInt16,
+            AudioEncoding::PcmFloat32,
+            AudioEncoding::Opus,
+            AudioEncoding::Aac,
+        ];
+        for enc in encodings {
+            let byte = enc as u8;
+            let back = AudioEncoding::try_from(byte).unwrap();
+            assert_eq!(enc, back);
+        }
     }
 
     #[test]

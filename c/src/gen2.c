@@ -5,6 +5,10 @@
 #include "../include/cowrie_gen2.h"
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
+#ifdef COWRIE_HAS_ZSTD
+#include <zstd.h>
+#endif
 
 /* ============================================================
  * Buffer Operations
@@ -1677,6 +1681,7 @@ static int validate_utf8(const char *data, size_t len) {
 }
 
 static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **out);
+static int decode_string_raw(Reader *r, char **out, size_t *out_len);
 
 static int skip_hints(Reader *r) {
     uint64_t count;
@@ -1843,6 +1848,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         if (rd_get_uvarint(r, &ext_type) != 0) return -1;
         if (rd_get_uvarint(r, &len) != 0) return -1;
         if (len > SIZE_MAX) return -1;
+        if (r->opts.max_ext_len > 0 && len > r->opts.max_ext_len) return -1;
         if (r->opts.max_bytes_len > 0 && len > r->opts.max_bytes_len) return -1;
         uint8_t *data = malloc((size_t)len);
         if (!data && len > 0) return -1;
@@ -1964,6 +1970,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         uint8_t dtype, rank;
         if (rd_get_byte(r, &dtype) != 0) return -1;
         if (rd_get_byte(r, &rank) != 0) return -1;
+        if (r->opts.max_rank > 0 && rank > (uint8_t)r->opts.max_rank) return -1;
 
         size_t *dims = NULL;
         if (rank > 0) {
@@ -2593,6 +2600,9 @@ int cowrie_decode_with_opts(const uint8_t *data, size_t len,
     if (r.opts.max_object_len == 0) r.opts.max_object_len = COWRIE_DEFAULT_MAX_OBJECT_LEN;
     if (r.opts.max_string_len == 0) r.opts.max_string_len = COWRIE_DEFAULT_MAX_STRING_LEN;
     if (r.opts.max_bytes_len == 0) r.opts.max_bytes_len = COWRIE_DEFAULT_MAX_BYTES_LEN;
+    if (r.opts.max_ext_len == 0) r.opts.max_ext_len = COWRIE_DEFAULT_MAX_EXT_LEN;
+    if (r.opts.max_dict_len == 0) r.opts.max_dict_len = COWRIE_DEFAULT_MAX_DICT_LEN;
+    if (r.opts.max_rank == 0) r.opts.max_rank = COWRIE_DEFAULT_MAX_RANK;
 
     /* Read header */
     uint8_t magic0, magic1, version, flags;
@@ -2613,6 +2623,7 @@ int cowrie_decode_with_opts(const uint8_t *data, size_t len,
     uint64_t dict_len;
     if (rd_get_uvarint(&r, &dict_len) != 0) return -1;
     if (dict_len > SIZE_MAX / sizeof(char *)) return -1;
+    if (dict_len > r.opts.max_dict_len) return -1;
 
     char **dict = NULL;
     if (dict_len > 0) {
@@ -3184,4 +3195,318 @@ int64_t* cowrie_tensor_copy_int64(const COWRIETensor *t, size_t *count) {
                            ((uint64_t)t->data[i*8 + 7] << 56));
     }
     return out;
+}
+
+/* ============================================================
+ * Framed Encode/Decode (with compression)
+ * ============================================================
+ *
+ * Framed wire format:
+ *   Magic:             "SJFR" (4 bytes)
+ *   Version:           0x01   (1 byte)
+ *   Flags:             1 byte
+ *                        bit 0: compressed (1) or not (0)
+ *                        bits 1-2: compression type
+ *                          00 = none, 01 = gzip, 10 = zstd
+ *   Uncompressed size: uint32 LE (4 bytes)
+ *   [If compressed]:
+ *     Compressed size:  uint32 LE (4 bytes)
+ *   Payload bytes
+ */
+
+#define COWRIE_FRAMED_MAGIC_0 'S'
+#define COWRIE_FRAMED_MAGIC_1 'J'
+#define COWRIE_FRAMED_MAGIC_2 'F'
+#define COWRIE_FRAMED_MAGIC_3 'R'
+#define COWRIE_FRAMED_VERSION 0x01
+
+/* Framed flags bits */
+#define COWRIE_FRAMED_FLAG_COMPRESSED  0x01
+#define COWRIE_FRAMED_COMP_SHIFT       1
+#define COWRIE_FRAMED_COMP_MASK        0x06  /* bits 1-2 */
+
+/* Helper to write u32 LE into a raw byte pointer (not COWRIEBuf) */
+static void framed_write_u32_le(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+    p[2] = (uint8_t)((v >> 16) & 0xFF);
+    p[3] = (uint8_t)((v >> 24) & 0xFF);
+}
+
+/* Helper to read u32 LE from a raw byte pointer */
+static uint32_t framed_read_u32_le(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+int cowrie_encode_framed(const COWRIEValue *root, int compression, COWRIEBuf *buf) {
+    if (!root || !buf) return -1;
+
+    cowrie_buf_init(buf);
+
+    /* Encode the value to raw cowrie bytes first */
+    COWRIEBuf raw;
+    if (cowrie_encode(root, &raw) != 0) return -1;
+
+    if (raw.len > UINT32_MAX) {
+        cowrie_buf_free(&raw);
+        return -1;
+    }
+
+    uint32_t uncomp_size = (uint32_t)raw.len;
+
+    if (compression == COWRIE_COMP_NONE) {
+        /* Uncompressed: header = 4 (magic) + 1 (version) + 1 (flags) + 4 (uncomp size) = 10 */
+        size_t total = 10 + raw.len;
+        if (buf_grow(buf, total) != 0) {
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        /* Write magic */
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_0;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_1;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_2;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_3;
+
+        /* Version */
+        buf->data[buf->len++] = COWRIE_FRAMED_VERSION;
+
+        /* Flags: not compressed, comp type = none */
+        buf->data[buf->len++] = 0x00;
+
+        /* Uncompressed size */
+        framed_write_u32_le(buf->data + buf->len, uncomp_size);
+        buf->len += 4;
+
+        /* Payload (raw cowrie bytes) */
+        memcpy(buf->data + buf->len, raw.data, raw.len);
+        buf->len += raw.len;
+
+        cowrie_buf_free(&raw);
+        return 0;
+
+    } else if (compression == COWRIE_COMP_GZIP) {
+        /* zlib's compress2() produces zlib-format; the framed header
+         * identifies the compression type so the decoder knows what to use. */
+        uLongf comp_bound = compressBound((uLong)raw.len);
+        uint8_t *comp_buf = malloc((size_t)comp_bound);
+        if (!comp_buf) {
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        uLongf comp_len = comp_bound;
+        int zrc = compress2(comp_buf, &comp_len, raw.data, (uLong)raw.len, Z_DEFAULT_COMPRESSION);
+        if (zrc != Z_OK) {
+            free(comp_buf);
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        if (comp_len > UINT32_MAX) {
+            free(comp_buf);
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        uint32_t compressed_size = (uint32_t)comp_len;
+
+        /* Header: 4 (magic) + 1 (version) + 1 (flags) + 4 (uncomp) + 4 (comp) = 14 */
+        size_t total = 14 + comp_len;
+        if (buf_grow(buf, total) != 0) {
+            free(comp_buf);
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        /* Write magic */
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_0;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_1;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_2;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_3;
+
+        /* Version */
+        buf->data[buf->len++] = COWRIE_FRAMED_VERSION;
+
+        /* Flags: compressed=1, comp type=gzip (01 in bits 1-2) */
+        uint8_t flags = COWRIE_FRAMED_FLAG_COMPRESSED | (COWRIE_COMP_GZIP << COWRIE_FRAMED_COMP_SHIFT);
+        buf->data[buf->len++] = flags;
+
+        /* Uncompressed size */
+        framed_write_u32_le(buf->data + buf->len, uncomp_size);
+        buf->len += 4;
+
+        /* Compressed size */
+        framed_write_u32_le(buf->data + buf->len, compressed_size);
+        buf->len += 4;
+
+        /* Compressed payload */
+        memcpy(buf->data + buf->len, comp_buf, comp_len);
+        buf->len += comp_len;
+
+        free(comp_buf);
+        cowrie_buf_free(&raw);
+        return 0;
+
+    } else if (compression == COWRIE_COMP_ZSTD) {
+#ifdef COWRIE_HAS_ZSTD
+        size_t comp_bound = ZSTD_compressBound(raw.len);
+        uint8_t *comp_buf = malloc(comp_bound);
+        if (!comp_buf) {
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        size_t comp_len = ZSTD_compress(comp_buf, comp_bound, raw.data, raw.len, 3);
+        if (ZSTD_isError(comp_len)) {
+            free(comp_buf);
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        if (comp_len > UINT32_MAX) {
+            free(comp_buf);
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        uint32_t compressed_size = (uint32_t)comp_len;
+
+        /* Header: 4 (magic) + 1 (version) + 1 (flags) + 4 (uncomp) + 4 (comp) = 14 */
+        size_t total = 14 + comp_len;
+        if (buf_grow(buf, total) != 0) {
+            free(comp_buf);
+            cowrie_buf_free(&raw);
+            return -1;
+        }
+
+        /* Write magic */
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_0;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_1;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_2;
+        buf->data[buf->len++] = COWRIE_FRAMED_MAGIC_3;
+
+        /* Version */
+        buf->data[buf->len++] = COWRIE_FRAMED_VERSION;
+
+        /* Flags: compressed=1, comp type=zstd (10 in bits 1-2) */
+        uint8_t flags = COWRIE_FRAMED_FLAG_COMPRESSED | (COWRIE_COMP_ZSTD << COWRIE_FRAMED_COMP_SHIFT);
+        buf->data[buf->len++] = flags;
+
+        /* Uncompressed size */
+        framed_write_u32_le(buf->data + buf->len, uncomp_size);
+        buf->len += 4;
+
+        /* Compressed size */
+        framed_write_u32_le(buf->data + buf->len, compressed_size);
+        buf->len += 4;
+
+        /* Compressed payload */
+        memcpy(buf->data + buf->len, comp_buf, comp_len);
+        buf->len += comp_len;
+
+        free(comp_buf);
+        cowrie_buf_free(&raw);
+        return 0;
+#else
+        /* ZSTD not available */
+        cowrie_buf_free(&raw);
+        return -1;
+#endif
+
+    } else {
+        /* Unknown compression type */
+        cowrie_buf_free(&raw);
+        return -1;
+    }
+}
+
+int cowrie_decode_framed(const uint8_t *data, size_t len, COWRIEValue **out) {
+    if (!data || !out) return -1;
+
+    /* Minimum header: 4 (magic) + 1 (version) + 1 (flags) + 4 (uncomp size) = 10 */
+    if (len < 10) return -1;
+
+    /* Validate magic */
+    if (data[0] != COWRIE_FRAMED_MAGIC_0 ||
+        data[1] != COWRIE_FRAMED_MAGIC_1 ||
+        data[2] != COWRIE_FRAMED_MAGIC_2 ||
+        data[3] != COWRIE_FRAMED_MAGIC_3) {
+        return -1;
+    }
+
+    /* Version check */
+    uint8_t version = data[4];
+    if (version != COWRIE_FRAMED_VERSION) return -1;
+
+    /* Parse flags */
+    uint8_t flags = data[5];
+    int is_compressed = (flags & COWRIE_FRAMED_FLAG_COMPRESSED) != 0;
+    int comp_type = (flags & COWRIE_FRAMED_COMP_MASK) >> COWRIE_FRAMED_COMP_SHIFT;
+
+    /* Read uncompressed size */
+    uint32_t uncomp_size = framed_read_u32_le(&data[6]);
+
+    /* Decompression bomb protection */
+    if (uncomp_size > COWRIE_MAX_DECOMPRESSED_SIZE) return -1;
+
+    if (!is_compressed) {
+        /* Uncompressed: payload starts at offset 10 */
+        size_t payload_offset = 10;
+        if (payload_offset + uncomp_size > len) return -1;
+
+        return cowrie_decode(&data[payload_offset], uncomp_size, out);
+
+    } else {
+        /* Compressed: need additional 4 bytes for compressed size */
+        if (len < 14) return -1;
+
+        uint32_t comp_size = framed_read_u32_le(&data[10]);
+        size_t payload_offset = 14;
+
+        if (payload_offset + comp_size > len) return -1;
+
+        const uint8_t *comp_data = &data[payload_offset];
+
+        if (comp_type == COWRIE_COMP_GZIP) {
+            /* Decompress with zlib */
+            uint8_t *decomp = malloc(uncomp_size);
+            if (!decomp) return -1;
+
+            uLongf dest_len = (uLongf)uncomp_size;
+            int zrc = uncompress(decomp, &dest_len, comp_data, (uLong)comp_size);
+            if (zrc != Z_OK || dest_len != uncomp_size) {
+                free(decomp);
+                return -1;
+            }
+
+            int result = cowrie_decode(decomp, uncomp_size, out);
+            free(decomp);
+            return result;
+
+        } else if (comp_type == COWRIE_COMP_ZSTD) {
+#ifdef COWRIE_HAS_ZSTD
+            uint8_t *decomp = malloc(uncomp_size);
+            if (!decomp) return -1;
+
+            size_t result_len = ZSTD_decompress(decomp, uncomp_size, comp_data, comp_size);
+            if (ZSTD_isError(result_len) || result_len != uncomp_size) {
+                free(decomp);
+                return -1;
+            }
+
+            int result = cowrie_decode(decomp, uncomp_size, out);
+            free(decomp);
+            return result;
+#else
+            /* ZSTD not available */
+            return -1;
+#endif
+
+        } else {
+            /* Unknown compression type */
+            return -1;
+        }
+    }
 }
