@@ -262,6 +262,74 @@ func readTestVector(t *testing.T, dir, name string) []byte {
 	return data
 }
 
+// TestGenerateCrossLanguageFixtures generates the fixture files needed by
+// TestCrossLanguageCompatibility. Run once with GENERATE_COMPAT=1.
+func TestGenerateCrossLanguageFixtures(t *testing.T) {
+	if os.Getenv("GENERATE_COMPAT") != "1" {
+		t.Skip("Set GENERATE_COMPAT=1 to generate fixtures")
+	}
+
+	dir := "testdata"
+	os.MkdirAll(dir, 0755)
+
+	fixtures := map[string]*Value{
+		"tensor_2x3_f32": Tensor(DTypeFloat32, []uint64{2, 3}, func() []byte {
+			data := make([]byte, 24)
+			for i := range data {
+				data[i] = byte(i)
+			}
+			return data
+		}()),
+		"tensor_ref": TensorRef(7, []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}),
+		"image_jpeg_640x480": Image(ImageFormatJPEG, 640, 480,
+			[]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46}),
+		"audio_pcm16_44100_stereo": Audio(AudioEncodingPCMInt16, 44100, 2,
+			[]byte{0x00, 0x01, 0x02, 0x03}),
+		"adjlist_3node_4edge": Adjlist(IDWidthInt32, 3, 4,
+			[]uint64{0, 2, 3, 4},
+			[]byte{
+				1, 0, 0, 0, // 0->1
+				2, 0, 0, 0, // 0->2
+				2, 0, 0, 0, // 1->2
+				0, 0, 0, 0, // 2->0
+			}),
+		"rich_text_with_tokens_spans": RichText("Hello, world!",
+			[]int32{101, 7592, 1010, 2088, 999, 102},
+			[]RichTextSpan{
+				{Start: 0, End: 5, KindID: 1},
+				{Start: 7, End: 12, KindID: 2},
+			}),
+		"rich_text_plain": RichText("Just plain text", nil, nil),
+		"delta_3ops": Delta(999, []DeltaOp{
+			{OpCode: DeltaOpSetField, FieldID: 0, Value: String("updated")},
+			{OpCode: DeltaOpDeleteField, FieldID: 1, Value: nil},
+			{OpCode: DeltaOpAppendArray, FieldID: 2, Value: Int64(42)},
+		}),
+		"object_with_tensor": Object(
+			Member{Key: "embedding", Value: Tensor(DTypeFloat32, []uint64{4}, []byte{0, 0, 0, 0, 0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64})},
+			Member{Key: "name", Value: String("test")},
+			Member{Key: "score", Value: Float64(3.14)},
+		),
+		"array_mixed_v21": Array(
+			Tensor(DTypeInt8, []uint64{4}, []byte{1, 2, 3, 4}),
+			Image(ImageFormatJPEG, 100, 100, []byte("jpeg")),
+			String("mixed"),
+		),
+	}
+
+	for name, v := range fixtures {
+		encoded, err := Encode(v)
+		if err != nil {
+			t.Fatalf("encode %s: %v", name, err)
+		}
+		path := filepath.Join(dir, name+".cowrie")
+		if err := os.WriteFile(path, encoded, 0644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+		t.Logf("generated %s (%d bytes)", path, len(encoded))
+	}
+}
+
 // TestGoToCCompatibility verifies that Go-encoded data can be decoded by C.
 // This generates test vectors in a format that C can verify.
 func TestGoToCCompatibility(t *testing.T) {
