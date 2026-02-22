@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate adversarial test vectors for SJSON security testing."""
+"""Generate adversarial test vectors for Cowrie security testing."""
 
 import os
 import struct
@@ -52,31 +52,31 @@ def main():
     # =========================================================
 
     # Empty array []
-    with open("empty/empty_array.sjson", "wb") as f:
+    with open("empty/empty_array.cowrie", "wb") as f:
         f.write(bytes([TAG_ARRAY]) + write_uvarint(0))
 
     # Empty object {}
-    with open("empty/empty_object.sjson", "wb") as f:
+    with open("empty/empty_object.cowrie", "wb") as f:
         f.write(bytes([TAG_OBJECT]) + write_uvarint(0))
 
     # Empty string ""
-    with open("empty/empty_string.sjson", "wb") as f:
+    with open("empty/empty_string.cowrie", "wb") as f:
         f.write(bytes([TAG_STRING]) + write_uvarint(0))
 
     # Empty bytes
-    with open("empty/empty_bytes.sjson", "wb") as f:
+    with open("empty/empty_bytes.cowrie", "wb") as f:
         f.write(bytes([TAG_BYTES]) + write_uvarint(0))
 
     # Empty int64 array
-    with open("empty/empty_int64_array.sjson", "wb") as f:
+    with open("empty/empty_int64_array.cowrie", "wb") as f:
         f.write(bytes([TAG_INT64_ARRAY]) + write_uvarint(0))
 
     # Empty float64 array
-    with open("empty/empty_float64_array.sjson", "wb") as f:
+    with open("empty/empty_float64_array.cowrie", "wb") as f:
         f.write(bytes([TAG_FLOAT64_ARRAY]) + write_uvarint(0))
 
     # Empty string array
-    with open("empty/empty_string_array.sjson", "wb") as f:
+    with open("empty/empty_string_array.cowrie", "wb") as f:
         f.write(bytes([TAG_STRING_ARRAY]) + write_uvarint(0))
 
     print("Created empty container tests")
@@ -87,37 +87,37 @@ def main():
 
     # INT64_MAX
     int64_max = 9223372036854775807
-    with open("boundary/int64_max.sjson", "wb") as f:
+    with open("boundary/int64_max.cowrie", "wb") as f:
         f.write(bytes([TAG_INT64]) + write_uvarint(zigzag_encode(int64_max)))
 
     # INT64_MIN
     int64_min = -9223372036854775808
-    with open("boundary/int64_min.sjson", "wb") as f:
+    with open("boundary/int64_min.cowrie", "wb") as f:
         f.write(bytes([TAG_INT64]) + write_uvarint(zigzag_encode(int64_min)))
 
     # Float64 positive infinity
-    with open("boundary/float64_inf.sjson", "wb") as f:
+    with open("boundary/float64_inf.cowrie", "wb") as f:
         f.write(bytes([TAG_FLOAT64]) + struct.pack("<d", float("inf")))
 
     # Float64 negative infinity
-    with open("boundary/float64_neg_inf.sjson", "wb") as f:
+    with open("boundary/float64_neg_inf.cowrie", "wb") as f:
         f.write(bytes([TAG_FLOAT64]) + struct.pack("<d", float("-inf")))
 
     # Float64 NaN
-    with open("boundary/float64_nan.sjson", "wb") as f:
+    with open("boundary/float64_nan.cowrie", "wb") as f:
         f.write(bytes([TAG_FLOAT64]) + struct.pack("<d", float("nan")))
 
     # Float64 subnormal (smallest positive subnormal)
-    with open("boundary/float64_subnormal.sjson", "wb") as f:
+    with open("boundary/float64_subnormal.cowrie", "wb") as f:
         # Smallest positive subnormal: 2^-1074 = 5e-324
         f.write(bytes([TAG_FLOAT64]) + struct.pack("<d", 5e-324))
 
     # Float64 zero
-    with open("boundary/float64_zero.sjson", "wb") as f:
+    with open("boundary/float64_zero.cowrie", "wb") as f:
         f.write(bytes([TAG_FLOAT64]) + struct.pack("<d", 0.0))
 
     # Float64 negative zero
-    with open("boundary/float64_neg_zero.sjson", "wb") as f:
+    with open("boundary/float64_neg_zero.cowrie", "wb") as f:
         f.write(bytes([TAG_FLOAT64]) + struct.pack("<d", -0.0))
 
     print("Created boundary value tests")
@@ -127,7 +127,7 @@ def main():
     # =========================================================
 
     def make_nested_array(depth: int) -> bytes:
-        """Create binary SJSON for nested array of given depth."""
+        """Create binary Cowrie data for nested array of given depth."""
         result = bytearray()
         for _ in range(depth):
             result.append(TAG_ARRAY)
@@ -136,16 +136,16 @@ def main():
         return bytes(result)
 
     # Nested array at max depth (1000)
-    with open("depth/nested_array_1000.sjson", "wb") as f:
+    with open("depth/nested_array_1000.cowrie", "wb") as f:
         f.write(make_nested_array(1000))
 
     # Nested array exceeding max depth (1001)
-    with open("depth/nested_array_1001.sjson", "wb") as f:
+    with open("depth/nested_array_1001.cowrie", "wb") as f:
         f.write(make_nested_array(1001))
 
     # Nested objects at max depth
     def make_nested_object(depth: int) -> bytes:
-        """Create binary SJSON for nested object of given depth."""
+        """Create binary Cowrie data for nested object of given depth."""
         result = bytearray()
         for i in range(depth):
             result.append(TAG_OBJECT)
@@ -156,10 +156,10 @@ def main():
         result.append(TAG_NULL)  # innermost value
         return bytes(result)
 
-    with open("depth/nested_object_1000.sjson", "wb") as f:
+    with open("depth/nested_object_1000.cowrie", "wb") as f:
         f.write(make_nested_object(1000))
 
-    with open("depth/nested_object_1001.sjson", "wb") as f:
+    with open("depth/nested_object_1001.cowrie", "wb") as f:
         f.write(make_nested_object(1001))
 
     print("Created depth tests")

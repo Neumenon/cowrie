@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use sjson::gen2::{decode, json::to_json, SjsonError};
+use cowrie_codec::gen2::{decode, json::to_json, CowrieError};
 
 #[test]
 fn fixtures_core_decode() {
@@ -52,15 +52,15 @@ fn fixtures_core_decode() {
     }
 }
 
-fn map_error_code(err: &SjsonError) -> &'static str {
+fn map_error_code(err: &CowrieError) -> &'static str {
     match err {
-        SjsonError::InvalidMagic => "ERR_INVALID_MAGIC",
-        SjsonError::InvalidVersion(_) => "ERR_INVALID_VERSION",
-        SjsonError::Truncated => "ERR_TRUNCATED",
-        SjsonError::InvalidTag(_) => "ERR_INVALID_TAG",
-        SjsonError::InvalidUtf8 => "ERR_INVALID_UTF8",
-        SjsonError::TooDeep => "ERR_TOO_DEEP",
-        SjsonError::TooLarge => "ERR_TOO_LARGE",
+        CowrieError::InvalidMagic => "ERR_INVALID_MAGIC",
+        CowrieError::InvalidVersion(_) => "ERR_INVALID_VERSION",
+        CowrieError::Truncated => "ERR_TRUNCATED",
+        CowrieError::InvalidTag(_) => "ERR_INVALID_TAG",
+        CowrieError::InvalidUtf8 => "ERR_INVALID_UTF8",
+        CowrieError::TooDeep => "ERR_TOO_DEEP",
+        CowrieError::TooLarge => "ERR_TOO_LARGE",
         _ => "",
     }
 }

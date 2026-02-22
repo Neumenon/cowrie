@@ -1,7 +1,7 @@
 """Gen1 codec tests."""
 
 import pytest
-from sjson.gen1 import encode, decode
+from cowrie.gen1 import encode, decode
 
 
 class TestEmptyContainers:

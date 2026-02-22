@@ -1,31 +1,31 @@
-//! JSON bridge for SJSON Gen2.
+//! JSON bridge for Cowrie Gen2.
 //!
-//! Provides conversion between JSON strings and SJSON Values.
+//! Provides conversion between JSON strings and Cowrie Values.
 
-use super::types::{Value, SjsonError, DType, TensorData};
+use super::types::{Value, CowrieError, DType, TensorData};
 use std::collections::BTreeMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-/// Parse a JSON string into an SJSON Value.
-pub fn from_json(json: &str) -> Result<Value, SjsonError> {
+/// Parse a JSON string into an Cowrie Value.
+pub fn from_json(json: &str) -> Result<Value, CowrieError> {
     let parsed: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     json_to_value(&parsed)
 }
 
-/// Convert an SJSON Value to a JSON string.
-pub fn to_json(value: &Value) -> Result<String, SjsonError> {
+/// Convert an Cowrie Value to a JSON string.
+pub fn to_json(value: &Value) -> Result<String, CowrieError> {
     let json = value_to_json(value)?;
-    serde_json::to_string(&json).map_err(|e| SjsonError::InvalidData(e.to_string()))
+    serde_json::to_string(&json).map_err(|e| CowrieError::InvalidData(e.to_string()))
 }
 
-/// Convert an SJSON Value to a pretty-printed JSON string.
-pub fn to_json_pretty(value: &Value) -> Result<String, SjsonError> {
+/// Convert an Cowrie Value to a pretty-printed JSON string.
+pub fn to_json_pretty(value: &Value) -> Result<String, CowrieError> {
     let json = value_to_json(value)?;
-    serde_json::to_string_pretty(&json).map_err(|e| SjsonError::InvalidData(e.to_string()))
+    serde_json::to_string_pretty(&json).map_err(|e| CowrieError::InvalidData(e.to_string()))
 }
 
-fn json_to_value(json: &serde_json::Value) -> Result<Value, SjsonError> {
+fn json_to_value(json: &serde_json::Value) -> Result<Value, CowrieError> {
     match json {
         serde_json::Value::Null => Ok(Value::Null),
         serde_json::Value::Bool(b) => Ok(Value::Bool(*b)),
@@ -37,12 +37,12 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, SjsonError> {
             } else if let Some(f) = n.as_f64() {
                 Ok(Value::Float(f))
             } else {
-                Err(SjsonError::InvalidData("invalid number".into()))
+                Err(CowrieError::InvalidData("invalid number".into()))
             }
         }
         serde_json::Value::String(s) => Ok(Value::String(s.clone())),
         serde_json::Value::Array(arr) => {
-            let items: Result<Vec<Value>, SjsonError> = arr.iter().map(json_to_value).collect();
+            let items: Result<Vec<Value>, CowrieError> = arr.iter().map(json_to_value).collect();
             Ok(Value::Array(items?))
         }
         serde_json::Value::Object(obj) => {
@@ -66,10 +66,10 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, SjsonError> {
     }
 }
 
-fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, SjsonError> {
+fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
     let dtype_str = obj.get("dtype")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| SjsonError::InvalidData("tensor missing dtype".into()))?;
+        .ok_or_else(|| CowrieError::InvalidData("tensor missing dtype".into()))?;
 
     let dtype = match dtype_str {
         "float32" => DType::Float32,
@@ -90,22 +90,22 @@ fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> R
         "qint3" => DType::QINT3,
         "ternary" => DType::Ternary,
         "binary" => DType::Binary,
-        _ => return Err(SjsonError::InvalidData(format!("unknown dtype: {}", dtype_str))),
+        _ => return Err(CowrieError::InvalidData(format!("unknown dtype: {}", dtype_str))),
     };
 
     let dims: Vec<u64> = obj.get("dims")
         .and_then(|v| v.as_array())
-        .ok_or_else(|| SjsonError::InvalidData("tensor missing dims".into()))?
+        .ok_or_else(|| CowrieError::InvalidData("tensor missing dims".into()))?
         .iter()
         .filter_map(|v| v.as_u64())
         .collect();
 
     let data_b64 = obj.get("data")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| SjsonError::InvalidData("tensor missing data".into()))?;
+        .ok_or_else(|| CowrieError::InvalidData("tensor missing data".into()))?;
 
     let data = BASE64.decode(data_b64)
-        .map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::Tensor(TensorData {
         dtype,
@@ -114,45 +114,45 @@ fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> R
     }))
 }
 
-fn parse_bytes_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, SjsonError> {
+fn parse_bytes_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
     let data_b64 = obj.get("data")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| SjsonError::InvalidData("bytes missing data".into()))?;
+        .ok_or_else(|| CowrieError::InvalidData("bytes missing data".into()))?;
 
     let data = BASE64.decode(data_b64)
-        .map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::Bytes(data))
 }
 
-fn parse_datetime_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, SjsonError> {
+fn parse_datetime_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
     let nanos = obj.get("nanos")
         .and_then(|v| v.as_i64())
-        .ok_or_else(|| SjsonError::InvalidData("datetime missing nanos".into()))?;
+        .ok_or_else(|| CowrieError::InvalidData("datetime missing nanos".into()))?;
 
     Ok(Value::DateTime(nanos))
 }
 
-fn parse_uuid_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, SjsonError> {
+fn parse_uuid_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
     let hex = obj.get("hex")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| SjsonError::InvalidData("uuid missing hex".into()))?;
+        .ok_or_else(|| CowrieError::InvalidData("uuid missing hex".into()))?;
 
     let clean: String = hex.chars().filter(|c: &char| c.is_ascii_hexdigit()).collect();
     if clean.len() != 32 {
-        return Err(SjsonError::InvalidData("invalid uuid hex".into()));
+        return Err(CowrieError::InvalidData("invalid uuid hex".into()));
     }
 
     let mut bytes = [0u8; 16];
     for i in 0..16 {
         bytes[i] = u8::from_str_radix(&clean[i*2..i*2+2], 16)
-            .map_err(|_| SjsonError::InvalidData("invalid uuid hex".into()))?;
+            .map_err(|_| CowrieError::InvalidData("invalid uuid hex".into()))?;
     }
 
     Ok(Value::Uuid(bytes))
 }
 
-fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
+fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
     match value {
         Value::Null => Ok(serde_json::Value::Null),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
@@ -203,7 +203,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
             }))
         }
         Value::Array(arr) => {
-            let items: Result<Vec<serde_json::Value>, SjsonError> =
+            let items: Result<Vec<serde_json::Value>, CowrieError> =
                 arr.iter().map(value_to_json).collect();
             Ok(serde_json::Value::Array(items?))
         }
@@ -310,7 +310,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
         }
         // Graph types
         Value::Node(node) => {
-            let props: Result<serde_json::Map<String, serde_json::Value>, SjsonError> =
+            let props: Result<serde_json::Map<String, serde_json::Value>, CowrieError> =
                 node.props.iter().map(|(k, v)| {
                     Ok((k.clone(), value_to_json(v)?))
                 }).collect();
@@ -322,7 +322,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
             }))
         }
         Value::Edge(edge) => {
-            let props: Result<serde_json::Map<String, serde_json::Value>, SjsonError> =
+            let props: Result<serde_json::Map<String, serde_json::Value>, CowrieError> =
                 edge.props.iter().map(|(k, v)| {
                     Ok((k.clone(), value_to_json(v)?))
                 }).collect();
@@ -335,7 +335,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
             }))
         }
         Value::NodeBatch(batch) => {
-            let nodes: Result<Vec<serde_json::Value>, SjsonError> =
+            let nodes: Result<Vec<serde_json::Value>, CowrieError> =
                 batch.nodes.iter().map(|n| value_to_json(&Value::Node(n.clone()))).collect();
             Ok(serde_json::json!({
                 "_type": "node_batch",
@@ -343,7 +343,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
             }))
         }
         Value::EdgeBatch(batch) => {
-            let edges: Result<Vec<serde_json::Value>, SjsonError> =
+            let edges: Result<Vec<serde_json::Value>, CowrieError> =
                 batch.edges.iter().map(|e| value_to_json(&Value::Edge(e.clone()))).collect();
             Ok(serde_json::json!({
                 "_type": "edge_batch",
@@ -351,11 +351,11 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, SjsonError> {
             }))
         }
         Value::GraphShard(shard) => {
-            let nodes: Result<Vec<serde_json::Value>, SjsonError> =
+            let nodes: Result<Vec<serde_json::Value>, CowrieError> =
                 shard.nodes.iter().map(|n| value_to_json(&Value::Node(n.clone()))).collect();
-            let edges: Result<Vec<serde_json::Value>, SjsonError> =
+            let edges: Result<Vec<serde_json::Value>, CowrieError> =
                 shard.edges.iter().map(|e| value_to_json(&Value::Edge(e.clone()))).collect();
-            let metadata: Result<serde_json::Map<String, serde_json::Value>, SjsonError> =
+            let metadata: Result<serde_json::Map<String, serde_json::Value>, CowrieError> =
                 shard.metadata.iter().map(|(k, v)| {
                     Ok((k.clone(), value_to_json(v)?))
                 }).collect();

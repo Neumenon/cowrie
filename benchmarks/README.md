@@ -1,6 +1,6 @@
-# SJSON Benchmarks
+# Cowrie Benchmarks
 
-Performance benchmarks for SJSON codec implementations.
+Performance benchmarks for Cowrie codec implementations.
 
 ## Running Benchmarks
 

@@ -1,8 +1,8 @@
 /*
- * SJSON JSON Bridge Implementation
+ * COWRIE JSON Bridge Implementation
  */
 
-#include "../include/sjson_json.h"
+#include "../include/cowrie_json.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -34,7 +34,7 @@ static const int8_t b64_decode_table[256] = {
     -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
 };
 
-int sjson_base64_encode(const uint8_t *data, size_t len, SJSONBuf *buf) {
+int cowrie_base64_encode(const uint8_t *data, size_t len, COWRIEBuf *buf) {
     size_t out_len = ((len + 2) / 3) * 4;
     buf->data = malloc(out_len + 1);
     if (!buf->data) return -1;
@@ -59,7 +59,7 @@ int sjson_base64_encode(const uint8_t *data, size_t len, SJSONBuf *buf) {
     return 0;
 }
 
-int sjson_base64_decode(const char *b64, size_t len, SJSONBuf *buf) {
+int cowrie_base64_decode(const char *b64, size_t len, COWRIEBuf *buf) {
     if (len % 4 != 0) return -1;
 
     size_t out_len = (len / 4) * 3;
@@ -125,7 +125,7 @@ static int expect(JsonParser *p, char c) {
     return 0;
 }
 
-static SJSONValue* parse_value(JsonParser *p);
+static COWRIEValue* parse_value(JsonParser *p);
 
 static char* parse_string_content(JsonParser *p, size_t *out_len) {
     if (expect(p, '"') != 0) return NULL;
@@ -199,14 +199,14 @@ static char* parse_string_content(JsonParser *p, size_t *out_len) {
     return NULL;
 }
 
-static SJSONValue* parse_string(JsonParser *p) {
+static COWRIEValue* parse_string(JsonParser *p) {
     size_t len;
     char *s = parse_string_content(p, &len);
     if (!s) return NULL;
-    return sjson_new_string(s, len);
+    return cowrie_new_string(s, len);
 }
 
-static SJSONValue* parse_number(JsonParser *p) {
+static COWRIEValue* parse_number(JsonParser *p) {
     skip_whitespace(p);
     size_t start = p->pos;
     int is_float = 0;
@@ -238,19 +238,19 @@ static SJSONValue* parse_number(JsonParser *p) {
     memcpy(num_str, p->data + start, len);
     num_str[len] = '\0';
 
-    SJSONValue *result;
+    COWRIEValue *result;
     if (is_float) {
         double d = strtod(num_str, NULL);
-        result = sjson_new_float64(d);
+        result = cowrie_new_float64(d);
     } else if (is_negative) {
         int64_t i = strtoll(num_str, NULL, 10);
-        result = sjson_new_int64(i);
+        result = cowrie_new_int64(i);
     } else {
         uint64_t u = strtoull(num_str, NULL, 10);
         if (u <= INT64_MAX) {
-            result = sjson_new_int64((int64_t)u);
+            result = cowrie_new_int64((int64_t)u);
         } else {
-            result = sjson_new_uint64(u);
+            result = cowrie_new_uint64(u);
         }
     }
 
@@ -258,10 +258,10 @@ static SJSONValue* parse_number(JsonParser *p) {
     return result;
 }
 
-static SJSONValue* parse_array(JsonParser *p) {
+static COWRIEValue* parse_array(JsonParser *p) {
     if (expect(p, '[') != 0) return NULL;
 
-    SJSONValue *arr = sjson_new_array();
+    COWRIEValue *arr = cowrie_new_array();
     if (!arr) return NULL;
 
     skip_whitespace(p);
@@ -271,14 +271,14 @@ static SJSONValue* parse_array(JsonParser *p) {
     }
 
     while (1) {
-        SJSONValue *item = parse_value(p);
+        COWRIEValue *item = parse_value(p);
         if (!item) {
-            sjson_free(arr);
+            cowrie_free(arr);
             return NULL;
         }
-        if (sjson_array_append(arr, item) != 0) {
-            sjson_free(item);
-            sjson_free(arr);
+        if (cowrie_array_append(arr, item) != 0) {
+            cowrie_free(item);
+            cowrie_free(arr);
             return NULL;
         }
 
@@ -289,7 +289,7 @@ static SJSONValue* parse_array(JsonParser *p) {
             return arr;
         }
         if (c != ',') {
-            sjson_free(arr);
+            cowrie_free(arr);
             return NULL;
         }
         next(p);
@@ -297,12 +297,12 @@ static SJSONValue* parse_array(JsonParser *p) {
 }
 
 /* Forward declaration for special type handling */
-static SJSONValue* handle_special_object(SJSONValue *obj);
+static COWRIEValue* handle_special_object(COWRIEValue *obj);
 
-static SJSONValue* parse_object(JsonParser *p) {
+static COWRIEValue* parse_object(JsonParser *p) {
     if (expect(p, '{') != 0) return NULL;
 
-    SJSONValue *obj = sjson_new_object();
+    COWRIEValue *obj = cowrie_new_object();
     if (!obj) return NULL;
 
     skip_whitespace(p);
@@ -315,27 +315,27 @@ static SJSONValue* parse_object(JsonParser *p) {
         size_t key_len;
         char *key = parse_string_content(p, &key_len);
         if (!key) {
-            sjson_free(obj);
+            cowrie_free(obj);
             return NULL;
         }
 
         if (expect(p, ':') != 0) {
             free(key);
-            sjson_free(obj);
+            cowrie_free(obj);
             return NULL;
         }
 
-        SJSONValue *value = parse_value(p);
+        COWRIEValue *value = parse_value(p);
         if (!value) {
             free(key);
-            sjson_free(obj);
+            cowrie_free(obj);
             return NULL;
         }
 
-        if (sjson_object_set(obj, key, key_len, value) != 0) {
+        if (cowrie_object_set(obj, key, key_len, value) != 0) {
             free(key);
-            sjson_free(value);
-            sjson_free(obj);
+            cowrie_free(value);
+            cowrie_free(obj);
             return NULL;
         }
         free(key);
@@ -345,22 +345,22 @@ static SJSONValue* parse_object(JsonParser *p) {
         if (c == '}') {
             next(p);
             /* Check for special _type handling */
-            SJSONValue *special = handle_special_object(obj);
+            COWRIEValue *special = handle_special_object(obj);
             if (special) {
-                sjson_free(obj);
+                cowrie_free(obj);
                 return special;
             }
             return obj;
         }
         if (c != ',') {
-            sjson_free(obj);
+            cowrie_free(obj);
             return NULL;
         }
         next(p);
     }
 }
 
-static SJSONValue* parse_value(JsonParser *p) {
+static COWRIEValue* parse_value(JsonParser *p) {
     skip_whitespace(p);
     int c = peek(p);
 
@@ -372,57 +372,57 @@ static SJSONValue* parse_value(JsonParser *p) {
     /* Keywords */
     if (p->len - p->pos >= 4 && strncmp(p->data + p->pos, "null", 4) == 0) {
         p->pos += 4;
-        return sjson_new_null();
+        return cowrie_new_null();
     }
     if (p->len - p->pos >= 4 && strncmp(p->data + p->pos, "true", 4) == 0) {
         p->pos += 4;
-        return sjson_new_bool(1);
+        return cowrie_new_bool(1);
     }
     if (p->len - p->pos >= 5 && strncmp(p->data + p->pos, "false", 5) == 0) {
         p->pos += 5;
-        return sjson_new_bool(0);
+        return cowrie_new_bool(0);
     }
 
     return NULL;
 }
 
 /* Handle special _type objects */
-static SJSONValue* handle_special_object(SJSONValue *obj) {
-    if (obj->type != SJSON_OBJECT) return NULL;
+static COWRIEValue* handle_special_object(COWRIEValue *obj) {
+    if (obj->type != COWRIE_OBJECT) return NULL;
 
-    SJSONValue *type_val = sjson_object_get(obj, "_type", 5);
-    if (!type_val || type_val->type != SJSON_STRING) return NULL;
+    COWRIEValue *type_val = cowrie_object_get(obj, "_type", 5);
+    if (!type_val || type_val->type != COWRIE_STRING) return NULL;
 
     const char *type_name = type_val->as.str.data;
     size_t type_len = type_val->as.str.len;
 
     /* Tensor: {"_type":"tensor", "dtype":"float32", "dims":[...], "data":"base64"} */
     if (type_len == 6 && memcmp(type_name, "tensor", 6) == 0) {
-        SJSONValue *dtype_val = sjson_object_get(obj, "dtype", 5);
-        SJSONValue *dims_val = sjson_object_get(obj, "dims", 4);
-        SJSONValue *data_val = sjson_object_get(obj, "data", 4);
+        COWRIEValue *dtype_val = cowrie_object_get(obj, "dtype", 5);
+        COWRIEValue *dims_val = cowrie_object_get(obj, "dims", 4);
+        COWRIEValue *data_val = cowrie_object_get(obj, "data", 4);
 
-        if (!dtype_val || dtype_val->type != SJSON_STRING) return NULL;
-        if (!dims_val || dims_val->type != SJSON_ARRAY) return NULL;
-        if (!data_val || data_val->type != SJSON_STRING) return NULL;
+        if (!dtype_val || dtype_val->type != COWRIE_STRING) return NULL;
+        if (!dims_val || dims_val->type != COWRIE_ARRAY) return NULL;
+        if (!data_val || data_val->type != COWRIE_STRING) return NULL;
 
         /* Parse dtype */
         uint8_t dtype;
         const char *ds = dtype_val->as.str.data;
         size_t dl = dtype_val->as.str.len;
-        if (dl == 7 && memcmp(ds, "float32", 7) == 0) dtype = SJSON_DTYPE_FLOAT32;
-        else if (dl == 7 && memcmp(ds, "float64", 7) == 0) dtype = SJSON_DTYPE_FLOAT64;
-        else if (dl == 4 && memcmp(ds, "int8", 4) == 0) dtype = SJSON_DTYPE_INT8;
-        else if (dl == 5 && memcmp(ds, "int16", 5) == 0) dtype = SJSON_DTYPE_INT16;
-        else if (dl == 5 && memcmp(ds, "int32", 5) == 0) dtype = SJSON_DTYPE_INT32;
-        else if (dl == 5 && memcmp(ds, "int64", 5) == 0) dtype = SJSON_DTYPE_INT64;
-        else if (dl == 5 && memcmp(ds, "uint8", 5) == 0) dtype = SJSON_DTYPE_UINT8;
-        else if (dl == 6 && memcmp(ds, "uint16", 6) == 0) dtype = SJSON_DTYPE_UINT16;
-        else if (dl == 6 && memcmp(ds, "uint32", 6) == 0) dtype = SJSON_DTYPE_UINT32;
-        else if (dl == 6 && memcmp(ds, "uint64", 6) == 0) dtype = SJSON_DTYPE_UINT64;
-        else if (dl == 4 && memcmp(ds, "bool", 4) == 0) dtype = SJSON_DTYPE_BOOL;
-        else if (dl == 8 && memcmp(ds, "bfloat16", 8) == 0) dtype = SJSON_DTYPE_BFLOAT16;
-        else if (dl == 7 && memcmp(ds, "float16", 7) == 0) dtype = SJSON_DTYPE_FLOAT16;
+        if (dl == 7 && memcmp(ds, "float32", 7) == 0) dtype = COWRIE_DTYPE_FLOAT32;
+        else if (dl == 7 && memcmp(ds, "float64", 7) == 0) dtype = COWRIE_DTYPE_FLOAT64;
+        else if (dl == 4 && memcmp(ds, "int8", 4) == 0) dtype = COWRIE_DTYPE_INT8;
+        else if (dl == 5 && memcmp(ds, "int16", 5) == 0) dtype = COWRIE_DTYPE_INT16;
+        else if (dl == 5 && memcmp(ds, "int32", 5) == 0) dtype = COWRIE_DTYPE_INT32;
+        else if (dl == 5 && memcmp(ds, "int64", 5) == 0) dtype = COWRIE_DTYPE_INT64;
+        else if (dl == 5 && memcmp(ds, "uint8", 5) == 0) dtype = COWRIE_DTYPE_UINT8;
+        else if (dl == 6 && memcmp(ds, "uint16", 6) == 0) dtype = COWRIE_DTYPE_UINT16;
+        else if (dl == 6 && memcmp(ds, "uint32", 6) == 0) dtype = COWRIE_DTYPE_UINT32;
+        else if (dl == 6 && memcmp(ds, "uint64", 6) == 0) dtype = COWRIE_DTYPE_UINT64;
+        else if (dl == 4 && memcmp(ds, "bool", 4) == 0) dtype = COWRIE_DTYPE_BOOL;
+        else if (dl == 8 && memcmp(ds, "bfloat16", 8) == 0) dtype = COWRIE_DTYPE_BFLOAT16;
+        else if (dl == 7 && memcmp(ds, "float16", 7) == 0) dtype = COWRIE_DTYPE_FLOAT16;
         else return NULL;
 
         /* Parse dims */
@@ -430,20 +430,20 @@ static SJSONValue* handle_special_object(SJSONValue *obj) {
         size_t *dims = malloc(rank * sizeof(size_t));
         if (!dims) return NULL;
         for (uint8_t i = 0; i < rank; i++) {
-            SJSONValue *dim = dims_val->as.array.items[i];
-            if (dim->type == SJSON_INT64) dims[i] = (size_t)dim->as.i64;
-            else if (dim->type == SJSON_UINT64) dims[i] = (size_t)dim->as.u64;
+            COWRIEValue *dim = dims_val->as.array.items[i];
+            if (dim->type == COWRIE_INT64) dims[i] = (size_t)dim->as.i64;
+            else if (dim->type == COWRIE_UINT64) dims[i] = (size_t)dim->as.u64;
             else { free(dims); return NULL; }
         }
 
         /* Decode base64 data */
-        SJSONBuf data_buf;
-        if (sjson_base64_decode(data_val->as.str.data, data_val->as.str.len, &data_buf) != 0) {
+        COWRIEBuf data_buf;
+        if (cowrie_base64_decode(data_val->as.str.data, data_val->as.str.len, &data_buf) != 0) {
             free(dims);
             return NULL;
         }
 
-        SJSONValue *tensor = sjson_new_tensor(dtype, rank, dims, data_buf.data, data_buf.len);
+        COWRIEValue *tensor = cowrie_new_tensor(dtype, rank, dims, data_buf.data, data_buf.len);
         free(dims);
         free(data_buf.data);
         return tensor;
@@ -451,36 +451,36 @@ static SJSONValue* handle_special_object(SJSONValue *obj) {
 
     /* Bytes: {"_type":"bytes", "data":"base64"} */
     if (type_len == 5 && memcmp(type_name, "bytes", 5) == 0) {
-        SJSONValue *data_val = sjson_object_get(obj, "data", 4);
-        if (!data_val || data_val->type != SJSON_STRING) return NULL;
+        COWRIEValue *data_val = cowrie_object_get(obj, "data", 4);
+        if (!data_val || data_val->type != COWRIE_STRING) return NULL;
 
-        SJSONBuf data_buf;
-        if (sjson_base64_decode(data_val->as.str.data, data_val->as.str.len, &data_buf) != 0) {
+        COWRIEBuf data_buf;
+        if (cowrie_base64_decode(data_val->as.str.data, data_val->as.str.len, &data_buf) != 0) {
             return NULL;
         }
 
-        SJSONValue *bytes = sjson_new_bytes(data_buf.data, data_buf.len);
+        COWRIEValue *bytes = cowrie_new_bytes(data_buf.data, data_buf.len);
         free(data_buf.data);
         return bytes;
     }
 
     /* DateTime: {"_type":"datetime", "nanos":123456789} */
     if (type_len == 8 && memcmp(type_name, "datetime", 8) == 0) {
-        SJSONValue *nanos_val = sjson_object_get(obj, "nanos", 5);
+        COWRIEValue *nanos_val = cowrie_object_get(obj, "nanos", 5);
         if (!nanos_val) return NULL;
 
         int64_t nanos;
-        if (nanos_val->type == SJSON_INT64) nanos = nanos_val->as.i64;
-        else if (nanos_val->type == SJSON_UINT64) nanos = (int64_t)nanos_val->as.u64;
+        if (nanos_val->type == COWRIE_INT64) nanos = nanos_val->as.i64;
+        else if (nanos_val->type == COWRIE_UINT64) nanos = (int64_t)nanos_val->as.u64;
         else return NULL;
 
-        return sjson_new_datetime64(nanos);
+        return cowrie_new_datetime64(nanos);
     }
 
     /* UUID: {"_type":"uuid", "hex":"550e8400-e29b-41d4-a716-446655440000"} */
     if (type_len == 4 && memcmp(type_name, "uuid", 4) == 0) {
-        SJSONValue *hex_val = sjson_object_get(obj, "hex", 3);
-        if (!hex_val || hex_val->type != SJSON_STRING) return NULL;
+        COWRIEValue *hex_val = cowrie_object_get(obj, "hex", 3);
+        if (!hex_val || hex_val->type != COWRIE_STRING) return NULL;
 
         /* Parse hex, ignoring dashes */
         uint8_t uuid[16];
@@ -509,27 +509,27 @@ static SJSONValue* handle_special_object(SJSONValue *obj) {
         }
 
         if (uuid_idx != 16) return NULL;
-        return sjson_new_uuid128(uuid);
+        return cowrie_new_uuid128(uuid);
     }
 
     /* Ext: {"_type":"ext","ext_type":123,"payload":"base64"} */
     if (type_len == 3 && memcmp(type_name, "ext", 3) == 0) {
-        SJSONValue *type_id_val = sjson_object_get(obj, "ext_type", 8);
-        SJSONValue *payload_val = sjson_object_get(obj, "payload", 7);
+        COWRIEValue *type_id_val = cowrie_object_get(obj, "ext_type", 8);
+        COWRIEValue *payload_val = cowrie_object_get(obj, "payload", 7);
         if (!type_id_val || !payload_val) return NULL;
-        if (payload_val->type != SJSON_STRING) return NULL;
+        if (payload_val->type != COWRIE_STRING) return NULL;
 
         uint64_t ext_type = 0;
-        if (type_id_val->type == SJSON_INT64) ext_type = (uint64_t)type_id_val->as.i64;
-        else if (type_id_val->type == SJSON_UINT64) ext_type = type_id_val->as.u64;
+        if (type_id_val->type == COWRIE_INT64) ext_type = (uint64_t)type_id_val->as.i64;
+        else if (type_id_val->type == COWRIE_UINT64) ext_type = type_id_val->as.u64;
         else return NULL;
 
-        SJSONBuf data_buf;
-        if (sjson_base64_decode(payload_val->as.str.data, payload_val->as.str.len, &data_buf) != 0) {
+        COWRIEBuf data_buf;
+        if (cowrie_base64_decode(payload_val->as.str.data, payload_val->as.str.len, &data_buf) != 0) {
             return NULL;
         }
 
-        SJSONValue *ext = sjson_new_ext(ext_type, data_buf.data, data_buf.len);
+        COWRIEValue *ext = cowrie_new_ext(ext_type, data_buf.data, data_buf.len);
         free(data_buf.data);
         return ext;
     }
@@ -537,7 +537,7 @@ static SJSONValue* handle_special_object(SJSONValue *obj) {
     return NULL;
 }
 
-int sjson_from_json(const char *json, size_t len, SJSONValue **out) {
+int cowrie_from_json(const char *json, size_t len, COWRIEValue **out) {
     JsonParser p = { json, len, 0 };
     *out = parse_value(&p);
     return *out ? 0 : -1;
@@ -547,7 +547,7 @@ int sjson_from_json(const char *json, size_t len, SJSONValue **out) {
  * JSON Serializer
  * ============================================================ */
 
-static int buf_grow(SJSONBuf *buf, size_t need) {
+static int buf_grow(COWRIEBuf *buf, size_t need) {
     if (buf->len + need <= buf->cap) return 0;
     size_t new_cap = buf->cap * 2;
     if (new_cap < buf->len + need) new_cap = buf->len + need;
@@ -558,18 +558,18 @@ static int buf_grow(SJSONBuf *buf, size_t need) {
     return 0;
 }
 
-static int buf_append(SJSONBuf *buf, const char *s, size_t len) {
+static int buf_append(COWRIEBuf *buf, const char *s, size_t len) {
     if (buf_grow(buf, len) != 0) return -1;
     memcpy(buf->data + buf->len, s, len);
     buf->len += len;
     return 0;
 }
 
-static int buf_append_char(SJSONBuf *buf, char c) {
+static int buf_append_char(COWRIEBuf *buf, char c) {
     return buf_append(buf, &c, 1);
 }
 
-static int write_string_escaped(SJSONBuf *buf, const char *s, size_t len) {
+static int write_string_escaped(COWRIEBuf *buf, const char *s, size_t len) {
     if (buf_append_char(buf, '"') != 0) return -1;
 
     for (size_t i = 0; i < len; i++) {
@@ -596,47 +596,47 @@ static int write_string_escaped(SJSONBuf *buf, const char *s, size_t len) {
     return buf_append_char(buf, '"');
 }
 
-static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth);
+static int write_value(COWRIEBuf *buf, const COWRIEValue *v, int pretty, int depth);
 
-static int write_indent(SJSONBuf *buf, int depth) {
+static int write_indent(COWRIEBuf *buf, int depth) {
     for (int i = 0; i < depth; i++) {
         if (buf_append(buf, "  ", 2) != 0) return -1;
     }
     return 0;
 }
 
-static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth) {
+static int write_value(COWRIEBuf *buf, const COWRIEValue *v, int pretty, int depth) {
     char num_buf[64];
 
     switch (v->type) {
-        case SJSON_NULL:
+        case COWRIE_NULL:
             return buf_append(buf, "null", 4);
 
-        case SJSON_BOOL:
+        case COWRIE_BOOL:
             return v->as.boolean ? buf_append(buf, "true", 4) : buf_append(buf, "false", 5);
 
-        case SJSON_INT64:
+        case COWRIE_INT64:
             snprintf(num_buf, sizeof(num_buf), "%lld", (long long)v->as.i64);
             return buf_append(buf, num_buf, strlen(num_buf));
 
-        case SJSON_UINT64:
+        case COWRIE_UINT64:
             snprintf(num_buf, sizeof(num_buf), "%llu", (unsigned long long)v->as.u64);
             return buf_append(buf, num_buf, strlen(num_buf));
 
-        case SJSON_FLOAT64:
+        case COWRIE_FLOAT64:
             if (isnan(v->as.f64) || isinf(v->as.f64)) {
                 return buf_append(buf, "null", 4);
             }
             snprintf(num_buf, sizeof(num_buf), "%.17g", v->as.f64);
             return buf_append(buf, num_buf, strlen(num_buf));
 
-        case SJSON_STRING:
+        case COWRIE_STRING:
             return write_string_escaped(buf, v->as.str.data, v->as.str.len);
 
-        case SJSON_BYTES: {
+        case COWRIE_BYTES: {
             /* {"_type":"bytes","data":"base64"} */
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.bytes.data, v->as.bytes.len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.bytes.data, v->as.bytes.len, &b64) != 0) return -1;
 
             if (buf_append(buf, "{\"_type\":\"bytes\",\"data\":\"", 25) != 0) { free(b64.data); return -1; }
             if (buf_append(buf, (char*)b64.data, b64.len) != 0) { free(b64.data); return -1; }
@@ -644,7 +644,7 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_DATETIME64: {
+        case COWRIE_DATETIME64: {
             /* {"_type":"datetime","nanos":123456789} */
             if (buf_append(buf, "{\"_type\":\"datetime\",\"nanos\":", 28) != 0) return -1;
             snprintf(num_buf, sizeof(num_buf), "%lld", (long long)v->as.datetime64);
@@ -652,7 +652,7 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append_char(buf, '}');
         }
 
-        case SJSON_UUID128: {
+        case COWRIE_UUID128: {
             /* {"_type":"uuid","hex":"550e8400-e29b-41d4-a716-446655440000"} */
             char hex[64];
             snprintf(hex, sizeof(hex),
@@ -664,7 +664,7 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, hex, strlen(hex));
         }
 
-        case SJSON_ARRAY: {
+        case COWRIE_ARRAY: {
             if (buf_append_char(buf, '[') != 0) return -1;
             for (size_t i = 0; i < v->as.array.len; i++) {
                 if (i > 0 && buf_append_char(buf, ',') != 0) return -1;
@@ -681,7 +681,7 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append_char(buf, ']');
         }
 
-        case SJSON_OBJECT: {
+        case COWRIE_OBJECT: {
             if (buf_append_char(buf, '{') != 0) return -1;
             for (size_t i = 0; i < v->as.object.len; i++) {
                 if (i > 0 && buf_append_char(buf, ',') != 0) return -1;
@@ -702,23 +702,23 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append_char(buf, '}');
         }
 
-        case SJSON_TENSOR: {
+        case COWRIE_TENSOR: {
             /* {"_type":"tensor","dtype":"float32","dims":[...],"data":"base64"} */
             const char *dtype_str;
             switch (v->as.tensor.dtype) {
-                case SJSON_DTYPE_FLOAT32: dtype_str = "float32"; break;
-                case SJSON_DTYPE_FLOAT64: dtype_str = "float64"; break;
-                case SJSON_DTYPE_INT8: dtype_str = "int8"; break;
-                case SJSON_DTYPE_INT16: dtype_str = "int16"; break;
-                case SJSON_DTYPE_INT32: dtype_str = "int32"; break;
-                case SJSON_DTYPE_INT64: dtype_str = "int64"; break;
-                case SJSON_DTYPE_UINT8: dtype_str = "uint8"; break;
-                case SJSON_DTYPE_UINT16: dtype_str = "uint16"; break;
-                case SJSON_DTYPE_UINT32: dtype_str = "uint32"; break;
-                case SJSON_DTYPE_UINT64: dtype_str = "uint64"; break;
-                case SJSON_DTYPE_BOOL: dtype_str = "bool"; break;
-                case SJSON_DTYPE_BFLOAT16: dtype_str = "bfloat16"; break;
-                case SJSON_DTYPE_FLOAT16: dtype_str = "float16"; break;
+                case COWRIE_DTYPE_FLOAT32: dtype_str = "float32"; break;
+                case COWRIE_DTYPE_FLOAT64: dtype_str = "float64"; break;
+                case COWRIE_DTYPE_INT8: dtype_str = "int8"; break;
+                case COWRIE_DTYPE_INT16: dtype_str = "int16"; break;
+                case COWRIE_DTYPE_INT32: dtype_str = "int32"; break;
+                case COWRIE_DTYPE_INT64: dtype_str = "int64"; break;
+                case COWRIE_DTYPE_UINT8: dtype_str = "uint8"; break;
+                case COWRIE_DTYPE_UINT16: dtype_str = "uint16"; break;
+                case COWRIE_DTYPE_UINT32: dtype_str = "uint32"; break;
+                case COWRIE_DTYPE_UINT64: dtype_str = "uint64"; break;
+                case COWRIE_DTYPE_BOOL: dtype_str = "bool"; break;
+                case COWRIE_DTYPE_BFLOAT16: dtype_str = "bfloat16"; break;
+                case COWRIE_DTYPE_FLOAT16: dtype_str = "float16"; break;
                 default: dtype_str = "unknown";
             }
 
@@ -734,18 +734,18 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
 
             if (buf_append(buf, "],\"data\":\"", 10) != 0) return -1;
 
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.tensor.data, v->as.tensor.data_len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.tensor.data, v->as.tensor.data_len, &b64) != 0) return -1;
             if (buf_append(buf, (char*)b64.data, b64.len) != 0) { free(b64.data); return -1; }
             free(b64.data);
 
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_TENSOR_REF: {
+        case COWRIE_TENSOR_REF: {
             /* {"_type":"tensor_ref","store_id":0,"key":"base64"} */
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.tensor_ref.key, v->as.tensor_ref.key_len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.tensor_ref.key, v->as.tensor_ref.key_len, &b64) != 0) return -1;
 
             if (buf_append(buf, "{\"_type\":\"tensor_ref\",\"store_id\":", 33) != 0) { free(b64.data); return -1; }
             snprintf(num_buf, sizeof(num_buf), "%u", v->as.tensor_ref.store_id);
@@ -756,10 +756,10 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_IMAGE: {
+        case COWRIE_IMAGE: {
             /* {"_type":"image","format":1,"width":100,"height":100,"data":"base64"} */
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.image.data, v->as.image.data_len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.image.data, v->as.image.data_len, &b64) != 0) return -1;
 
             if (buf_append(buf, "{\"_type\":\"image\",\"format\":", 26) != 0) { free(b64.data); return -1; }
             snprintf(num_buf, sizeof(num_buf), "%u", v->as.image.format);
@@ -776,10 +776,10 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_AUDIO: {
+        case COWRIE_AUDIO: {
             /* {"_type":"audio","encoding":1,"sample_rate":44100,"channels":2,"data":"base64"} */
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.audio.data, v->as.audio.data_len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.audio.data, v->as.audio.data_len, &b64) != 0) return -1;
 
             if (buf_append(buf, "{\"_type\":\"audio\",\"encoding\":", 28) != 0) { free(b64.data); return -1; }
             snprintf(num_buf, sizeof(num_buf), "%u", v->as.audio.encoding);
@@ -796,14 +796,14 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_DECIMAL128: {
+        case COWRIE_DECIMAL128: {
             /* {"_type":"decimal128","data":"base64"} */
             uint8_t dec_data[17];
             dec_data[0] = (uint8_t)v->as.decimal128.scale;
             memcpy(dec_data + 1, v->as.decimal128.coef, 16);
 
-            SJSONBuf b64;
-            if (sjson_base64_encode(dec_data, 17, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(dec_data, 17, &b64) != 0) return -1;
 
             if (buf_append(buf, "{\"_type\":\"decimal128\",\"data\":\"", 30) != 0) { free(b64.data); return -1; }
             if (buf_append(buf, (char*)b64.data, b64.len) != 0) { free(b64.data); return -1; }
@@ -811,10 +811,10 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_BIGINT: {
+        case COWRIE_BIGINT: {
             /* {"_type":"bigint","data":"base64"} */
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.bigint.data, v->as.bigint.len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.bigint.data, v->as.bigint.len, &b64) != 0) return -1;
 
             if (buf_append(buf, "{\"_type\":\"bigint\",\"data\":\"", 26) != 0) { free(b64.data); return -1; }
             if (buf_append(buf, (char*)b64.data, b64.len) != 0) { free(b64.data); return -1; }
@@ -822,10 +822,10 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
             return buf_append(buf, "\"}", 2);
         }
 
-        case SJSON_EXT: {
+        case COWRIE_EXT: {
             /* {"_type":"ext","ext_type":123,"payload":"base64"} */
-            SJSONBuf b64;
-            if (sjson_base64_encode(v->as.ext.payload, v->as.ext.payload_len, &b64) != 0) return -1;
+            COWRIEBuf b64;
+            if (cowrie_base64_encode(v->as.ext.payload, v->as.ext.payload_len, &b64) != 0) return -1;
             if (buf_append(buf, "{\"_type\":\"ext\",\"ext_type\":", 27) != 0) { free(b64.data); return -1; }
             snprintf(num_buf, sizeof(num_buf), "%llu", (unsigned long long)v->as.ext.ext_type);
             if (buf_append(buf, num_buf, strlen(num_buf)) != 0) { free(b64.data); return -1; }
@@ -841,8 +841,8 @@ static int write_value(SJSONBuf *buf, const SJSONValue *v, int pretty, int depth
     }
 }
 
-int sjson_to_json(const SJSONValue *value, SJSONBuf *buf) {
-    sjson_buf_init(buf);
+int cowrie_to_json(const COWRIEValue *value, COWRIEBuf *buf) {
+    cowrie_buf_init(buf);
     buf->data = malloc(256);
     if (!buf->data) return -1;
     buf->cap = 256;
@@ -865,8 +865,8 @@ int sjson_to_json(const SJSONValue *value, SJSONBuf *buf) {
     return 0;
 }
 
-int sjson_to_json_pretty(const SJSONValue *value, SJSONBuf *buf) {
-    sjson_buf_init(buf);
+int cowrie_to_json_pretty(const COWRIEValue *value, COWRIEBuf *buf) {
+    cowrie_buf_init(buf);
     buf->data = malloc(256);
     if (!buf->data) return -1;
     buf->cap = 256;

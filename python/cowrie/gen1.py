@@ -8,7 +8,7 @@ Gen1 provides a compact binary JSON format that's simpler than Gen2:
 
 Example
 -------
->>> from sjson.gen1 import encode, decode
+>>> from cowrie.gen1 import encode, decode
 >>> data = encode({"name": "Alice", "scores": [1.0, 2.0, 3.0]})
 >>> decoded = decode(data)
 >>> decoded

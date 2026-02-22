@@ -1,11 +1,11 @@
-# SJSON Wire Format Specification
+# Cowrie Wire Format Specification
 
 ## Overview
 
-SJSON is a binary serialization format for JSON-like data structures. Two variants exist:
+Cowrie is a binary serialization format for JSON-like data structures. Two variants exist:
 
 - **Gen1**: Simple binary JSON with proto-tensors
-- **Gen2**: Full SJSON v2 with dictionary coding and ML extensions
+- **Gen2**: Full Cowrie v2 with dictionary coding and ML extensions
 
 ## Gen1 Wire Format
 

@@ -1,5 +1,5 @@
 /**
- * SJSON v2 - "JSON++" Binary Codec for TypeScript/JavaScript
+ * Cowrie v2 - "JSON++" Binary Codec for TypeScript/JavaScript
  *
  * A binary format that extends JSON with:
  * - Explicit integer types (int64, uint64 via BigInt)
@@ -89,7 +89,7 @@ enum Tag {
   GRAPH_SHARD = 0x39,
 }
 
-// SJSON value types
+// Cowrie value types
 export enum Type {
   NULL,
   BOOL,
@@ -253,7 +253,7 @@ export interface UnknownExtData {
   payload: Uint8Array;
 }
 
-// SJSON Value type
+// Cowrie Value type
 export interface Value {
   type: Type;
   data: unknown;
@@ -2202,9 +2202,9 @@ export function isMasterStream(data: Uint8Array): boolean {
 }
 
 /**
- * Check if data starts with SJSON document magic but not master stream
+ * Check if data starts with Cowrie document magic but not master stream
  */
-export function isSjsonDocument(data: Uint8Array): boolean {
+export function isCowrieDocument(data: Uint8Array): boolean {
   if (data.length < 4) return false;
   if (data[0] !== MAGIC[0] || data[1] !== MAGIC[1]) return false;
   // Exclude master stream format
@@ -2313,8 +2313,8 @@ export function readMasterFrame(data: Uint8Array): [MasterFrame, number] {
 
   // Check magic
   if (!isMasterStream(data)) {
-    // Check for legacy SJSON document
-    if (isSjsonDocument(data)) {
+    // Check for legacy Cowrie document
+    if (isCowrieDocument(data)) {
       return readLegacyDocument(data);
     }
     // Try legacy stream format
@@ -2493,7 +2493,7 @@ export function encodeFramed(v: Value, compression: Compression = Compression.NO
 }
 
 /**
- * Decode a framed SJSON value, automatically decompressing if needed.
+ * Decode a framed Cowrie value, automatically decompressing if needed.
  */
 export function decodeFramed(data: Uint8Array, maxSize: number = Limits.MAX_BYTES_LEN): Value {
   if (data.length < 4) {
@@ -2550,7 +2550,7 @@ export function decodeFramed(data: Uint8Array, maxSize: number = Limits.MAX_BYTE
     throw new Error("Decompressed length mismatch");
   }
 
-  // Reconstruct full SJSON data with header
+  // Reconstruct full Cowrie data with header
   const full = new Uint8Array(4 + decompressed.length);
   full[0] = data[0]; // 'S'
   full[1] = data[1]; // 'J'
@@ -2725,7 +2725,7 @@ if (typeof require !== "undefined" && require.main === module) {
   const data = dumps(obj);
   const jsonData = JSON.stringify(obj);
 
-  console.log(`SJSON size: ${data.length} bytes`);
+  console.log(`Cowrie size: ${data.length} bytes`);
   console.log(`JSON size:  ${jsonData.length} bytes`);
   console.log(`Savings:    ${((1 - data.length / jsonData.length) * 100).toFixed(1)}%`);
 

@@ -1,6 +1,6 @@
 //! Golden test vectors - verify Rust decodes Go-generated binaries correctly.
 
-use sjson::gen2::{decode, encode, Value};
+use cowrie_codec::gen2::{decode, encode, Value};
 use std::fs;
 use std::path::PathBuf;
 
@@ -14,10 +14,10 @@ fn testdata_path(subpath: &str) -> PathBuf {
 
 #[test]
 fn test_decode_gen2_tensor() {
-    let path = testdata_path("gen2/tensor.sjson");
-    let data = fs::read(&path).expect("failed to read tensor.sjson");
+    let path = testdata_path("gen2/tensor.cowrie");
+    let data = fs::read(&path).expect("failed to read tensor.cowrie");
 
-    let value = decode(&data).expect("failed to decode tensor.sjson");
+    let value = decode(&data).expect("failed to decode tensor.cowrie");
 
     // Verify structure
     if let Value::Object(obj) = &value {
@@ -56,10 +56,10 @@ fn test_decode_gen2_tensor() {
 
 #[test]
 fn test_decode_gen2_image_meta() {
-    let path = testdata_path("gen2/image_meta.sjson");
-    let data = fs::read(&path).expect("failed to read image_meta.sjson");
+    let path = testdata_path("gen2/image_meta.cowrie");
+    let data = fs::read(&path).expect("failed to read image_meta.cowrie");
 
-    let value = decode(&data).expect("failed to decode image_meta.sjson");
+    let value = decode(&data).expect("failed to decode image_meta.cowrie");
 
     // Verify structure
     if let Value::Object(obj) = &value {

@@ -1,5 +1,5 @@
 """
-SJSON v2 - "JSON++" Binary Codec for Python
+Cowrie v2 - "JSON++" Binary Codec for Python
 
 A binary format that extends JSON with:
 - Explicit integer types (int64, uint64)
@@ -157,7 +157,7 @@ class DeltaOpCode(IntEnum):
 
 
 class Type(IntEnum):
-    """SJSON value types."""
+    """Cowrie value types."""
     NULL = 0
     BOOL = 1
     INT64 = 2
@@ -425,7 +425,7 @@ class TensorData:
         if not HAS_NUMPY:
             raise RuntimeError("NumPy is required for from_numpy()")
 
-        # Map NumPy dtype to SJSON DType
+        # Map NumPy dtype to Cowrie DType
         dtype_map = {
             np.dtype('float32'): DType.FLOAT32,
             np.dtype('float64'): DType.FLOAT64,
@@ -684,7 +684,7 @@ class UnknownExtData:
 
 @dataclass
 class Value:
-    """SJSON value container."""
+    """Cowrie value container."""
     type: Type
     data: Any  # The actual value based on type
 
@@ -1185,7 +1185,7 @@ class Encoder:
 
 
 def encode(v: Value) -> bytes:
-    """Encode a value to SJSON v2 binary format."""
+    """Encode a value to Cowrie v2 binary format."""
     return Encoder().encode(v)
 
 
@@ -1501,7 +1501,7 @@ class Decoder:
 
 
 def decode(data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.KEEP) -> Value:
-    """Decode SJSON v2 binary data into a Value."""
+    """Decode Cowrie v2 binary data into a Value."""
     return Decoder(data, on_unknown_ext=on_unknown_ext).decode()
 
 
@@ -1601,14 +1601,14 @@ MIN_SAFE_INT = -9007199254740991
 
 
 def from_json(data: Union[str, bytes]) -> Value:
-    """Parse JSON into an SJSON value with type inference."""
+    """Parse JSON into a Cowrie value with type inference."""
     if isinstance(data, bytes):
         data = data.decode('utf-8')
     return from_any(json.loads(data))
 
 
 def from_any(v: Any, field_name: str = "") -> Value:
-    """Convert a Python value to an SJSON value with type inference."""
+    """Convert a Python value to a Cowrie value with type inference."""
     if v is None:
         return Value.null()
     elif isinstance(v, bool):
@@ -1680,12 +1680,12 @@ def _infer_string_type(s: str, field_name: str) -> Value:
 
 
 def to_json(v: Value, indent: Optional[int] = None) -> str:
-    """Convert an SJSON value to JSON string with canonical projections."""
+    """Convert a Cowrie value to JSON string with canonical projections."""
     return json.dumps(to_any(v), indent=indent)
 
 
 def to_any(v: Value) -> Any:
-    """Convert an SJSON value to a Python value."""
+    """Convert a Cowrie value to a Python value."""
     if v.type == Type.NULL:
         return None
     elif v.type == Type.BOOL:
@@ -1878,7 +1878,7 @@ def to_any(v: Value) -> Any:
 # ============================================================
 
 def dumps(obj: Any, compression: Compression = Compression.NONE) -> bytes:
-    """Encode a Python object to SJSON bytes."""
+    """Encode a Python object to Cowrie bytes."""
     v = from_any(obj)
     if compression == Compression.NONE:
         return encode(v)
@@ -1886,7 +1886,7 @@ def dumps(obj: Any, compression: Compression = Compression.NONE) -> bytes:
 
 
 def loads(data: bytes) -> Any:
-    """Decode SJSON bytes to a Python object."""
+    """Decode Cowrie bytes to a Python object."""
     # Check if compressed
     if len(data) >= 4 and data[3] & FLAG_COMPRESSED:
         v = decode_framed(data)
@@ -2323,8 +2323,8 @@ def is_master_stream(data: bytes) -> bool:
     return len(data) >= 4 and data[:4] == MASTER_MAGIC
 
 
-def is_sjson_document(data: bytes) -> bool:
-    """Check if data starts with SJSON document magic but not master stream."""
+def is_cowrie_document(data: bytes) -> bool:
+    """Check if data starts with Cowrie document magic but not master stream."""
     if len(data) < 4:
         return False
     if data[:2] != MAGIC:
@@ -2493,7 +2493,7 @@ if __name__ == '__main__':
     data = dumps(obj)
     json_data = json.dumps(obj).encode()
 
-    print(f"SJSON size: {len(data)} bytes")
+    print(f"Cowrie size: {len(data)} bytes")
     print(f"JSON size:  {len(json_data)} bytes")
     print(f"Savings:    {(1 - len(data)/len(json_data))*100:.1f}%")
 

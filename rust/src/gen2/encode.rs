@@ -1,6 +1,6 @@
-//! SJSON encoder.
+//! Cowrie encoder.
 
-use super::types::{Value, SjsonError, NodeData, EdgeData};
+use super::types::{Value, CowrieError, NodeData, EdgeData};
 use crate::{MAGIC, VERSION};
 use std::collections::{BTreeMap, HashMap};
 
@@ -45,13 +45,13 @@ pub struct EncodeOptions {
     pub deterministic: bool,
 }
 
-/// Encode a value to SJSON bytes.
-pub fn encode(value: &Value) -> Result<Vec<u8>, SjsonError> {
+/// Encode a value to Cowrie bytes.
+pub fn encode(value: &Value) -> Result<Vec<u8>, CowrieError> {
     encode_with_options(value, &EncodeOptions::default())
 }
 
 /// Encode a value with options.
-pub fn encode_with_options(value: &Value, opts: &EncodeOptions) -> Result<Vec<u8>, SjsonError> {
+pub fn encode_with_options(value: &Value, opts: &EncodeOptions) -> Result<Vec<u8>, CowrieError> {
     let mut buf = Vec::with_capacity(256);
 
     // Build dictionary
@@ -158,7 +158,7 @@ fn collect_props_keys(
     }
 }
 
-fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, opts: &EncodeOptions) -> Result<(), SjsonError> {
+fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, opts: &EncodeOptions) -> Result<(), CowrieError> {
     match value {
         Value::Null => {
             buf.push(tags::NULL);
@@ -369,7 +369,7 @@ fn encode_node_data(
     node: &NodeData,
     dict: &HashMap<&str, usize>,
     opts: &EncodeOptions,
-) -> Result<(), SjsonError> {
+) -> Result<(), CowrieError> {
     // ID
     write_string(buf, &node.id);
     // Labels
@@ -388,7 +388,7 @@ fn encode_edge_data(
     edge: &EdgeData,
     dict: &HashMap<&str, usize>,
     opts: &EncodeOptions,
-) -> Result<(), SjsonError> {
+) -> Result<(), CowrieError> {
     // From, To, Type
     write_string(buf, &edge.from);
     write_string(buf, &edge.to);
@@ -404,7 +404,7 @@ fn encode_props(
     props: &BTreeMap<String, Value>,
     dict: &HashMap<&str, usize>,
     opts: &EncodeOptions,
-) -> Result<(), SjsonError> {
+) -> Result<(), CowrieError> {
     // Filter nulls if needed
     let filtered: Vec<_> = if opts.omit_null {
         props.iter().filter(|(_, v)| !matches!(v, Value::Null)).collect()

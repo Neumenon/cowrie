@@ -1,7 +1,7 @@
 """Gen2 codec tests."""
 
 import pytest
-from sjson.gen2 import (
+from cowrie.gen2 import (
     encode, decode, Value, Type, to_json, to_any,
     NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData,
     TensorData, DType, ImageData, AudioData, RichTextData, RichTextSpan,

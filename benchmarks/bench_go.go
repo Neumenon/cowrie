@@ -1,4 +1,4 @@
-// SJSON Go Benchmark Suite
+// Cowrie Go Benchmark Suite
 // Run: go test -bench=. -benchmem ./benchmarks/
 
 package benchmarks
@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/phenomenon0/sjson-final/go/gen1"
-	"github.com/phenomenon0/sjson-final/go/gen2"
+	"github.com/phenomenon0/cowrie-final/go/gen1"
+	"github.com/phenomenon0/cowrie-final/go/gen2"
 )
 
 // Test payloads

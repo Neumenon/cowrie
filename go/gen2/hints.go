@@ -15,7 +15,7 @@ const (
 	HintUint64   HintType = 0x09 // Maps to TagUint64
 	HintDatetime HintType = 0x0B // Maps to TagDatetime64
 	HintUUID     HintType = 0x0C // Maps to TagUUID128
-	HintFloat32  HintType = 0x14 // For tensor data (not a base SJSON type)
+	HintFloat32  HintType = 0x14 // For tensor data (not a base Cowrie type)
 )
 
 // String returns the hint type name.
@@ -66,7 +66,7 @@ func (f HintFlags) Has(flag HintFlags) bool {
 //	[flags: 1 byte]
 type ColumnHint struct {
 	Field string    // Field path (e.g., "id", "props.embedding")
-	Type  HintType  // Expected SJSON type
+	Type  HintType  // Expected Cowrie type
 	Shape []int     // For arrays/tensors (e.g., [128] for float32[128])
 	Flags HintFlags // Additional hints
 }
@@ -220,7 +220,7 @@ func EncodeWithHints(v *Value, hints []ColumnHint) ([]byte, error) {
 	return buf.bytes(), nil
 }
 
-// DecodeWithHints decodes SJSON data and returns both the value and any hints.
+// DecodeWithHints decodes Cowrie data and returns both the value and any hints.
 func DecodeWithHints(data []byte) (*HintResult, error) {
 	r := &reader{data: data}
 

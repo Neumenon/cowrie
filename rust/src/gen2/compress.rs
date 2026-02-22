@@ -1,8 +1,8 @@
-//! Compression support for SJSON Gen2.
+//! Compression support for Cowrie Gen2.
 //!
 //! Provides framed encoding/decoding with optional gzip or zstd compression.
 
-use super::types::{Value, SjsonError};
+use super::types::{Value, CowrieError};
 use super::encode::encode;
 use super::decode::decode;
 use crate::{MAGIC, VERSION};
@@ -31,8 +31,8 @@ const COMP_TYPE_SHIFT: u8 = 1;
 /// - Byte 2: Version (0x02)
 /// - Byte 3: Flags (compression info)
 /// - If compressed: uvarint of uncompressed length, then compressed data
-/// - Otherwise: raw SJSON data (after first 4 bytes)
-pub fn encode_framed(value: &Value, compression: Compression) -> Result<Vec<u8>, SjsonError> {
+/// - Otherwise: raw Cowrie data (after first 4 bytes)
+pub fn encode_framed(value: &Value, compression: Compression) -> Result<Vec<u8>, CowrieError> {
     // First encode normally
     let raw = encode(value)?;
 
@@ -75,23 +75,23 @@ pub fn encode_framed(value: &Value, compression: Compression) -> Result<Vec<u8>,
     Ok(out)
 }
 
-/// Decode a framed SJSON value, automatically decompressing if needed.
-pub fn decode_framed(data: &[u8]) -> Result<Value, SjsonError> {
+/// Decode a framed Cowrie value, automatically decompressing if needed.
+pub fn decode_framed(data: &[u8]) -> Result<Value, CowrieError> {
     decode_framed_with_limit(data, 100 * 1024 * 1024) // 100MB default limit
 }
 
-/// Decode a framed SJSON value with a maximum decompressed size limit.
-pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, SjsonError> {
+/// Decode a framed Cowrie value with a maximum decompressed size limit.
+pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, CowrieError> {
     if data.len() < 4 {
-        return Err(SjsonError::Truncated);
+        return Err(CowrieError::Truncated);
     }
 
     // Check magic + version
     if &data[0..2] != MAGIC {
-        return Err(SjsonError::InvalidMagic);
+        return Err(CowrieError::InvalidMagic);
     }
     if data[2] != VERSION {
-        return Err(SjsonError::InvalidVersion(data[2]));
+        return Err(CowrieError::InvalidVersion(data[2]));
     }
 
     let flags = data[3];
@@ -110,7 +110,7 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, S
     let mut shift = 0;
     loop {
         if pos >= data.len() {
-            return Err(SjsonError::Truncated);
+            return Err(CowrieError::Truncated);
         }
         let b = data[pos];
         pos += 1;
@@ -120,12 +120,12 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, S
         }
         shift += 7;
         if shift > 63 {
-            return Err(SjsonError::InvalidData("varint overflow".into()));
+            return Err(CowrieError::InvalidData("varint overflow".into()));
         }
     }
 
     if uncompressed_len as usize > max_size {
-        return Err(SjsonError::TooLarge);
+        return Err(CowrieError::TooLarge);
     }
 
     // Decompress
@@ -133,14 +133,14 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, S
     let decompressed = match comp_type {
         1 => decompress_gzip(compressed, max_size)?,
         2 => decompress_zstd(compressed, max_size)?,
-        _ => return Err(SjsonError::InvalidData("unknown compression".into())),
+        _ => return Err(CowrieError::InvalidData("unknown compression".into())),
     };
 
     if decompressed.len() != uncompressed_len as usize {
-        return Err(SjsonError::InvalidData("decompressed length mismatch".into()));
+        return Err(CowrieError::InvalidData("decompressed length mismatch".into()));
     }
 
-    // Reconstruct full SJSON data with header
+    // Reconstruct full Cowrie data with header
     let mut full = Vec::with_capacity(4 + decompressed.len());
     full.push(data[0]); // 'S'
     full.push(data[1]); // 'J'
@@ -151,61 +151,61 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, S
     decode(&full)
 }
 
-fn compress_gzip(data: &[u8]) -> Result<Vec<u8>, SjsonError> {
+fn compress_gzip(data: &[u8]) -> Result<Vec<u8>, CowrieError> {
     let mut encoder = GzEncoder::new(Vec::new(), GzCompression::default());
-    encoder.write_all(data).map_err(|e| SjsonError::InvalidData(e.to_string()))?;
-    encoder.finish().map_err(|e| SjsonError::InvalidData(e.to_string()))
+    encoder.write_all(data).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+    encoder.finish().map_err(|e| CowrieError::InvalidData(e.to_string()))
 }
 
-fn decompress_gzip(data: &[u8], max_size: usize) -> Result<Vec<u8>, SjsonError> {
+fn decompress_gzip(data: &[u8], max_size: usize) -> Result<Vec<u8>, CowrieError> {
     let mut decoder = GzDecoder::new(data);
     if max_size == 0 {
         let mut out = Vec::new();
-        decoder.read_to_end(&mut out).map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+        decoder.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
         return Ok(out);
     }
 
     let mut out = Vec::new();
     let mut limited = decoder.take((max_size as u64) + 1);
-    limited.read_to_end(&mut out).map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+    limited.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     if out.len() > max_size {
-        return Err(SjsonError::TooLarge);
+        return Err(CowrieError::TooLarge);
     }
     Ok(out)
 }
 
 #[cfg(feature = "zstd")]
-fn compress_zstd(data: &[u8]) -> Result<Vec<u8>, SjsonError> {
-    zstd::encode_all(data, 3).map_err(|e| SjsonError::InvalidData(e.to_string()))
+fn compress_zstd(data: &[u8]) -> Result<Vec<u8>, CowrieError> {
+    zstd::encode_all(data, 3).map_err(|e| CowrieError::InvalidData(e.to_string()))
 }
 
 #[cfg(not(feature = "zstd"))]
-fn compress_zstd(_data: &[u8]) -> Result<Vec<u8>, SjsonError> {
-    Err(SjsonError::InvalidData("zstd feature not enabled".into()))
+fn compress_zstd(_data: &[u8]) -> Result<Vec<u8>, CowrieError> {
+    Err(CowrieError::InvalidData("zstd feature not enabled".into()))
 }
 
 #[cfg(feature = "zstd")]
-fn decompress_zstd(data: &[u8], max_size: usize) -> Result<Vec<u8>, SjsonError> {
+fn decompress_zstd(data: &[u8], max_size: usize) -> Result<Vec<u8>, CowrieError> {
     let mut decoder = zstd::stream::read::Decoder::new(data)
-        .map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     if max_size == 0 {
         let mut out = Vec::new();
-        decoder.read_to_end(&mut out).map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+        decoder.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
         return Ok(out);
     }
 
     let mut out = Vec::new();
     let mut limited = decoder.take((max_size as u64) + 1);
-    limited.read_to_end(&mut out).map_err(|e| SjsonError::InvalidData(e.to_string()))?;
+    limited.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     if out.len() > max_size {
-        return Err(SjsonError::TooLarge);
+        return Err(CowrieError::TooLarge);
     }
     Ok(out)
 }
 
 #[cfg(not(feature = "zstd"))]
-fn decompress_zstd(_data: &[u8], _max_size: usize) -> Result<Vec<u8>, SjsonError> {
-    Err(SjsonError::InvalidData("zstd feature not enabled".into()))
+fn decompress_zstd(_data: &[u8], _max_size: usize) -> Result<Vec<u8>, CowrieError> {
+    Err(CowrieError::InvalidData("zstd feature not enabled".into()))
 }
 
 #[cfg(test)]

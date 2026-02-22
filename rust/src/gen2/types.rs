@@ -1,11 +1,11 @@
-//! SJSON value types.
+//! Cowrie value types.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-/// SJSON error type.
+/// Cowrie error type.
 #[derive(Debug)]
-pub enum SjsonError {
+pub enum CowrieError {
     InvalidMagic,
     InvalidVersion(u8),
     InvalidTag(u8),
@@ -17,27 +17,27 @@ pub enum SjsonError {
     TooLarge,
 }
 
-impl fmt::Display for SjsonError {
+impl fmt::Display for CowrieError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SjsonError::InvalidMagic => write!(f, "invalid SJSON magic"),
-            SjsonError::InvalidVersion(v) => write!(f, "invalid SJSON version: {}", v),
-            SjsonError::InvalidTag(t) => write!(f, "invalid tag: 0x{:02x}", t),
-            SjsonError::InvalidData(msg) => write!(f, "invalid data: {}", msg),
-            SjsonError::Truncated => write!(f, "truncated data"),
-            SjsonError::InvalidUtf8 => write!(f, "invalid UTF-8"),
-            SjsonError::Io(e) => write!(f, "I/O error: {}", e),
-            SjsonError::TooDeep => write!(f, "nesting too deep"),
-            SjsonError::TooLarge => write!(f, "data too large"),
+            CowrieError::InvalidMagic => write!(f, "invalid Cowrie magic"),
+            CowrieError::InvalidVersion(v) => write!(f, "invalid Cowrie version: {}", v),
+            CowrieError::InvalidTag(t) => write!(f, "invalid tag: 0x{:02x}", t),
+            CowrieError::InvalidData(msg) => write!(f, "invalid data: {}", msg),
+            CowrieError::Truncated => write!(f, "truncated data"),
+            CowrieError::InvalidUtf8 => write!(f, "invalid UTF-8"),
+            CowrieError::Io(e) => write!(f, "I/O error: {}", e),
+            CowrieError::TooDeep => write!(f, "nesting too deep"),
+            CowrieError::TooLarge => write!(f, "data too large"),
         }
     }
 }
 
-impl std::error::Error for SjsonError {}
+impl std::error::Error for CowrieError {}
 
-impl From<std::io::Error> for SjsonError {
+impl From<std::io::Error> for CowrieError {
     fn from(e: std::io::Error) -> Self {
-        SjsonError::Io(e)
+        CowrieError::Io(e)
     }
 }
 
@@ -67,7 +67,7 @@ pub enum DType {
 }
 
 impl TryFrom<u8> for DType {
-    type Error = SjsonError;
+    type Error = CowrieError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -89,7 +89,7 @@ impl TryFrom<u8> for DType {
             0x12 => Ok(DType::QINT3),
             0x13 => Ok(DType::Ternary),
             0x14 => Ok(DType::Binary),
-            _ => Err(SjsonError::InvalidTag(value)),
+            _ => Err(CowrieError::InvalidTag(value)),
         }
     }
 }
@@ -417,7 +417,7 @@ pub struct GraphShardData {
     pub metadata: BTreeMap<String, Value>,
 }
 
-/// SJSON Value type.
+/// Cowrie Value type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,

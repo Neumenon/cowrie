@@ -1,8 +1,8 @@
-// Package gen1 implements GEN-1 SJSON: a compact binary JSON format
+// Package gen1 implements GEN-1 Cowrie: a compact binary JSON format
 // with proto-tensor support for numeric arrays.
 //
 // GEN-1 is the "lightweight" codec that provides significant size savings
-// without the full complexity of SJSON v2. It's perfect for:
+// without the full complexity of Cowrie v2. It's perfect for:
 //   - JSON APIs that want binary efficiency
 //   - ML data with float arrays (embeddings, features)
 //   - Structured logging with numeric payloads
@@ -28,6 +28,6 @@
 //	result, err := gen1.Decode(data)
 //
 //	// JSON round-trip
-//	sjsonBytes, _ := gen1.EncodeJSON(jsonBytes)
-//	jsonBytes, _ := gen1.DecodeJSON(sjsonBytes)
+//	cowrieBytes, _ := gen1.EncodeJSON(jsonBytes)
+//	jsonBytes, _ := gen1.DecodeJSON(cowrieBytes)
 package gen1

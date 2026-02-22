@@ -1,6 +1,6 @@
 // Package intern provides string interning for memory-efficient decoding.
 //
-// When decoding JSON/SJSON data with repetitive keys (common in ML configs,
+// When decoding JSON/Cowrie data with repetitive keys (common in ML configs,
 // API responses), string interning can significantly reduce memory allocation
 // by deduplicating identical strings.
 //

@@ -9,29 +9,29 @@ import (
 
 // Errors
 var (
-	ErrInvalidMagic     = errors.New("sjson: invalid magic bytes")
-	ErrInvalidVersion   = errors.New("sjson: unsupported version")
-	ErrUnexpectedEOF    = errors.New("sjson: unexpected end of data")
-	ErrInvalidTag       = errors.New("sjson: invalid type tag")
-	ErrInvalidFieldID   = errors.New("sjson: invalid field ID")
-	ErrInvalidDType     = errors.New("sjson: invalid tensor dtype")
-	ErrInvalidImgFormat = errors.New("sjson: invalid image format")
-	ErrInvalidAudioEnc  = errors.New("sjson: invalid audio encoding")
-	ErrInvalidIDWidth   = errors.New("sjson: invalid ID width")
-	ErrInvalidDeltaOp   = errors.New("sjson: invalid delta opcode")
+	ErrInvalidMagic     = errors.New("cowrie: invalid magic bytes")
+	ErrInvalidVersion   = errors.New("cowrie: unsupported version")
+	ErrUnexpectedEOF    = errors.New("cowrie: unexpected end of data")
+	ErrInvalidTag       = errors.New("cowrie: invalid type tag")
+	ErrInvalidFieldID   = errors.New("cowrie: invalid field ID")
+	ErrInvalidDType     = errors.New("cowrie: invalid tensor dtype")
+	ErrInvalidImgFormat = errors.New("cowrie: invalid image format")
+	ErrInvalidAudioEnc  = errors.New("cowrie: invalid audio encoding")
+	ErrInvalidIDWidth   = errors.New("cowrie: invalid ID width")
+	ErrInvalidDeltaOp   = errors.New("cowrie: invalid delta opcode")
 
 	// Security limit errors
-	ErrMalformedLength = errors.New("sjson: malformed length exceeds remaining data")
-	ErrDepthExceeded   = errors.New("sjson: maximum nesting depth exceeded")
-	ErrArrayTooLarge   = errors.New("sjson: array exceeds maximum length")
-	ErrObjectTooLarge  = errors.New("sjson: object exceeds maximum field count")
-	ErrStringTooLarge  = errors.New("sjson: string exceeds maximum length")
-	ErrBytesTooLarge   = errors.New("sjson: bytes exceeds maximum length")
-	ErrExtTooLarge     = errors.New("sjson: extension payload exceeds maximum length")
-	ErrUnknownExt      = errors.New("sjson: unknown extension type (strict mode)")
-	ErrInvalidVarint   = errors.New("sjson: invalid or overflow varint encoding")
-	ErrDictTooLarge    = errors.New("sjson: dictionary exceeds maximum size")
-	ErrTooManyHints    = errors.New("sjson: too many column hints")
+	ErrMalformedLength = errors.New("cowrie: malformed length exceeds remaining data")
+	ErrDepthExceeded   = errors.New("cowrie: maximum nesting depth exceeded")
+	ErrArrayTooLarge   = errors.New("cowrie: array exceeds maximum length")
+	ErrObjectTooLarge  = errors.New("cowrie: object exceeds maximum field count")
+	ErrStringTooLarge  = errors.New("cowrie: string exceeds maximum length")
+	ErrBytesTooLarge   = errors.New("cowrie: bytes exceeds maximum length")
+	ErrExtTooLarge     = errors.New("cowrie: extension payload exceeds maximum length")
+	ErrUnknownExt      = errors.New("cowrie: unknown extension type (strict mode)")
+	ErrInvalidVarint   = errors.New("cowrie: invalid or overflow varint encoding")
+	ErrDictTooLarge    = errors.New("cowrie: dictionary exceeds maximum size")
+	ErrTooManyHints    = errors.New("cowrie: too many column hints")
 )
 
 // Default security limits (can be overridden via DecodeOptions)
@@ -107,7 +107,7 @@ type TagError struct {
 }
 
 func (e *TagError) Error() string {
-	return "sjson: unknown type tag 0x" + hexByte(e.Tag)
+	return "cowrie: unknown type tag 0x" + hexByte(e.Tag)
 }
 
 // hexByte converts a byte to a 2-char hex string.
@@ -150,13 +150,13 @@ func isValidDeltaOpCode(op DeltaOpCode) bool {
 	return op >= DeltaOpSetField && op <= DeltaOpAppendArray
 }
 
-// Decode decodes SJSON v2 binary data into a Value.
+// Decode decodes Cowrie v2 binary data into a Value.
 // Uses default security limits to prevent memory exhaustion attacks.
 func Decode(data []byte) (*Value, error) {
 	return DecodeWithOptions(data, DefaultDecodeOptions())
 }
 
-// DecodeWithOptions decodes SJSON v2 with custom security limits.
+// DecodeWithOptions decodes Cowrie v2 with custom security limits.
 func DecodeWithOptions(data []byte, opts DecodeOptions) (*Value, error) {
 	// Apply defaults for zero values
 	if opts.MaxDepth == 0 {
@@ -206,7 +206,7 @@ func DecodeFrom(rd io.Reader) (*Value, error) {
 const DefaultMaxInputSize = 100 * 1024 * 1024
 
 // ErrInputTooLarge is returned when input exceeds the size limit.
-var ErrInputTooLarge = errors.New("sjson: input exceeds size limit")
+var ErrInputTooLarge = errors.New("cowrie: input exceeds size limit")
 
 // DecodeFromLimited decodes from an io.Reader with a size limit.
 // Returns ErrInputTooLarge if the input exceeds maxBytes.
@@ -214,7 +214,7 @@ var ErrInputTooLarge = errors.New("sjson: input exceeds size limit")
 //
 // Example:
 //
-//	val, err := sjson.DecodeFromLimited(resp.Body, 10*1024*1024) // 10MB limit
+//	val, err := cowrie.DecodeFromLimited(resp.Body, 10*1024*1024) // 10MB limit
 func DecodeFromLimited(rd io.Reader, maxBytes int64) (*Value, error) {
 	// Read up to maxBytes+1 to detect overflow
 	lr := io.LimitReader(rd, maxBytes+1)
@@ -425,7 +425,7 @@ func skipHints(r *reader) error {
 	return nil
 }
 
-// decode reads the complete SJSON v2 format.
+// decode reads the complete Cowrie v2 format.
 func decode(r *reader) (*Value, error) {
 	// Read header
 	magic0, err := r.readByte()

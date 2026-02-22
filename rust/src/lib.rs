@@ -1,15 +1,15 @@
-//! SJSON - Structured JSON binary codec.
+//! Cowrie - Structured JSON binary codec.
 //!
 //! This crate provides two codecs for binary JSON serialization:
 //!
 //! - **Gen1**: Lightweight codec with proto-tensor support (11 core types + graph types)
-//! - **Gen2**: Full SJSON v2 with ML extensions (18+ types, dictionary coding, compression)
+//! - **Gen2**: Full Cowrie v2 with ML extensions (18+ types, dictionary coding, compression)
 //!
 //! # Quick Start
 //!
 //! ## Gen1 (Lightweight)
 //! ```
-//! use sjson::gen1::{encode, decode, Value};
+//! use cowrie_codec::gen1::{encode, decode, Value};
 //!
 //! let val = Value::Object(vec![
 //!     ("name".to_string(), Value::String("Alice".to_string())),
@@ -22,7 +22,7 @@
 //!
 //! ## Gen2 (Full)
 //! ```
-//! use sjson::gen2::{encode, decode, Value, DType, TensorData};
+//! use cowrie_codec::gen2::{encode, decode, Value, DType, TensorData};
 //!
 //! let val = Value::object(vec![
 //!     ("name", Value::String("Alice".into())),
@@ -64,10 +64,10 @@
 pub mod gen1;
 pub mod gen2;
 
-/// SJSON magic bytes: "SJ" (used by Gen2)
+/// Cowrie magic bytes: "SJ" (used by Gen2)
 pub const MAGIC: &[u8; 2] = b"SJ";
 
-/// SJSON version 2 (Gen2)
+/// Cowrie version 2 (Gen2)
 pub const VERSION: u8 = 0x02;
 
 #[cfg(test)]

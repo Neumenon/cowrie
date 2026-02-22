@@ -1,8 +1,8 @@
 /*
- * SJSON Gen1 Tests
+ * COWRIE Gen1 Tests
  */
 
-#include "../include/sjson_gen1.h"
+#include "../include/cowrie_gen1.h"
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
@@ -22,54 +22,54 @@ static int tests_passed = 0;
     static void test_##name(void)
 
 TEST(null) {
-    sjson_g1_value_t *v = sjson_g1_null();
+    cowrie_g1_value_t *v = cowrie_g1_null();
     assert(v != NULL);
-    assert(v->type == SJSON_G1_TYPE_NULL);
+    assert(v->type == COWRIE_G1_TYPE_NULL);
 
-    sjson_g1_buf_t buf;
-    int err = sjson_g1_encode(v, &buf);
-    assert(err == SJSON_G1_OK);
+    cowrie_g1_buf_t buf;
+    int err = cowrie_g1_encode(v, &buf);
+    assert(err == COWRIE_G1_OK);
     assert(buf.len == 1);
-    assert(buf.data[0] == SJSON_G1_TAG_NULL);
+    assert(buf.data[0] == COWRIE_G1_TAG_NULL);
 
-    sjson_g1_value_t *decoded;
-    err = sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(err == SJSON_G1_OK);
-    assert(decoded->type == SJSON_G1_TYPE_NULL);
+    cowrie_g1_value_t *decoded;
+    err = cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(err == COWRIE_G1_OK);
+    assert(decoded->type == COWRIE_G1_TYPE_NULL);
 
-    sjson_g1_value_free(v);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(v);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 TEST(bool) {
-    sjson_g1_value_t *v_true = sjson_g1_bool(true);
-    sjson_g1_value_t *v_false = sjson_g1_bool(false);
+    cowrie_g1_value_t *v_true = cowrie_g1_bool(true);
+    cowrie_g1_value_t *v_false = cowrie_g1_bool(false);
 
-    assert(v_true != NULL && v_true->type == SJSON_G1_TYPE_BOOL && v_true->bool_val == true);
-    assert(v_false != NULL && v_false->type == SJSON_G1_TYPE_BOOL && v_false->bool_val == false);
+    assert(v_true != NULL && v_true->type == COWRIE_G1_TYPE_BOOL && v_true->bool_val == true);
+    assert(v_false != NULL && v_false->type == COWRIE_G1_TYPE_BOOL && v_false->bool_val == false);
 
-    sjson_g1_buf_t buf;
+    cowrie_g1_buf_t buf;
 
-    sjson_g1_encode(v_true, &buf);
-    assert(buf.len == 1 && buf.data[0] == SJSON_G1_TAG_TRUE);
+    cowrie_g1_encode(v_true, &buf);
+    assert(buf.len == 1 && buf.data[0] == COWRIE_G1_TAG_TRUE);
 
-    sjson_g1_value_t *decoded;
-    sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(decoded->type == SJSON_G1_TYPE_BOOL && decoded->bool_val == true);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_t *decoded;
+    cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(decoded->type == COWRIE_G1_TYPE_BOOL && decoded->bool_val == true);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 
-    sjson_g1_encode(v_false, &buf);
-    assert(buf.len == 1 && buf.data[0] == SJSON_G1_TAG_FALSE);
+    cowrie_g1_encode(v_false, &buf);
+    assert(buf.len == 1 && buf.data[0] == COWRIE_G1_TAG_FALSE);
 
-    sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(decoded->type == SJSON_G1_TYPE_BOOL && decoded->bool_val == false);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(decoded->type == COWRIE_G1_TYPE_BOOL && decoded->bool_val == false);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 
-    sjson_g1_value_free(v_true);
-    sjson_g1_value_free(v_false);
+    cowrie_g1_value_free(v_true);
+    cowrie_g1_value_free(v_false);
 }
 
 TEST(int64) {
@@ -77,155 +77,155 @@ TEST(int64) {
     int num_values = sizeof(test_values) / sizeof(test_values[0]);
 
     for (int i = 0; i < num_values; i++) {
-        sjson_g1_value_t *v = sjson_g1_int64(test_values[i]);
+        cowrie_g1_value_t *v = cowrie_g1_int64(test_values[i]);
         assert(v != NULL);
-        assert(v->type == SJSON_G1_TYPE_INT64);
+        assert(v->type == COWRIE_G1_TYPE_INT64);
         assert(v->int64_val == test_values[i]);
 
-        sjson_g1_buf_t buf;
-        sjson_g1_encode(v, &buf);
+        cowrie_g1_buf_t buf;
+        cowrie_g1_encode(v, &buf);
 
-        sjson_g1_value_t *decoded;
-        sjson_g1_decode(buf.data, buf.len, &decoded);
-        assert(decoded->type == SJSON_G1_TYPE_INT64);
+        cowrie_g1_value_t *decoded;
+        cowrie_g1_decode(buf.data, buf.len, &decoded);
+        assert(decoded->type == COWRIE_G1_TYPE_INT64);
         assert(decoded->int64_val == test_values[i]);
 
-        sjson_g1_value_free(v);
-        sjson_g1_value_free(decoded);
-        sjson_g1_buf_free(&buf);
+        cowrie_g1_value_free(v);
+        cowrie_g1_value_free(decoded);
+        cowrie_g1_buf_free(&buf);
     }
 }
 
 TEST(string) {
     const char *test_str = "Hello, World!";
-    sjson_g1_value_t *v = sjson_g1_string(test_str, strlen(test_str));
+    cowrie_g1_value_t *v = cowrie_g1_string(test_str, strlen(test_str));
     assert(v != NULL);
-    assert(v->type == SJSON_G1_TYPE_STRING);
+    assert(v->type == COWRIE_G1_TYPE_STRING);
     assert(strcmp(v->string_val.data, test_str) == 0);
 
-    sjson_g1_buf_t buf;
-    sjson_g1_encode(v, &buf);
+    cowrie_g1_buf_t buf;
+    cowrie_g1_encode(v, &buf);
 
-    sjson_g1_value_t *decoded;
-    sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(decoded->type == SJSON_G1_TYPE_STRING);
+    cowrie_g1_value_t *decoded;
+    cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(decoded->type == COWRIE_G1_TYPE_STRING);
     assert(strcmp(decoded->string_val.data, test_str) == 0);
 
-    sjson_g1_value_free(v);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(v);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 TEST(object) {
-    sjson_g1_value_t *obj = sjson_g1_object(2);
-    sjson_g1_object_set(obj, "name", sjson_g1_string("test", 4));
-    sjson_g1_object_set(obj, "count", sjson_g1_int64(42));
+    cowrie_g1_value_t *obj = cowrie_g1_object(2);
+    cowrie_g1_object_set(obj, "name", cowrie_g1_string("test", 4));
+    cowrie_g1_object_set(obj, "count", cowrie_g1_int64(42));
 
-    assert(obj->type == SJSON_G1_TYPE_OBJECT);
+    assert(obj->type == COWRIE_G1_TYPE_OBJECT);
     assert(obj->object_val.len == 2);
 
-    sjson_g1_buf_t buf;
-    sjson_g1_encode(obj, &buf);
+    cowrie_g1_buf_t buf;
+    cowrie_g1_encode(obj, &buf);
 
-    sjson_g1_value_t *decoded;
-    sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(decoded->type == SJSON_G1_TYPE_OBJECT);
+    cowrie_g1_value_t *decoded;
+    cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(decoded->type == COWRIE_G1_TYPE_OBJECT);
     assert(decoded->object_val.len == 2);
 
-    sjson_g1_value_free(obj);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(obj);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 TEST(float64_array) {
     double data[] = {1.0, 2.5, 3.14159, -42.0};
-    sjson_g1_value_t *v = sjson_g1_float64_array(data, 4);
+    cowrie_g1_value_t *v = cowrie_g1_float64_array(data, 4);
     assert(v != NULL);
-    assert(v->type == SJSON_G1_TYPE_FLOAT64_ARRAY);
+    assert(v->type == COWRIE_G1_TYPE_FLOAT64_ARRAY);
     assert(v->float64_array_val.len == 4);
 
-    sjson_g1_buf_t buf;
-    sjson_g1_encode(v, &buf);
+    cowrie_g1_buf_t buf;
+    cowrie_g1_encode(v, &buf);
 
-    sjson_g1_value_t *decoded;
-    sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(decoded->type == SJSON_G1_TYPE_FLOAT64_ARRAY);
+    cowrie_g1_value_t *decoded;
+    cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(decoded->type == COWRIE_G1_TYPE_FLOAT64_ARRAY);
     assert(decoded->float64_array_val.len == 4);
 
     for (int i = 0; i < 4; i++) {
         assert(decoded->float64_array_val.data[i] == data[i]);
     }
 
-    sjson_g1_value_free(v);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(v);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 TEST(empty_array) {
-    sjson_g1_value_t *arr = sjson_g1_array(0);
+    cowrie_g1_value_t *arr = cowrie_g1_array(0);
     assert(arr != NULL);
-    assert(arr->type == SJSON_G1_TYPE_ARRAY);
+    assert(arr->type == COWRIE_G1_TYPE_ARRAY);
     assert(arr->array_val.len == 0);
 
-    sjson_g1_buf_t buf;
-    int err = sjson_g1_encode(arr, &buf);
-    assert(err == SJSON_G1_OK);
+    cowrie_g1_buf_t buf;
+    int err = cowrie_g1_encode(arr, &buf);
+    assert(err == COWRIE_G1_OK);
 
-    sjson_g1_value_t *decoded;
-    err = sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(err == SJSON_G1_OK);
-    assert(decoded->type == SJSON_G1_TYPE_ARRAY);
+    cowrie_g1_value_t *decoded;
+    err = cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(err == COWRIE_G1_OK);
+    assert(decoded->type == COWRIE_G1_TYPE_ARRAY);
     assert(decoded->array_val.len == 0);
 
-    sjson_g1_value_free(arr);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(arr);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 TEST(empty_object) {
-    sjson_g1_value_t *obj = sjson_g1_object(0);
+    cowrie_g1_value_t *obj = cowrie_g1_object(0);
     assert(obj != NULL);
-    assert(obj->type == SJSON_G1_TYPE_OBJECT);
+    assert(obj->type == COWRIE_G1_TYPE_OBJECT);
     assert(obj->object_val.len == 0);
 
-    sjson_g1_buf_t buf;
-    int err = sjson_g1_encode(obj, &buf);
-    assert(err == SJSON_G1_OK);
+    cowrie_g1_buf_t buf;
+    int err = cowrie_g1_encode(obj, &buf);
+    assert(err == COWRIE_G1_OK);
 
-    sjson_g1_value_t *decoded;
-    err = sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(err == SJSON_G1_OK);
-    assert(decoded->type == SJSON_G1_TYPE_OBJECT);
+    cowrie_g1_value_t *decoded;
+    err = cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(err == COWRIE_G1_OK);
+    assert(decoded->type == COWRIE_G1_TYPE_OBJECT);
     assert(decoded->object_val.len == 0);
 
-    sjson_g1_value_free(obj);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(obj);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 TEST(empty_string) {
-    sjson_g1_value_t *v = sjson_g1_string("", 0);
+    cowrie_g1_value_t *v = cowrie_g1_string("", 0);
     assert(v != NULL);
-    assert(v->type == SJSON_G1_TYPE_STRING);
+    assert(v->type == COWRIE_G1_TYPE_STRING);
     assert(v->string_val.len == 0);
 
-    sjson_g1_buf_t buf;
-    int err = sjson_g1_encode(v, &buf);
-    assert(err == SJSON_G1_OK);
+    cowrie_g1_buf_t buf;
+    int err = cowrie_g1_encode(v, &buf);
+    assert(err == COWRIE_G1_OK);
 
-    sjson_g1_value_t *decoded;
-    err = sjson_g1_decode(buf.data, buf.len, &decoded);
-    assert(err == SJSON_G1_OK);
-    assert(decoded->type == SJSON_G1_TYPE_STRING);
+    cowrie_g1_value_t *decoded;
+    err = cowrie_g1_decode(buf.data, buf.len, &decoded);
+    assert(err == COWRIE_G1_OK);
+    assert(decoded->type == COWRIE_G1_TYPE_STRING);
     assert(decoded->string_val.len == 0);
 
-    sjson_g1_value_free(v);
-    sjson_g1_value_free(decoded);
-    sjson_g1_buf_free(&buf);
+    cowrie_g1_value_free(v);
+    cowrie_g1_value_free(decoded);
+    cowrie_g1_buf_free(&buf);
 }
 
 int main(void) {
-    printf("Running SJSON Gen1 tests...\n");
+    printf("Running COWRIE Gen1 tests...\n");
 
     run_test_null();
     run_test_bool();

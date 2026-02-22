@@ -1,9 +1,9 @@
-# SJSON - Structured JSON Binary Codec
+# Cowrie - Structured JSON Binary Codec
 
 A multi-language binary JSON codec with two variants:
 
 - **Gen1**: Lightweight codec with proto-tensor support (11 core types + graph types)
-- **Gen2**: Full SJSON v2 with ML extensions (18+ types, dictionary coding, compression)
+- **Gen2**: Full Cowrie v2 with ML extensions (18+ types, dictionary coding, compression)
 
 ## Features
 
@@ -32,8 +32,8 @@ A multi-language binary JSON codec with two variants:
 
 ```go
 import (
-    "github.com/phenomenon0/sjson-final/go/gen1"
-    "github.com/phenomenon0/sjson-final/go/gen2"
+    "github.com/phenomenon0/cowrie-final/go/gen1"
+    "github.com/phenomenon0/cowrie-final/go/gen2"
 )
 
 // Gen1
@@ -53,7 +53,7 @@ data, _ = gen2.Encode(val)
 ### Rust
 
 ```rust
-use sjson::{gen1, gen2};
+use cowrie::{gen1, gen2};
 
 // Gen1
 let val = gen1::Value::Object(vec![
@@ -71,7 +71,7 @@ let encoded = gen2::encode(&val)?;
 ### Python
 
 ```python
-from sjson import gen1, gen2
+from cowrie import gen1, gen2
 
 # Gen1
 data = gen1.encode({"name": "Alice", "scores": [1.0, 2.0, 3.0]})
@@ -85,23 +85,23 @@ data = gen2.encode(val)
 ### C
 
 ```c
-#include "sjson_gen1.h"
+#include "cowrie_gen1.h"
 
-sjson_g1_value_t *obj = sjson_g1_object(2);
-sjson_g1_object_set(obj, "name", sjson_g1_string("Alice", 5));
-sjson_g1_object_set(obj, "count", sjson_g1_int64(42));
+cowrie_g1_value_t *obj = cowrie_g1_object(2);
+cowrie_g1_object_set(obj, "name", cowrie_g1_string("Alice", 5));
+cowrie_g1_object_set(obj, "count", cowrie_g1_int64(42));
 
-sjson_g1_buf_t buf;
-sjson_g1_encode(obj, &buf);
+cowrie_g1_buf_t buf;
+cowrie_g1_encode(obj, &buf);
 
-sjson_g1_value_t *decoded;
-sjson_g1_decode(buf.data, buf.len, &decoded);
+cowrie_g1_value_t *decoded;
+cowrie_g1_decode(buf.data, buf.len, &decoded);
 ```
 
 ### TypeScript
 
 ```typescript
-import { gen1, gen2 } from 'sjson';
+import { gen1, gen2 } from 'cowrie';
 
 // Gen1
 const data = gen1.encode({ name: 'Alice', scores: [1.0, 2.0, 3.0] });
@@ -165,16 +165,16 @@ A command-line tool is available for encoding/decoding:
 
 ```bash
 cd go
-go build -o sjson ./cmd/sjson
+go build -o cowrie ./cmd/cowrie
 
-# Encode JSON to SJSON
-echo '{"name":"Alice","age":30}' | ./sjson encode --gen2 > data.sjson
+# Encode JSON to Cowrie
+echo '{"name":"Alice","age":30}' | ./cowrie encode --gen2 > data.cowrie
 
-# Decode SJSON to JSON
-./sjson decode < data.sjson
+# Decode Cowrie to JSON
+./cowrie decode < data.cowrie
 
-# Get info about SJSON file
-./sjson info < data.sjson
+# Get info about Cowrie file
+./cowrie info < data.cowrie
 ```
 
 ## Performance
@@ -225,7 +225,7 @@ shard := gen2.GraphShard(nodes, edges, metadata)
 
 ```python
 # Python - Gen2 Graph Types
-from sjson.gen2 import Value, NodeData, EdgeData
+from cowrie.gen2 import Value, NodeData, EdgeData
 
 node = Value.node("person_42", ["Person"], {"name": Value.string("Alice")})
 edge = Value.edge("person_42", "company_1", "WORKS_AT", {})
@@ -234,7 +234,7 @@ shard = Value.graph_shard(nodes, edges, metadata)
 
 ## Streaming Support
 
-SJSON supports streaming for large payloads:
+Cowrie supports streaming for large payloads:
 
 ### Gen1: Record-by-Record Streaming
 
@@ -266,7 +266,7 @@ meta := frame.Metadata()
 
 ```python
 # Python - Master stream
-from sjson.gen2 import write_master_frame, read_master_frame
+from cowrie.gen2 import write_master_frame, read_master_frame
 
 write_master_frame(writer, value, metadata={"version": 1})
 frame = read_master_frame(reader)

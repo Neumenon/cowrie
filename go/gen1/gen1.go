@@ -1,4 +1,4 @@
-// Package gen1 implements GEN-1 SJSON: a compact binary JSON format
+// Package gen1 implements GEN-1 Cowrie: a compact binary JSON format
 // with proto-tensor support for numeric arrays.
 //
 // This is the "legacy" codec that provides size savings without full
@@ -86,12 +86,12 @@ var globalDecodeOptions = DefaultDecodeOptions()
 
 // Security errors
 var (
-	ErrMaxDepthExceeded  = errors.New("sjson: maximum nesting depth exceeded")
-	ErrMaxArrayLen       = errors.New("sjson: array too large")
-	ErrMaxObjectLen      = errors.New("sjson: object has too many fields")
-	ErrMaxStringLen      = errors.New("sjson: string too long")
-	ErrMaxBytesLen       = errors.New("sjson: bytes too long")
-	ErrIntegerOverflow   = errors.New("sjson: integer overflow in size calculation")
+	ErrMaxDepthExceeded  = errors.New("cowrie: maximum nesting depth exceeded")
+	ErrMaxArrayLen       = errors.New("cowrie: array too large")
+	ErrMaxObjectLen      = errors.New("cowrie: object has too many fields")
+	ErrMaxStringLen      = errors.New("cowrie: string too long")
+	ErrMaxBytesLen       = errors.New("cowrie: bytes too long")
+	ErrIntegerOverflow   = errors.New("cowrie: integer overflow in size calculation")
 )
 
 // Buffer pool for encoding - reduces allocations in hot paths
@@ -323,7 +323,7 @@ func SetDefaultEncodeOptions(opts EncodeOptions) {
 	globalEncodeOptions = opts
 }
 
-// Encode encodes arbitrary Go data into GEN-1 SJSON binary format.
+// Encode encodes arbitrary Go data into GEN-1 Cowrie binary format.
 func Encode(v any) ([]byte, error) {
 	return EncodeWithOptions(v, globalEncodeOptions)
 }
@@ -357,7 +357,7 @@ func EncodeAppendWithOptions(buf []byte, v any, opts EncodeOptions) ([]byte, err
 	return appendValueWithOpts(buf, v, opts)
 }
 
-// Decode decodes GEN-1 SJSON into a Go value compatible with json.Marshal.
+// Decode decodes GEN-1 Cowrie into a Go value compatible with json.Marshal.
 func Decode(data []byte) (any, error) {
 	return DecodeWithOptions(data, globalDecodeOptions)
 }
@@ -391,7 +391,7 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (any, error) {
 	return v, err
 }
 
-// EncodeJSON encodes raw JSON bytes into GEN-1 SJSON.
+// EncodeJSON encodes raw JSON bytes into GEN-1 Cowrie.
 func EncodeJSON(raw []byte) ([]byte, error) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -400,7 +400,7 @@ func EncodeJSON(raw []byte) ([]byte, error) {
 	return Encode(v)
 }
 
-// DecodeJSON decodes GEN-1 SJSON back to JSON bytes.
+// DecodeJSON decodes GEN-1 Cowrie back to JSON bytes.
 func DecodeJSON(data []byte) ([]byte, error) {
 	v, err := Decode(data)
 	if err != nil {

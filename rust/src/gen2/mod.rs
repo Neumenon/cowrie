@@ -1,6 +1,6 @@
-//! Gen2: Full SJSON v2 codec with ML extensions.
+//! Gen2: Full Cowrie v2 codec with ML extensions.
 //!
-//! Gen2 provides the complete SJSON v2 implementation with:
+//! Gen2 provides the complete Cowrie v2 implementation with:
 //! - Dictionary-coded object keys
 //! - 18+ types including ML extensions (Tensor, Image, Audio, etc.)
 //! - Schema fingerprinting
@@ -17,7 +17,7 @@ pub mod compress;
 pub mod json;
 
 // Re-export main types
-pub use types::{Value, DType, TensorData, SjsonError};
+pub use types::{Value, DType, TensorData, CowrieError};
 pub use encode::{encode, encode_with_options, EncodeOptions};
 pub use decode::decode;
 pub use schema::{schema_fingerprint32, schema_fingerprint64, schema_equals};

@@ -1,24 +1,24 @@
-// Command sjson provides a CLI tool for encoding/decoding SJSON data.
+// Command cowrie provides a CLI tool for encoding/decoding Cowrie data.
 //
 // Usage:
 //
-//	sjson encode [--gen1|--gen2] [--compress=none|gzip|zstd] < input.json > output.sjson
-//	sjson decode [--gen1|--gen2] < input.sjson > output.json
-//	sjson info < input.sjson
+//	cowrie encode [--gen1|--gen2] [--compress=none|gzip|zstd] < input.json > output.cowrie
+//	cowrie decode [--gen1|--gen2] < input.cowrie > output.json
+//	cowrie info < input.cowrie
 //
 // Examples:
 //
-//	# Encode JSON to SJSON Gen2
-//	echo '{"name":"Alice","age":30}' | sjson encode --gen2 > data.sjson
+//	# Encode JSON to Cowrie Gen2
+//	echo '{"name":"Alice","age":30}' | cowrie encode --gen2 > data.cowrie
 //
-//	# Decode SJSON to JSON
-//	sjson decode < data.sjson
+//	# Decode Cowrie to JSON
+//	cowrie decode < data.cowrie
 //
 //	# Encode with compression
-//	cat large.json | sjson encode --gen2 --compress=zstd > data.sjson.zst
+//	cat large.json | cowrie encode --gen2 --compress=zstd > data.cowrie.zst
 //
-//	# Get info about SJSON file
-//	sjson info < data.sjson
+//	# Get info about Cowrie file
+//	cowrie info < data.cowrie
 package main
 
 import (
@@ -28,8 +28,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/phenomenon0/sjson-final/go/gen1"
-	"github.com/phenomenon0/sjson-final/go/gen2"
+	"github.com/Neumenon/cowrie/gen1"
+	"github.com/Neumenon/cowrie/gen2"
 )
 
 func main() {
@@ -55,28 +55,28 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Println(`sjson - Binary JSON codec CLI
+	fmt.Println(`cowrie - Binary JSON codec CLI
 
 Usage:
-  sjson encode [--gen1|--gen2] [--compress=none|gzip|zstd] < input.json > output.sjson
-  sjson decode [--gen1|--gen2] < input.sjson > output.json
-  sjson info < input.sjson
+  cowrie encode [--gen1|--gen2] [--compress=none|gzip|zstd] < input.json > output.cowrie
+  cowrie decode [--gen1|--gen2] < input.cowrie > output.json
+  cowrie info < input.cowrie
 
 Commands:
-  encode    Encode JSON to SJSON binary format
-  decode    Decode SJSON binary to JSON
-  info      Display information about an SJSON file
+  encode    Encode JSON to Cowrie binary format
+  decode    Decode Cowrie binary to JSON
+  info      Display information about an Cowrie file
 
 Flags:
   --gen1        Use Gen1 codec (lightweight, stdlib only)
-  --gen2        Use Gen2 codec (full SJSON v2 with ML extensions) [default]
+  --gen2        Use Gen2 codec (full Cowrie v2 with ML extensions) [default]
   --compress    Compression: none, gzip, zstd (Gen2 only) [default: none]
   --pretty      Pretty-print JSON output (decode only)
 
 Examples:
-  echo '{"name":"Alice"}' | sjson encode --gen2 > data.sjson
-  sjson decode < data.sjson
-  cat data.json | sjson encode --gen2 --compress=zstd | sjson decode`)
+  echo '{"name":"Alice"}' | cowrie encode --gen2 > data.cowrie
+  cowrie decode < data.cowrie
+  cat data.json | cowrie encode --gen2 --compress=zstd | cowrie decode`)
 }
 
 func encodeCmd(args []string) {
@@ -215,7 +215,7 @@ func infoCmd(args []string) {
 		version := input[2]
 		flags := input[3]
 
-		fmt.Printf("Format: SJSON Gen2 (v%d)\n", version)
+		fmt.Printf("Format: Cowrie Gen2 (v%d)\n", version)
 		fmt.Printf("Size: %d bytes\n", len(input))
 
 		if flags&0x01 != 0 {
@@ -241,7 +241,7 @@ func infoCmd(args []string) {
 		}
 	} else if input[0] == 0x00 || input[0] <= 0x15 {
 		// Likely Gen1 format (starts with type tag)
-		fmt.Println("Format: SJSON Gen1 (likely)")
+		fmt.Println("Format: Cowrie Gen1 (likely)")
 		fmt.Printf("Size: %d bytes\n", len(input))
 
 		// Try to decode

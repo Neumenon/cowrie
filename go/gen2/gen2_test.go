@@ -24,7 +24,7 @@ func TestPrimitives(t *testing.T) {
 		{"int64 min", Int64(math.MinInt64), func(v *Value) bool { return v.Type() == TypeInt64 && v.Int64() == math.MinInt64 }},
 		{"uint64", Uint64(math.MaxUint64), func(v *Value) bool { return v.Type() == TypeUint64 && v.Uint64() == math.MaxUint64 }},
 		{"float64", Float64(3.14159265359), func(v *Value) bool { return v.Type() == TypeFloat64 && v.Float64() == 3.14159265359 }},
-		{"string", String("Hello, SJSON!"), func(v *Value) bool { return v.Type() == TypeString && v.String() == "Hello, SJSON!" }},
+		{"string", String("Hello, Cowrie!"), func(v *Value) bool { return v.Type() == TypeString && v.String() == "Hello, Cowrie!" }},
 		{"string empty", String(""), func(v *Value) bool { return v.Type() == TypeString && v.String() == "" }},
 	}
 
@@ -340,7 +340,7 @@ func TestJSONBridge(t *testing.T) {
 		"id": "550e8400-e29b-41d4-a716-446655440000"
 	}`
 
-	// Parse JSON to SJSON with enrichment (type inference)
+	// Parse JSON to Cowrie with enrichment (type inference)
 	v, err := FromJSONEnriched([]byte(jsonData))
 	if err != nil {
 		t.Fatalf("FromJSONEnriched failed: %v", err)
@@ -390,15 +390,15 @@ func TestSizeComparison(t *testing.T) {
 		)},
 	)
 
-	// SJSON size
-	sjsonData, _ := Encode(v)
+	// Cowrie size
+	cowrieData, _ := Encode(v)
 
 	// JSON equivalent
 	jsonData, _ := ToJSON(v)
 
-	t.Logf("SJSON size: %d bytes", len(sjsonData))
+	t.Logf("Cowrie size: %d bytes", len(cowrieData))
 	t.Logf("JSON size:  %d bytes", len(jsonData))
-	t.Logf("Savings:    %.1f%%", (1-float64(len(sjsonData))/float64(len(jsonData)))*100)
+	t.Logf("Savings:    %.1f%%", (1-float64(len(cowrieData))/float64(len(jsonData)))*100)
 }
 
 func BenchmarkEncode(b *testing.B) {

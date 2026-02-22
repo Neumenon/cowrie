@@ -15,7 +15,7 @@ var bufferPool = sync.Pool{
 	},
 }
 
-// Encode encodes a value to SJSON v2 binary format.
+// Encode encodes a value to Cowrie v2 binary format.
 func Encode(v *Value) ([]byte, error) {
 	buf := bufferPool.Get().(*buffer)
 	buf.data = buf.data[:0] // reset length, keep capacity
@@ -198,7 +198,7 @@ func collectKeysFromAnyValue(v any, d *dict) {
 	}
 }
 
-// encode writes the complete SJSON v2 format to the buffer.
+// encode writes the complete Cowrie v2 format to the buffer.
 func encode(buf *buffer, v *Value) error {
 	// Build dictionary
 	d := newDict()
@@ -472,7 +472,7 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		buf.write(v.unknownExtVal.Payload)
 
 	default:
-		return fmt.Errorf("sjson: unsupported type %v (%d)", v.typ, v.typ)
+		return fmt.Errorf("cowrie: unsupported type %v (%d)", v.typ, v.typ)
 	}
 
 	return nil
@@ -525,7 +525,7 @@ func encodeEdgeData(buf *buffer, edge *EdgeData, d *dict) error {
 	return nil
 }
 
-// encodeAny encodes a Go any value to SJSON.
+// encodeAny encodes a Go any value to Cowrie.
 // Supports basic types: nil, bool, int/int64, uint/uint64, float64, string, []byte,
 // []any, map[string]any, and *Value.
 func encodeAny(buf *buffer, v any, d *dict) error {
@@ -588,7 +588,7 @@ func encodeAny(buf *buffer, v any, d *dict) error {
 			return encodeValue(buf, val, d)
 		}
 	default:
-		return fmt.Errorf("sjson: unsupported property type %T", v)
+		return fmt.Errorf("cowrie: unsupported property type %T", v)
 	}
 	return nil
 }

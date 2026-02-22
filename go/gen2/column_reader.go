@@ -8,13 +8,13 @@ import (
 
 // Errors for column reader
 var (
-	ErrFieldNotFound    = errors.New("sjson: field not found")
-	ErrIncompatibleType = errors.New("sjson: field type incompatible with hint")
-	ErrNoHints          = errors.New("sjson: no column hints available")
-	ErrArrayRequired    = errors.New("sjson: root value must be an array for columnar access")
+	ErrFieldNotFound    = errors.New("cowrie: field not found")
+	ErrIncompatibleType = errors.New("cowrie: field type incompatible with hint")
+	ErrNoHints          = errors.New("cowrie: no column hints available")
+	ErrArrayRequired    = errors.New("cowrie: root value must be an array for columnar access")
 )
 
-// ColumnReader provides columnar access to SJSON data using hints.
+// ColumnReader provides columnar access to Cowrie data using hints.
 // It enables partial decoding of specific fields without fully decoding the data.
 type ColumnReader struct {
 	data   []byte
@@ -24,7 +24,7 @@ type ColumnReader struct {
 	offset int    // Position after header, hints, dict
 }
 
-// NewColumnReader creates a reader from SJSON data.
+// NewColumnReader creates a reader from Cowrie data.
 // Returns an error if the data has no column hints.
 func NewColumnReader(data []byte) (*ColumnReader, error) {
 	r := &reader{data: data}

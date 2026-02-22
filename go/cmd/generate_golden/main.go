@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/phenomenon0/sjson-final/go/gen2"
+	"github.com/phenomenon0/cowrie-final/go/gen2"
 )
 
 func main() {
@@ -16,28 +16,28 @@ func main() {
 		panic(err)
 	}
 
-	// Generate primitives.sjson
+	// Generate primitives.cowrie
 	generatePrimitives(outDir)
 
-	// Generate nested.sjson
+	// Generate nested.cowrie
 	generateNested(outDir)
 
-	// Generate empty.sjson
+	// Generate empty.cowrie
 	generateEmpty(outDir)
 
-	// Generate integers.sjson
+	// Generate integers.cowrie
 	generateIntegers(outDir)
 
-	// Generate floats.sjson
+	// Generate floats.cowrie
 	generateFloats(outDir)
 
-	// Generate mixed_array.sjson
+	// Generate mixed_array.cowrie
 	generateMixedArray(outDir)
 
-	// Generate deterministic.sjson
+	// Generate deterministic.cowrie
 	generateDeterministic(outDir)
 
-	// Generate schema1.sjson and schema2.sjson
+	// Generate schema1.cowrie and schema2.cowrie
 	generateSchemas(outDir)
 
 	fmt.Println("All golden files generated successfully!")
@@ -75,7 +75,7 @@ func generatePrimitives(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "primitives.sjson", data)
+	writeFile(outDir, "primitives.cowrie", data)
 }
 
 func generateNested(outDir string) {
@@ -94,7 +94,7 @@ func generateNested(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "nested.sjson", data)
+	writeFile(outDir, "nested.cowrie", data)
 }
 
 func generateEmpty(outDir string) {
@@ -108,7 +108,7 @@ func generateEmpty(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "empty.sjson", data)
+	writeFile(outDir, "empty.cowrie", data)
 }
 
 func generateIntegers(outDir string) {
@@ -125,7 +125,7 @@ func generateIntegers(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "integers.sjson", data)
+	writeFile(outDir, "integers.cowrie", data)
 }
 
 func generateFloats(outDir string) {
@@ -139,7 +139,7 @@ func generateFloats(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "floats.sjson", data)
+	writeFile(outDir, "floats.cowrie", data)
 }
 
 func generateMixedArray(outDir string) {
@@ -157,7 +157,7 @@ func generateMixedArray(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "mixed_array.sjson", data)
+	writeFile(outDir, "mixed_array.cowrie", data)
 }
 
 func generateDeterministic(outDir string) {
@@ -175,11 +175,11 @@ func generateDeterministic(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "deterministic.sjson", data)
+	writeFile(outDir, "deterministic.cowrie", data)
 
 	// Generate fingerprint
 	fp := gen2.SchemaFingerprint32(val)
-	writeFingerprint(outDir, "deterministic.sjson", fp)
+	writeFingerprint(outDir, "deterministic.cowrie", fp)
 }
 
 func generateSchemas(outDir string) {
@@ -200,20 +200,20 @@ func generateSchemas(outDir string) {
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "schema1.sjson", data1)
+	writeFile(outDir, "schema1.cowrie", data1)
 
 	data2, err := gen2.Encode(schema2)
 	if err != nil {
 		panic(err)
 	}
-	writeFile(outDir, "schema2.sjson", data2)
+	writeFile(outDir, "schema2.cowrie", data2)
 
 	// Generate fingerprints
 	fp1 := gen2.SchemaFingerprint32(schema1)
 	fp2 := gen2.SchemaFingerprint32(schema2)
 
-	writeFingerprint(outDir, "schema1.sjson", fp1)
-	writeFingerprint(outDir, "schema2.sjson", fp2)
+	writeFingerprint(outDir, "schema1.cowrie", fp1)
+	writeFingerprint(outDir, "schema2.cowrie", fp2)
 
 	if fp1 != fp2 {
 		fmt.Printf("WARNING: schema1 and schema2 have different fingerprints! (0x%08x vs 0x%08x)\n", fp1, fp2)

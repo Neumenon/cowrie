@@ -24,7 +24,7 @@ var (
 	uuidPattern    = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 )
 
-// FromJSON parses JSON bytes into an SJSON value without type inference.
+// FromJSON parses JSON bytes into an Cowrie value without type inference.
 // Strings remain strings, preserving exact JSON round-trip fidelity.
 // Use FromJSONEnriched if you want automatic type inference (dates, UUIDs, etc.).
 func FromJSON(data []byte) (*Value, error) {
@@ -41,7 +41,7 @@ func FromJSON(data []byte) (*Value, error) {
 //   - UUID-formatted strings → TypeUUID128
 //   - Base64 strings in data-like fields → TypeBytes
 //
-// Use this when ingesting external data into the SJSON ecosystem.
+// Use this when ingesting external data into the Cowrie ecosystem.
 // For strict JSON round-trip fidelity, use FromJSON instead.
 func FromJSONEnriched(data []byte) (*Value, error) {
 	var v any
@@ -51,7 +51,7 @@ func FromJSONEnriched(data []byte) (*Value, error) {
 	return FromAnyEnriched(v), nil
 }
 
-// FromAny converts a Go value to an SJSON value without type inference.
+// FromAny converts a Go value to an Cowrie value without type inference.
 // Strings remain strings, preserving exact round-trip fidelity.
 // Use FromAnyEnriched if you want automatic type inference.
 func FromAny(v any) *Value {
@@ -344,7 +344,7 @@ func parseUUID(s string) ([16]byte, error) {
 	return uuid, nil
 }
 
-// ToJSON converts an SJSON value to JSON bytes with canonical projections.
+// ToJSON converts an Cowrie value to JSON bytes with canonical projections.
 func ToJSON(v *Value) ([]byte, error) {
 	return json.Marshal(ToAny(v))
 }
@@ -354,7 +354,7 @@ func ToJSONIndent(v *Value, indent string) ([]byte, error) {
 	return json.MarshalIndent(ToAny(v), "", indent)
 }
 
-// ToAny converts an SJSON value to a Go any value.
+// ToAny converts an Cowrie value to a Go any value.
 func ToAny(v *Value) any {
 	if v == nil {
 		return nil

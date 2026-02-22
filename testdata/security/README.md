@@ -1,4 +1,4 @@
-# SJSON Security Test Vectors
+# Cowrie Security Test Vectors
 
 This directory contains adversarial test vectors for testing decoder security.
 These inputs are designed to trigger edge cases and potential vulnerabilities.
@@ -32,18 +32,18 @@ These inputs are designed to trigger edge cases and potential vulnerabilities.
 - `invalid_tag_context.bin` - Valid tag in invalid context
 
 ### 6. Empty Container Tests (`empty/`)
-- `empty_array.sjson` - Empty array `[]`
-- `empty_object.sjson` - Empty object `{}`
-- `empty_string.sjson` - Empty string `""`
-- `empty_bytes.sjson` - Empty bytes
+- `empty_array.cowrie` - Empty array `[]`
+- `empty_object.cowrie` - Empty object `{}`
+- `empty_string.cowrie` - Empty string `""`
+- `empty_bytes.cowrie` - Empty bytes
 
 ### 7. Boundary Value Tests (`boundary/`)
-- `int64_max.sjson` - INT64_MAX (9223372036854775807)
-- `int64_min.sjson` - INT64_MIN (-9223372036854775808)
-- `float64_nan.sjson` - Float64 NaN
-- `float64_inf.sjson` - Float64 Infinity
-- `float64_neg_inf.sjson` - Float64 -Infinity
-- `float64_subnormal.sjson` - Float64 subnormal number
+- `int64_max.cowrie` - INT64_MAX (9223372036854775807)
+- `int64_min.cowrie` - INT64_MIN (-9223372036854775808)
+- `float64_nan.cowrie` - Float64 NaN
+- `float64_inf.cowrie` - Float64 Infinity
+- `float64_neg_inf.cowrie` - Float64 -Infinity
+- `float64_subnormal.cowrie` - Float64 subnormal number
 
 ## Usage
 
@@ -60,7 +60,7 @@ Each implementation should:
 import struct
 
 def make_nested_array(depth):
-    """Create binary SJSON for nested array."""
+    """Create binary Cowrie data for nested array."""
     # Tag 0x07 = ARRAY, count 1
     result = b''
     for _ in range(depth):

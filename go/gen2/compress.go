@@ -15,7 +15,7 @@ const compressThreshold = 256
 
 // EncodeFramed encodes with optional compression.
 func EncodeFramed(v *Value, comp Compression) ([]byte, error) {
-	// First encode to raw SJSON
+	// First encode to raw Cowrie
 	raw, err := Encode(v)
 	if err != nil {
 		return nil, err
@@ -70,7 +70,7 @@ func EncodeFramed(v *Value, comp Compression) ([]byte, error) {
 }
 
 // ErrDecompressedTooLarge is returned when decompressed size exceeds limits.
-var ErrDecompressedTooLarge = errors.New("sjson: decompressed size exceeds limit")
+var ErrDecompressedTooLarge = errors.New("cowrie: decompressed size exceeds limit")
 
 // DecodeFramed decodes with automatic decompression.
 func DecodeFramed(data []byte) (*Value, error) {

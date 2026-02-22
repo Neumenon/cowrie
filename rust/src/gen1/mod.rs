@@ -11,7 +11,7 @@
 //!
 //! # Example
 //! ```
-//! use sjson::gen1::{encode, decode, Value};
+//! use cowrie_codec::gen1::{encode, decode, Value};
 //!
 //! let val = Value::Object(vec![
 //!     ("name".to_string(), Value::String("test".to_string())),

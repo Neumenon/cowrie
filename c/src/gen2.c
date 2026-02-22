@@ -1,8 +1,8 @@
 /*
- * SJSON v2 - Core Codec Implementation
+ * COWRIE v2 - Core Codec Implementation
  */
 
-#include "../include/sjson_gen2.h"
+#include "../include/cowrie_gen2.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -10,20 +10,20 @@
  * Buffer Operations
  * ============================================================ */
 
-void sjson_buf_init(SJSONBuf *buf) {
+void cowrie_buf_init(COWRIEBuf *buf) {
     buf->data = NULL;
     buf->len = 0;
     buf->cap = 0;
 }
 
-void sjson_buf_free(SJSONBuf *buf) {
+void cowrie_buf_free(COWRIEBuf *buf) {
     free(buf->data);
     buf->data = NULL;
     buf->len = 0;
     buf->cap = 0;
 }
 
-static int buf_grow(SJSONBuf *buf, size_t need) {
+static int buf_grow(COWRIEBuf *buf, size_t need) {
     /* Check for overflow in addition */
     if (need > SIZE_MAX - buf->len) return -1;
     
@@ -50,13 +50,13 @@ static int buf_grow(SJSONBuf *buf, size_t need) {
     return 0;
 }
 
-static int buf_put_byte(SJSONBuf *buf, uint8_t b) {
+static int buf_put_byte(COWRIEBuf *buf, uint8_t b) {
     if (buf_grow(buf, 1) != 0) return -1;
     buf->data[buf->len++] = b;
     return 0;
 }
 
-static int buf_put(SJSONBuf *buf, const void *data, size_t len) {
+static int buf_put(COWRIEBuf *buf, const void *data, size_t len) {
     if (buf_grow(buf, len) != 0) return -1;
     memcpy(buf->data + buf->len, data, len);
     buf->len += len;
@@ -67,7 +67,7 @@ static int buf_put(SJSONBuf *buf, const void *data, size_t len) {
  * Varint Encoding/Decoding
  * ============================================================ */
 
-int sjson_put_uvarint(SJSONBuf *buf, uint64_t v) {
+int cowrie_put_uvarint(COWRIEBuf *buf, uint64_t v) {
     uint8_t tmp[10];
     int n = 0;
     while (v >= 0x80) {
@@ -78,7 +78,7 @@ int sjson_put_uvarint(SJSONBuf *buf, uint64_t v) {
     return buf_put(buf, tmp, n);
 }
 
-int sjson_get_uvarint(const uint8_t *data, size_t len, uint64_t *v, size_t *bytes_read) {
+int cowrie_get_uvarint(const uint8_t *data, size_t len, uint64_t *v, size_t *bytes_read) {
     uint64_t result = 0;
     size_t shift = 0;
     size_t i = 0;
@@ -101,8 +101,8 @@ int sjson_get_uvarint(const uint8_t *data, size_t len, uint64_t *v, size_t *byte
  * Memory Allocation
  * ============================================================ */
 
-static SJSONValue *alloc_value(SJSONType type) {
-    SJSONValue *v = calloc(1, sizeof(SJSONValue));
+static COWRIEValue *alloc_value(COWRIEType type) {
+    COWRIEValue *v = calloc(1, sizeof(COWRIEValue));
     if (v) v->type = type;
     return v;
 }
@@ -111,36 +111,36 @@ static SJSONValue *alloc_value(SJSONType type) {
  * Value Constructors
  * ============================================================ */
 
-SJSONValue *sjson_new_null(void) {
-    return alloc_value(SJSON_NULL);
+COWRIEValue *cowrie_new_null(void) {
+    return alloc_value(COWRIE_NULL);
 }
 
-SJSONValue *sjson_new_bool(int b) {
-    SJSONValue *v = alloc_value(SJSON_BOOL);
+COWRIEValue *cowrie_new_bool(int b) {
+    COWRIEValue *v = alloc_value(COWRIE_BOOL);
     if (v) v->as.boolean = b ? 1 : 0;
     return v;
 }
 
-SJSONValue *sjson_new_int64(int64_t i) {
-    SJSONValue *v = alloc_value(SJSON_INT64);
+COWRIEValue *cowrie_new_int64(int64_t i) {
+    COWRIEValue *v = alloc_value(COWRIE_INT64);
     if (v) v->as.i64 = i;
     return v;
 }
 
-SJSONValue *sjson_new_uint64(uint64_t u) {
-    SJSONValue *v = alloc_value(SJSON_UINT64);
+COWRIEValue *cowrie_new_uint64(uint64_t u) {
+    COWRIEValue *v = alloc_value(COWRIE_UINT64);
     if (v) v->as.u64 = u;
     return v;
 }
 
-SJSONValue *sjson_new_float64(double f) {
-    SJSONValue *v = alloc_value(SJSON_FLOAT64);
+COWRIEValue *cowrie_new_float64(double f) {
+    COWRIEValue *v = alloc_value(COWRIE_FLOAT64);
     if (v) v->as.f64 = f;
     return v;
 }
 
-SJSONValue *sjson_new_decimal128(int8_t scale, const uint8_t coef[16]) {
-    SJSONValue *v = alloc_value(SJSON_DECIMAL128);
+COWRIEValue *cowrie_new_decimal128(int8_t scale, const uint8_t coef[16]) {
+    COWRIEValue *v = alloc_value(COWRIE_DECIMAL128);
     if (v) {
         v->as.decimal128.scale = scale;
         memcpy(v->as.decimal128.coef, coef, 16);
@@ -148,8 +148,8 @@ SJSONValue *sjson_new_decimal128(int8_t scale, const uint8_t coef[16]) {
     return v;
 }
 
-SJSONValue *sjson_new_string(const char *s, size_t len) {
-    SJSONValue *v = alloc_value(SJSON_STRING);
+COWRIEValue *cowrie_new_string(const char *s, size_t len) {
+    COWRIEValue *v = alloc_value(COWRIE_STRING);
     if (!v) return NULL;
 
     v->as.str.data = malloc(len + 1);
@@ -163,8 +163,8 @@ SJSONValue *sjson_new_string(const char *s, size_t len) {
     return v;
 }
 
-SJSONValue *sjson_new_bytes(const uint8_t *data, size_t len) {
-    SJSONValue *v = alloc_value(SJSON_BYTES);
+COWRIEValue *cowrie_new_bytes(const uint8_t *data, size_t len) {
+    COWRIEValue *v = alloc_value(COWRIE_BYTES);
     if (!v) return NULL;
 
     v->as.bytes.data = malloc(len);
@@ -177,20 +177,20 @@ SJSONValue *sjson_new_bytes(const uint8_t *data, size_t len) {
     return v;
 }
 
-SJSONValue *sjson_new_datetime64(int64_t nanos) {
-    SJSONValue *v = alloc_value(SJSON_DATETIME64);
+COWRIEValue *cowrie_new_datetime64(int64_t nanos) {
+    COWRIEValue *v = alloc_value(COWRIE_DATETIME64);
     if (v) v->as.datetime64 = nanos;
     return v;
 }
 
-SJSONValue *sjson_new_uuid128(const uint8_t uuid[16]) {
-    SJSONValue *v = alloc_value(SJSON_UUID128);
+COWRIEValue *cowrie_new_uuid128(const uint8_t uuid[16]) {
+    COWRIEValue *v = alloc_value(COWRIE_UUID128);
     if (v) memcpy(v->as.uuid, uuid, 16);
     return v;
 }
 
-SJSONValue *sjson_new_bigint(const uint8_t *data, size_t len) {
-    SJSONValue *v = alloc_value(SJSON_BIGINT);
+COWRIEValue *cowrie_new_bigint(const uint8_t *data, size_t len) {
+    COWRIEValue *v = alloc_value(COWRIE_BIGINT);
     if (!v) return NULL;
 
     v->as.bigint.data = malloc(len);
@@ -203,8 +203,8 @@ SJSONValue *sjson_new_bigint(const uint8_t *data, size_t len) {
     return v;
 }
 
-SJSONValue *sjson_new_ext(uint64_t ext_type, const uint8_t *payload, size_t payload_len) {
-    SJSONValue *v = alloc_value(SJSON_EXT);
+COWRIEValue *cowrie_new_ext(uint64_t ext_type, const uint8_t *payload, size_t payload_len) {
+    COWRIEValue *v = alloc_value(COWRIE_EXT);
     if (!v) return NULL;
 
     v->as.ext.ext_type = ext_type;
@@ -218,21 +218,21 @@ SJSONValue *sjson_new_ext(uint64_t ext_type, const uint8_t *payload, size_t payl
     return v;
 }
 
-SJSONValue *sjson_new_array(void) {
-    return alloc_value(SJSON_ARRAY);
+COWRIEValue *cowrie_new_array(void) {
+    return alloc_value(COWRIE_ARRAY);
 }
 
-SJSONValue *sjson_new_object(void) {
-    return alloc_value(SJSON_OBJECT);
+COWRIEValue *cowrie_new_object(void) {
+    return alloc_value(COWRIE_OBJECT);
 }
 
 /* ============================================================
  * v2.1 Extension Constructors
  * ============================================================ */
 
-SJSONValue *sjson_new_tensor(uint8_t dtype, uint8_t rank, const size_t *dims,
+COWRIEValue *cowrie_new_tensor(uint8_t dtype, uint8_t rank, const size_t *dims,
                               const uint8_t *data, size_t data_len) {
-    SJSONValue *v = alloc_value(SJSON_TENSOR);
+    COWRIEValue *v = alloc_value(COWRIE_TENSOR);
     if (!v) return NULL;
 
     v->as.tensor.dtype = dtype;
@@ -260,8 +260,8 @@ SJSONValue *sjson_new_tensor(uint8_t dtype, uint8_t rank, const size_t *dims,
     return v;
 }
 
-SJSONValue *sjson_new_tensor_ref(uint8_t store_id, const uint8_t *key, size_t key_len) {
-    SJSONValue *v = alloc_value(SJSON_TENSOR_REF);
+COWRIEValue *cowrie_new_tensor_ref(uint8_t store_id, const uint8_t *key, size_t key_len) {
+    COWRIEValue *v = alloc_value(COWRIE_TENSOR_REF);
     if (!v) return NULL;
 
     v->as.tensor_ref.store_id = store_id;
@@ -278,9 +278,9 @@ SJSONValue *sjson_new_tensor_ref(uint8_t store_id, const uint8_t *key, size_t ke
     return v;
 }
 
-SJSONValue *sjson_new_image(uint8_t format, uint16_t width, uint16_t height,
+COWRIEValue *cowrie_new_image(uint8_t format, uint16_t width, uint16_t height,
                              const uint8_t *data, size_t data_len) {
-    SJSONValue *v = alloc_value(SJSON_IMAGE);
+    COWRIEValue *v = alloc_value(COWRIE_IMAGE);
     if (!v) return NULL;
 
     v->as.image.format = format;
@@ -299,9 +299,9 @@ SJSONValue *sjson_new_image(uint8_t format, uint16_t width, uint16_t height,
     return v;
 }
 
-SJSONValue *sjson_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t channels,
+COWRIEValue *cowrie_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t channels,
                              const uint8_t *data, size_t data_len) {
-    SJSONValue *v = alloc_value(SJSON_AUDIO);
+    COWRIEValue *v = alloc_value(COWRIE_AUDIO);
     if (!v) return NULL;
 
     v->as.audio.encoding = encoding;
@@ -320,9 +320,9 @@ SJSONValue *sjson_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t chan
     return v;
 }
 
-SJSONValue *sjson_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_count,
+COWRIEValue *cowrie_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_count,
                                const size_t *row_offsets, const void *col_indices) {
-    SJSONValue *v = alloc_value(SJSON_ADJLIST);
+    COWRIEValue *v = alloc_value(COWRIE_ADJLIST);
     if (!v) return NULL;
 
     v->as.adjlist.id_width = id_width;
@@ -336,7 +336,7 @@ SJSONValue *sjson_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_c
     memcpy(v->as.adjlist.row_offsets, row_offsets, ro_size);
 
     /* Allocate and copy col_indices */
-    size_t ci_elem_size = (id_width == SJSON_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
+    size_t ci_elem_size = (id_width == COWRIE_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
     size_t ci_size = edge_count * ci_elem_size;
     if (edge_count > 0) {
         v->as.adjlist.col_indices = malloc(ci_size);
@@ -353,10 +353,10 @@ SJSONValue *sjson_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_c
     return v;
 }
 
-SJSONValue *sjson_new_rich_text(const char *text, size_t text_len,
+COWRIEValue *cowrie_new_rich_text(const char *text, size_t text_len,
                                  const int32_t *tokens, size_t token_count,
-                                 const SJSONRichTextSpan *spans, size_t span_count) {
-    SJSONValue *v = alloc_value(SJSON_RICH_TEXT);
+                                 const COWRIERichTextSpan *spans, size_t span_count) {
+    COWRIEValue *v = alloc_value(COWRIE_RICH_TEXT);
     if (!v) return NULL;
 
     v->as.rich_text.text_len = text_len;
@@ -384,14 +384,14 @@ SJSONValue *sjson_new_rich_text(const char *text, size_t text_len,
 
     /* Allocate and copy spans */
     if (spans && span_count > 0) {
-        v->as.rich_text.spans = malloc(span_count * sizeof(SJSONRichTextSpan));
+        v->as.rich_text.spans = malloc(span_count * sizeof(COWRIERichTextSpan));
         if (!v->as.rich_text.spans) {
             free(v->as.rich_text.tokens);
             free(v->as.rich_text.text);
             free(v);
             return NULL;
         }
-        memcpy(v->as.rich_text.spans, spans, span_count * sizeof(SJSONRichTextSpan));
+        memcpy(v->as.rich_text.spans, spans, span_count * sizeof(COWRIERichTextSpan));
     } else {
         v->as.rich_text.spans = NULL;
     }
@@ -399,21 +399,21 @@ SJSONValue *sjson_new_rich_text(const char *text, size_t text_len,
     return v;
 }
 
-SJSONValue *sjson_new_delta(size_t base_id, const SJSONDeltaOp_t *ops, size_t op_count) {
-    SJSONValue *v = alloc_value(SJSON_DELTA);
+COWRIEValue *cowrie_new_delta(size_t base_id, const COWRIEDeltaOp_t *ops, size_t op_count) {
+    COWRIEValue *v = alloc_value(COWRIE_DELTA);
     if (!v) return NULL;
 
     v->as.delta.base_id = base_id;
     v->as.delta.op_count = op_count;
 
     if (op_count > 0) {
-        v->as.delta.ops = malloc(op_count * sizeof(SJSONDeltaOp_t));
+        v->as.delta.ops = malloc(op_count * sizeof(COWRIEDeltaOp_t));
         if (!v->as.delta.ops) { free(v); return NULL; }
 
         /* 
          * Copy ops - takes OWNERSHIP of value pointers.
          * The caller should pass values that this delta will own.
-         * sjson_free() will free all op values when delta is freed.
+         * cowrie_free() will free all op values when delta is freed.
          */
         for (size_t i = 0; i < op_count; i++) {
             v->as.delta.ops[i].op_code = ops[i].op_code;
@@ -431,10 +431,10 @@ SJSONValue *sjson_new_delta(size_t base_id, const SJSONDeltaOp_t *ops, size_t op
  * v2.1 Graph Type Constructors
  * ============================================================ */
 
-SJSONValue *sjson_new_node(const char *id, size_t id_len,
+COWRIEValue *cowrie_new_node(const char *id, size_t id_len,
                            const char **labels, const size_t *label_lens, size_t label_count,
-                           const SJSONMember *props, size_t prop_count) {
-    SJSONValue *v = alloc_value(SJSON_NODE);
+                           const COWRIEMember *props, size_t prop_count) {
+    COWRIEValue *v = alloc_value(COWRIE_NODE);
     if (!v) return NULL;
 
     /* Copy ID */
@@ -478,7 +478,7 @@ SJSONValue *sjson_new_node(const char *id, size_t id_len,
     /* Copy properties */
     v->as.node.prop_count = prop_count;
     if (prop_count > 0) {
-        v->as.node.props = malloc(prop_count * sizeof(SJSONMember));
+        v->as.node.props = malloc(prop_count * sizeof(COWRIEMember));
         if (!v->as.node.props) {
             for (size_t i = 0; i < label_count; i++) free(v->as.node.labels[i]);
             free(v->as.node.labels);
@@ -512,11 +512,11 @@ SJSONValue *sjson_new_node(const char *id, size_t id_len,
     return v;
 }
 
-SJSONValue *sjson_new_edge(const char *from_id, size_t from_id_len,
+COWRIEValue *cowrie_new_edge(const char *from_id, size_t from_id_len,
                            const char *to_id, size_t to_id_len,
                            const char *edge_type, size_t edge_type_len,
-                           const SJSONMember *props, size_t prop_count) {
-    SJSONValue *v = alloc_value(SJSON_EDGE);
+                           const COWRIEMember *props, size_t prop_count) {
+    COWRIEValue *v = alloc_value(COWRIE_EDGE);
     if (!v) return NULL;
 
     /* Copy from_id */
@@ -552,7 +552,7 @@ SJSONValue *sjson_new_edge(const char *from_id, size_t from_id_len,
     /* Copy properties */
     v->as.edge.prop_count = prop_count;
     if (prop_count > 0) {
-        v->as.edge.props = malloc(prop_count * sizeof(SJSONMember));
+        v->as.edge.props = malloc(prop_count * sizeof(COWRIEMember));
         if (!v->as.edge.props) {
             free(v->as.edge.edge_type);
             free(v->as.edge.to_id);
@@ -583,15 +583,15 @@ SJSONValue *sjson_new_edge(const char *from_id, size_t from_id_len,
     return v;
 }
 
-SJSONValue *sjson_new_node_batch(const SJSONNode *nodes, size_t node_count) {
-    SJSONValue *v = alloc_value(SJSON_NODE_BATCH);
+COWRIEValue *cowrie_new_node_batch(const COWRIENode *nodes, size_t node_count) {
+    COWRIEValue *v = alloc_value(COWRIE_NODE_BATCH);
     if (!v) return NULL;
 
     v->as.node_batch.node_count = node_count;
     if (node_count > 0) {
-        v->as.node_batch.nodes = malloc(node_count * sizeof(SJSONNode));
+        v->as.node_batch.nodes = malloc(node_count * sizeof(COWRIENode));
         if (!v->as.node_batch.nodes) { free(v); return NULL; }
-        memcpy(v->as.node_batch.nodes, nodes, node_count * sizeof(SJSONNode));
+        memcpy(v->as.node_batch.nodes, nodes, node_count * sizeof(COWRIENode));
     } else {
         v->as.node_batch.nodes = NULL;
     }
@@ -599,15 +599,15 @@ SJSONValue *sjson_new_node_batch(const SJSONNode *nodes, size_t node_count) {
     return v;
 }
 
-SJSONValue *sjson_new_edge_batch(const SJSONEdge *edges, size_t edge_count) {
-    SJSONValue *v = alloc_value(SJSON_EDGE_BATCH);
+COWRIEValue *cowrie_new_edge_batch(const COWRIEEdge *edges, size_t edge_count) {
+    COWRIEValue *v = alloc_value(COWRIE_EDGE_BATCH);
     if (!v) return NULL;
 
     v->as.edge_batch.edge_count = edge_count;
     if (edge_count > 0) {
-        v->as.edge_batch.edges = malloc(edge_count * sizeof(SJSONEdge));
+        v->as.edge_batch.edges = malloc(edge_count * sizeof(COWRIEEdge));
         if (!v->as.edge_batch.edges) { free(v); return NULL; }
-        memcpy(v->as.edge_batch.edges, edges, edge_count * sizeof(SJSONEdge));
+        memcpy(v->as.edge_batch.edges, edges, edge_count * sizeof(COWRIEEdge));
     } else {
         v->as.edge_batch.edges = NULL;
     }
@@ -615,18 +615,18 @@ SJSONValue *sjson_new_edge_batch(const SJSONEdge *edges, size_t edge_count) {
     return v;
 }
 
-SJSONValue *sjson_new_graph_shard(const SJSONNode *nodes, size_t node_count,
-                                   const SJSONEdge *edges, size_t edge_count,
-                                   const SJSONMember *metadata, size_t meta_count) {
-    SJSONValue *v = alloc_value(SJSON_GRAPH_SHARD);
+COWRIEValue *cowrie_new_graph_shard(const COWRIENode *nodes, size_t node_count,
+                                   const COWRIEEdge *edges, size_t edge_count,
+                                   const COWRIEMember *metadata, size_t meta_count) {
+    COWRIEValue *v = alloc_value(COWRIE_GRAPH_SHARD);
     if (!v) return NULL;
 
     /* Copy nodes */
     v->as.graph_shard.node_count = node_count;
     if (node_count > 0) {
-        v->as.graph_shard.nodes = malloc(node_count * sizeof(SJSONNode));
+        v->as.graph_shard.nodes = malloc(node_count * sizeof(COWRIENode));
         if (!v->as.graph_shard.nodes) { free(v); return NULL; }
-        memcpy(v->as.graph_shard.nodes, nodes, node_count * sizeof(SJSONNode));
+        memcpy(v->as.graph_shard.nodes, nodes, node_count * sizeof(COWRIENode));
     } else {
         v->as.graph_shard.nodes = NULL;
     }
@@ -634,13 +634,13 @@ SJSONValue *sjson_new_graph_shard(const SJSONNode *nodes, size_t node_count,
     /* Copy edges */
     v->as.graph_shard.edge_count = edge_count;
     if (edge_count > 0) {
-        v->as.graph_shard.edges = malloc(edge_count * sizeof(SJSONEdge));
+        v->as.graph_shard.edges = malloc(edge_count * sizeof(COWRIEEdge));
         if (!v->as.graph_shard.edges) {
             free(v->as.graph_shard.nodes);
             free(v);
             return NULL;
         }
-        memcpy(v->as.graph_shard.edges, edges, edge_count * sizeof(SJSONEdge));
+        memcpy(v->as.graph_shard.edges, edges, edge_count * sizeof(COWRIEEdge));
     } else {
         v->as.graph_shard.edges = NULL;
     }
@@ -648,7 +648,7 @@ SJSONValue *sjson_new_graph_shard(const SJSONNode *nodes, size_t node_count,
     /* Copy metadata */
     v->as.graph_shard.meta_count = meta_count;
     if (meta_count > 0) {
-        v->as.graph_shard.metadata = malloc(meta_count * sizeof(SJSONMember));
+        v->as.graph_shard.metadata = malloc(meta_count * sizeof(COWRIEMember));
         if (!v->as.graph_shard.metadata) {
             free(v->as.graph_shard.edges);
             free(v->as.graph_shard.nodes);
@@ -681,11 +681,11 @@ SJSONValue *sjson_new_graph_shard(const SJSONNode *nodes, size_t node_count,
  * Value Manipulation
  * ============================================================ */
 
-int sjson_array_append(SJSONValue *arr, SJSONValue *item) {
-    if (!arr || arr->type != SJSON_ARRAY) return -1;
+int cowrie_array_append(COWRIEValue *arr, COWRIEValue *item) {
+    if (!arr || arr->type != COWRIE_ARRAY) return -1;
 
     size_t new_len = arr->as.array.len + 1;
-    SJSONValue **new_items = realloc(arr->as.array.items, new_len * sizeof(SJSONValue *));
+    COWRIEValue **new_items = realloc(arr->as.array.items, new_len * sizeof(COWRIEValue *));
     if (!new_items) return -1;
 
     new_items[arr->as.array.len] = item;
@@ -694,25 +694,25 @@ int sjson_array_append(SJSONValue *arr, SJSONValue *item) {
     return 0;
 }
 
-SJSONValue *sjson_array_get(const SJSONValue *arr, size_t index) {
-    if (!arr || arr->type != SJSON_ARRAY) return NULL;
+COWRIEValue *cowrie_array_get(const COWRIEValue *arr, size_t index) {
+    if (!arr || arr->type != COWRIE_ARRAY) return NULL;
     if (index >= arr->as.array.len) return NULL;
     return arr->as.array.items[index];
 }
 
-size_t sjson_array_len(const SJSONValue *arr) {
-    if (!arr || arr->type != SJSON_ARRAY) return 0;
+size_t cowrie_array_len(const COWRIEValue *arr) {
+    if (!arr || arr->type != COWRIE_ARRAY) return 0;
     return arr->as.array.len;
 }
 
-int sjson_object_set(SJSONValue *obj, const char *key, size_t key_len, SJSONValue *value) {
-    if (!obj || obj->type != SJSON_OBJECT) return -1;
+int cowrie_object_set(COWRIEValue *obj, const char *key, size_t key_len, COWRIEValue *value) {
+    if (!obj || obj->type != COWRIE_OBJECT) return -1;
 
     /* Check if key exists */
     for (size_t i = 0; i < obj->as.object.len; i++) {
         if (obj->as.object.members[i].key_len == key_len &&
             memcmp(obj->as.object.members[i].key, key, key_len) == 0) {
-            sjson_free(obj->as.object.members[i].value);
+            cowrie_free(obj->as.object.members[i].value);
             obj->as.object.members[i].value = value;
             return 0;
         }
@@ -720,10 +720,10 @@ int sjson_object_set(SJSONValue *obj, const char *key, size_t key_len, SJSONValu
 
     /* Add new member */
     size_t new_len = obj->as.object.len + 1;
-    SJSONMember *new_members = realloc(obj->as.object.members, new_len * sizeof(SJSONMember));
+    COWRIEMember *new_members = realloc(obj->as.object.members, new_len * sizeof(COWRIEMember));
     if (!new_members) return -1;
 
-    SJSONMember *m = &new_members[obj->as.object.len];
+    COWRIEMember *m = &new_members[obj->as.object.len];
     m->key = malloc(key_len + 1);
     if (!m->key) return -1;
     memcpy(m->key, key, key_len);
@@ -736,8 +736,8 @@ int sjson_object_set(SJSONValue *obj, const char *key, size_t key_len, SJSONValu
     return 0;
 }
 
-SJSONValue *sjson_object_get(const SJSONValue *obj, const char *key, size_t key_len) {
-    if (!obj || obj->type != SJSON_OBJECT) return NULL;
+COWRIEValue *cowrie_object_get(const COWRIEValue *obj, const char *key, size_t key_len) {
+    if (!obj || obj->type != COWRIE_OBJECT) return NULL;
 
     for (size_t i = 0; i < obj->as.object.len; i++) {
         if (obj->as.object.members[i].key_len == key_len &&
@@ -748,8 +748,8 @@ SJSONValue *sjson_object_get(const SJSONValue *obj, const char *key, size_t key_
     return NULL;
 }
 
-size_t sjson_object_len(const SJSONValue *obj) {
-    if (!obj || obj->type != SJSON_OBJECT) return 0;
+size_t cowrie_object_len(const COWRIEValue *obj) {
+    if (!obj || obj->type != COWRIE_OBJECT) return 0;
     return obj->as.object.len;
 }
 
@@ -757,67 +757,67 @@ size_t sjson_object_len(const SJSONValue *obj) {
  * Memory Management
  * ============================================================ */
 
-void sjson_free(SJSONValue *v) {
+void cowrie_free(COWRIEValue *v) {
     if (!v) return;
 
     switch (v->type) {
-    case SJSON_STRING:
+    case COWRIE_STRING:
         free(v->as.str.data);
         break;
-    case SJSON_BYTES:
+    case COWRIE_BYTES:
         free(v->as.bytes.data);
         break;
-    case SJSON_BIGINT:
+    case COWRIE_BIGINT:
         free(v->as.bigint.data);
         break;
-    case SJSON_EXT:
+    case COWRIE_EXT:
         free(v->as.ext.payload);
         break;
-    case SJSON_ARRAY:
+    case COWRIE_ARRAY:
         for (size_t i = 0; i < v->as.array.len; i++) {
-            sjson_free(v->as.array.items[i]);
+            cowrie_free(v->as.array.items[i]);
         }
         free(v->as.array.items);
         break;
-    case SJSON_OBJECT:
+    case COWRIE_OBJECT:
         for (size_t i = 0; i < v->as.object.len; i++) {
             free(v->as.object.members[i].key);
-            sjson_free(v->as.object.members[i].value);
+            cowrie_free(v->as.object.members[i].value);
         }
         free(v->as.object.members);
         break;
     /* v2.1 extension types */
-    case SJSON_TENSOR:
+    case COWRIE_TENSOR:
         free(v->as.tensor.dims);
         free(v->as.tensor.data);
         break;
-    case SJSON_TENSOR_REF:
+    case COWRIE_TENSOR_REF:
         free(v->as.tensor_ref.key);
         break;
-    case SJSON_IMAGE:
+    case COWRIE_IMAGE:
         free(v->as.image.data);
         break;
-    case SJSON_AUDIO:
+    case COWRIE_AUDIO:
         free(v->as.audio.data);
         break;
-    case SJSON_ADJLIST:
+    case COWRIE_ADJLIST:
         free(v->as.adjlist.row_offsets);
         free(v->as.adjlist.col_indices);
         break;
-    case SJSON_RICH_TEXT:
+    case COWRIE_RICH_TEXT:
         free(v->as.rich_text.text);
         free(v->as.rich_text.tokens);
         free(v->as.rich_text.spans);
         break;
-    case SJSON_DELTA:
+    case COWRIE_DELTA:
         /* Delta owns its op values - free them */
         for (size_t i = 0; i < v->as.delta.op_count; i++) {
-            sjson_free(v->as.delta.ops[i].value);
+            cowrie_free(v->as.delta.ops[i].value);
         }
         free(v->as.delta.ops);
         break;
     /* v2.1 Graph types */
-    case SJSON_NODE:
+    case COWRIE_NODE:
         free(v->as.node.id);
         for (size_t i = 0; i < v->as.node.label_count; i++) {
             free(v->as.node.labels[i]);
@@ -826,35 +826,35 @@ void sjson_free(SJSONValue *v) {
         free(v->as.node.label_lens);
         for (size_t i = 0; i < v->as.node.prop_count; i++) {
             free(v->as.node.props[i].key);
-            sjson_free(v->as.node.props[i].value);
+            cowrie_free(v->as.node.props[i].value);
         }
         free(v->as.node.props);
         break;
-    case SJSON_EDGE:
+    case COWRIE_EDGE:
         free(v->as.edge.from_id);
         free(v->as.edge.to_id);
         free(v->as.edge.edge_type);
         for (size_t i = 0; i < v->as.edge.prop_count; i++) {
             free(v->as.edge.props[i].key);
-            sjson_free(v->as.edge.props[i].value);
+            cowrie_free(v->as.edge.props[i].value);
         }
         free(v->as.edge.props);
         break;
-    case SJSON_NODE_BATCH:
+    case COWRIE_NODE_BATCH:
         /* Note: shallow copy, don't free node internals */
         free(v->as.node_batch.nodes);
         break;
-    case SJSON_EDGE_BATCH:
+    case COWRIE_EDGE_BATCH:
         /* Note: shallow copy, don't free edge internals */
         free(v->as.edge_batch.edges);
         break;
-    case SJSON_GRAPH_SHARD:
+    case COWRIE_GRAPH_SHARD:
         /* Note: shallow copy, don't free node/edge internals */
         free(v->as.graph_shard.nodes);
         free(v->as.graph_shard.edges);
         for (size_t i = 0; i < v->as.graph_shard.meta_count; i++) {
             free(v->as.graph_shard.metadata[i].key);
-            sjson_free(v->as.graph_shard.metadata[i].value);
+            cowrie_free(v->as.graph_shard.metadata[i].value);
         }
         free(v->as.graph_shard.metadata);
         break;
@@ -995,62 +995,62 @@ static int dict_rehash(Dict *d, size_t new_htab_cap) {
     return 0;
 }
 
-static void collect_keys(const SJSONValue *v, Dict *d) {
+static void collect_keys(const COWRIEValue *v, Dict *d) {
     if (!v) return;
 
     switch (v->type) {
-    case SJSON_ARRAY:
+    case COWRIE_ARRAY:
         for (size_t i = 0; i < v->as.array.len; i++) {
             collect_keys(v->as.array.items[i], d);
         }
         break;
-    case SJSON_OBJECT:
+    case COWRIE_OBJECT:
         for (size_t i = 0; i < v->as.object.len; i++) {
             dict_add(d, v->as.object.members[i].key, v->as.object.members[i].key_len);
             collect_keys(v->as.object.members[i].value, d);
         }
         break;
     /* v2.1 Graph types - collect property keys */
-    case SJSON_NODE:
+    case COWRIE_NODE:
         for (size_t i = 0; i < v->as.node.prop_count; i++) {
             dict_add(d, v->as.node.props[i].key, v->as.node.props[i].key_len);
             collect_keys(v->as.node.props[i].value, d);
         }
         break;
-    case SJSON_EDGE:
+    case COWRIE_EDGE:
         for (size_t i = 0; i < v->as.edge.prop_count; i++) {
             dict_add(d, v->as.edge.props[i].key, v->as.edge.props[i].key_len);
             collect_keys(v->as.edge.props[i].value, d);
         }
         break;
-    case SJSON_NODE_BATCH:
+    case COWRIE_NODE_BATCH:
         for (size_t i = 0; i < v->as.node_batch.node_count; i++) {
-            SJSONNode *n = &v->as.node_batch.nodes[i];
+            COWRIENode *n = &v->as.node_batch.nodes[i];
             for (size_t j = 0; j < n->prop_count; j++) {
                 dict_add(d, n->props[j].key, n->props[j].key_len);
                 collect_keys(n->props[j].value, d);
             }
         }
         break;
-    case SJSON_EDGE_BATCH:
+    case COWRIE_EDGE_BATCH:
         for (size_t i = 0; i < v->as.edge_batch.edge_count; i++) {
-            SJSONEdge *e = &v->as.edge_batch.edges[i];
+            COWRIEEdge *e = &v->as.edge_batch.edges[i];
             for (size_t j = 0; j < e->prop_count; j++) {
                 dict_add(d, e->props[j].key, e->props[j].key_len);
                 collect_keys(e->props[j].value, d);
             }
         }
         break;
-    case SJSON_GRAPH_SHARD:
+    case COWRIE_GRAPH_SHARD:
         for (size_t i = 0; i < v->as.graph_shard.node_count; i++) {
-            SJSONNode *n = &v->as.graph_shard.nodes[i];
+            COWRIENode *n = &v->as.graph_shard.nodes[i];
             for (size_t j = 0; j < n->prop_count; j++) {
                 dict_add(d, n->props[j].key, n->props[j].key_len);
                 collect_keys(n->props[j].value, d);
             }
         }
         for (size_t i = 0; i < v->as.graph_shard.edge_count; i++) {
-            SJSONEdge *e = &v->as.graph_shard.edges[i];
+            COWRIEEdge *e = &v->as.graph_shard.edges[i];
             for (size_t j = 0; j < e->prop_count; j++) {
                 dict_add(d, e->props[j].key, e->props[j].key_len);
                 collect_keys(e->props[j].value, d);
@@ -1070,136 +1070,136 @@ static void collect_keys(const SJSONValue *v, Dict *d) {
  * Encoding
  * ============================================================ */
 
-static int encode_value(SJSONBuf *buf, const SJSONValue *v, const Dict *dict);
+static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict);
 
-static int encode_string_raw(SJSONBuf *buf, const char *s, size_t len) {
-    if (sjson_put_uvarint(buf, len) != 0) return -1;
+static int encode_string_raw(COWRIEBuf *buf, const char *s, size_t len) {
+    if (cowrie_put_uvarint(buf, len) != 0) return -1;
     return buf_put(buf, s, len);
 }
 
-static int encode_value(SJSONBuf *buf, const SJSONValue *v, const Dict *dict) {
+static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict) {
     if (!v) return -1;
 
     switch (v->type) {
-    case SJSON_NULL:
+    case COWRIE_NULL:
         return buf_put_byte(buf, SJT_NULL);
 
-    case SJSON_BOOL:
+    case COWRIE_BOOL:
         return buf_put_byte(buf, v->as.boolean ? SJT_TRUE : SJT_FALSE);
 
-    case SJSON_INT64:
+    case COWRIE_INT64:
         if (buf_put_byte(buf, SJT_INT64) != 0) return -1;
-        return sjson_put_uvarint(buf, sjson_zigzag_encode(v->as.i64));
+        return cowrie_put_uvarint(buf, cowrie_zigzag_encode(v->as.i64));
 
-    case SJSON_UINT64:
+    case COWRIE_UINT64:
         if (buf_put_byte(buf, SJT_UINT64) != 0) return -1;
-        return sjson_put_uvarint(buf, v->as.u64);
+        return cowrie_put_uvarint(buf, v->as.u64);
 
-    case SJSON_FLOAT64: {
+    case COWRIE_FLOAT64: {
         if (buf_put_byte(buf, SJT_FLOAT64) != 0) return -1;
         uint64_t bits;
         memcpy(&bits, &v->as.f64, sizeof(bits));
         return buf_put(buf, &bits, sizeof(bits));
     }
 
-    case SJSON_DECIMAL128:
+    case COWRIE_DECIMAL128:
         if (buf_put_byte(buf, SJT_DECIMAL128) != 0) return -1;
         if (buf_put_byte(buf, (uint8_t)v->as.decimal128.scale) != 0) return -1;
         return buf_put(buf, v->as.decimal128.coef, 16);
 
-    case SJSON_STRING:
+    case COWRIE_STRING:
         if (buf_put_byte(buf, SJT_STRING) != 0) return -1;
         return encode_string_raw(buf, v->as.str.data, v->as.str.len);
 
-    case SJSON_BYTES:
+    case COWRIE_BYTES:
         if (buf_put_byte(buf, SJT_BYTES) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.bytes.len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.bytes.len) != 0) return -1;
         return buf_put(buf, v->as.bytes.data, v->as.bytes.len);
 
-    case SJSON_DATETIME64:
+    case COWRIE_DATETIME64:
         if (buf_put_byte(buf, SJT_DATETIME64) != 0) return -1;
         return buf_put(buf, &v->as.datetime64, sizeof(int64_t));
 
-    case SJSON_UUID128:
+    case COWRIE_UUID128:
         if (buf_put_byte(buf, SJT_UUID128) != 0) return -1;
         return buf_put(buf, v->as.uuid, 16);
 
-    case SJSON_BIGINT:
+    case COWRIE_BIGINT:
         if (buf_put_byte(buf, SJT_BIGINT) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.bigint.len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.bigint.len) != 0) return -1;
         return buf_put(buf, v->as.bigint.data, v->as.bigint.len);
 
-    case SJSON_EXT:
+    case COWRIE_EXT:
         if (buf_put_byte(buf, SJT_EXT) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.ext.ext_type) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.ext.payload_len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.ext.ext_type) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.ext.payload_len) != 0) return -1;
         return buf_put(buf, v->as.ext.payload, v->as.ext.payload_len);
 
-    case SJSON_ARRAY:
+    case COWRIE_ARRAY:
         if (buf_put_byte(buf, SJT_ARRAY) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.array.len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.array.len) != 0) return -1;
         for (size_t i = 0; i < v->as.array.len; i++) {
             if (encode_value(buf, v->as.array.items[i], dict) != 0) return -1;
         }
         return 0;
 
-    case SJSON_OBJECT:
+    case COWRIE_OBJECT:
         if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.object.len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.object.len) != 0) return -1;
         for (size_t i = 0; i < v->as.object.len; i++) {
             int idx = dict_find(dict, v->as.object.members[i].key, v->as.object.members[i].key_len);
             if (idx < 0) return -1;
-            if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+            if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
             if (encode_value(buf, v->as.object.members[i].value, dict) != 0) return -1;
         }
         return 0;
 
     /* v2.1 extension types */
-    case SJSON_TENSOR:
+    case COWRIE_TENSOR:
         if (buf_put_byte(buf, SJT_TENSOR) != 0) return -1;
         if (buf_put_byte(buf, v->as.tensor.dtype) != 0) return -1;
         if (buf_put_byte(buf, v->as.tensor.rank) != 0) return -1;
         for (uint8_t i = 0; i < v->as.tensor.rank; i++) {
-            if (sjson_put_uvarint(buf, v->as.tensor.dims[i]) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.tensor.dims[i]) != 0) return -1;
         }
-        if (sjson_put_uvarint(buf, v->as.tensor.data_len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.tensor.data_len) != 0) return -1;
         return buf_put(buf, v->as.tensor.data, v->as.tensor.data_len);
 
-    case SJSON_TENSOR_REF:
+    case COWRIE_TENSOR_REF:
         if (buf_put_byte(buf, SJT_TENSOR_REF) != 0) return -1;
         if (buf_put_byte(buf, v->as.tensor_ref.store_id) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.tensor_ref.key_len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.tensor_ref.key_len) != 0) return -1;
         return buf_put(buf, v->as.tensor_ref.key, v->as.tensor_ref.key_len);
 
-    case SJSON_IMAGE: {
+    case COWRIE_IMAGE: {
         if (buf_put_byte(buf, SJT_IMAGE) != 0) return -1;
         if (buf_put_byte(buf, v->as.image.format) != 0) return -1;
         if (buf_put(buf, &v->as.image.width, sizeof(uint16_t)) != 0) return -1;
         if (buf_put(buf, &v->as.image.height, sizeof(uint16_t)) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.image.data_len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.image.data_len) != 0) return -1;
         return buf_put(buf, v->as.image.data, v->as.image.data_len);
     }
 
-    case SJSON_AUDIO: {
+    case COWRIE_AUDIO: {
         if (buf_put_byte(buf, SJT_AUDIO) != 0) return -1;
         if (buf_put_byte(buf, v->as.audio.encoding) != 0) return -1;
         if (buf_put(buf, &v->as.audio.sample_rate, sizeof(uint32_t)) != 0) return -1;
         if (buf_put_byte(buf, v->as.audio.channels) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.audio.data_len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.audio.data_len) != 0) return -1;
         return buf_put(buf, v->as.audio.data, v->as.audio.data_len);
     }
 
-    case SJSON_ADJLIST: {
+    case COWRIE_ADJLIST: {
         if (buf_put_byte(buf, SJT_ADJLIST) != 0) return -1;
         if (buf_put_byte(buf, v->as.adjlist.id_width) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.adjlist.node_count) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.adjlist.edge_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.adjlist.node_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.adjlist.edge_count) != 0) return -1;
         /* row_offsets as uvarint */
         for (size_t i = 0; i <= v->as.adjlist.node_count; i++) {
-            if (sjson_put_uvarint(buf, v->as.adjlist.row_offsets[i]) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.adjlist.row_offsets[i]) != 0) return -1;
         }
         /* col_indices as fixed-width LE */
-        if (v->as.adjlist.id_width == SJSON_ID_INT64) {
+        if (v->as.adjlist.id_width == COWRIE_ID_INT64) {
             int64_t *cols = (int64_t *)v->as.adjlist.col_indices;
             for (size_t i = 0; i < v->as.adjlist.edge_count; i++) {
                 if (buf_put(buf, &cols[i], sizeof(int64_t)) != 0) return -1;
@@ -1213,40 +1213,40 @@ static int encode_value(SJSONBuf *buf, const SJSONValue *v, const Dict *dict) {
         return 0;
     }
 
-    case SJSON_RICH_TEXT: {
+    case COWRIE_RICH_TEXT: {
         if (buf_put_byte(buf, SJT_RICH_TEXT) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.rich_text.text_len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.rich_text.text_len) != 0) return -1;
         if (buf_put(buf, v->as.rich_text.text, v->as.rich_text.text_len) != 0) return -1;
         uint8_t flags = 0;
         if (v->as.rich_text.tokens && v->as.rich_text.token_count > 0) flags |= 0x01;
         if (v->as.rich_text.spans && v->as.rich_text.span_count > 0) flags |= 0x02;
         if (buf_put_byte(buf, flags) != 0) return -1;
         if (flags & 0x01) {
-            if (sjson_put_uvarint(buf, v->as.rich_text.token_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.rich_text.token_count) != 0) return -1;
             for (size_t i = 0; i < v->as.rich_text.token_count; i++) {
                 if (buf_put(buf, &v->as.rich_text.tokens[i], sizeof(int32_t)) != 0) return -1;
             }
         }
         if (flags & 0x02) {
-            if (sjson_put_uvarint(buf, v->as.rich_text.span_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.rich_text.span_count) != 0) return -1;
             for (size_t i = 0; i < v->as.rich_text.span_count; i++) {
-                if (sjson_put_uvarint(buf, v->as.rich_text.spans[i].start) != 0) return -1;
-                if (sjson_put_uvarint(buf, v->as.rich_text.spans[i].end) != 0) return -1;
-                if (sjson_put_uvarint(buf, v->as.rich_text.spans[i].kind_id) != 0) return -1;
+                if (cowrie_put_uvarint(buf, v->as.rich_text.spans[i].start) != 0) return -1;
+                if (cowrie_put_uvarint(buf, v->as.rich_text.spans[i].end) != 0) return -1;
+                if (cowrie_put_uvarint(buf, v->as.rich_text.spans[i].kind_id) != 0) return -1;
             }
         }
         return 0;
     }
 
-    case SJSON_DELTA: {
+    case COWRIE_DELTA: {
         if (buf_put_byte(buf, SJT_DELTA) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.delta.base_id) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.delta.op_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.delta.base_id) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.delta.op_count) != 0) return -1;
         for (size_t i = 0; i < v->as.delta.op_count; i++) {
-            SJSONDeltaOp_t *op = &v->as.delta.ops[i];
+            COWRIEDeltaOp_t *op = &v->as.delta.ops[i];
             if (buf_put_byte(buf, op->op_code) != 0) return -1;
-            if (sjson_put_uvarint(buf, op->field_id) != 0) return -1;
-            if (op->op_code == SJSON_DELTA_SET_FIELD || op->op_code == SJSON_DELTA_APPEND_ARRAY) {
+            if (cowrie_put_uvarint(buf, op->field_id) != 0) return -1;
+            if (op->op_code == COWRIE_DELTA_SET_FIELD || op->op_code == COWRIE_DELTA_APPEND_ARRAY) {
                 if (encode_value(buf, op->value, dict) != 0) return -1;
             }
         }
@@ -1254,125 +1254,125 @@ static int encode_value(SJSONBuf *buf, const SJSONValue *v, const Dict *dict) {
     }
 
     /* v2.1 Graph types */
-    case SJSON_NODE: {
+    case COWRIE_NODE: {
         if (buf_put_byte(buf, SJT_NODE) != 0) return -1;
         /* id:string */
         if (encode_string_raw(buf, v->as.node.id, v->as.node.id_len) != 0) return -1;
         /* labelCount:uvarint + labels:string* */
-        if (sjson_put_uvarint(buf, v->as.node.label_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.node.label_count) != 0) return -1;
         for (size_t i = 0; i < v->as.node.label_count; i++) {
             if (encode_string_raw(buf, v->as.node.labels[i], v->as.node.label_lens[i]) != 0) return -1;
         }
         /* propCount:uvarint + (dictIdx:uvarint + value)* */
-        if (sjson_put_uvarint(buf, v->as.node.prop_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.node.prop_count) != 0) return -1;
         for (size_t i = 0; i < v->as.node.prop_count; i++) {
             int idx = dict_find(dict, v->as.node.props[i].key, v->as.node.props[i].key_len);
             if (idx < 0) return -1;
-            if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+            if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
             if (encode_value(buf, v->as.node.props[i].value, dict) != 0) return -1;
         }
         return 0;
     }
 
-    case SJSON_EDGE: {
+    case COWRIE_EDGE: {
         if (buf_put_byte(buf, SJT_EDGE) != 0) return -1;
         /* srcId:string + dstId:string + type:string */
         if (encode_string_raw(buf, v->as.edge.from_id, v->as.edge.from_id_len) != 0) return -1;
         if (encode_string_raw(buf, v->as.edge.to_id, v->as.edge.to_id_len) != 0) return -1;
         if (encode_string_raw(buf, v->as.edge.edge_type, v->as.edge.edge_type_len) != 0) return -1;
         /* propCount:uvarint + (dictIdx:uvarint + value)* */
-        if (sjson_put_uvarint(buf, v->as.edge.prop_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.edge.prop_count) != 0) return -1;
         for (size_t i = 0; i < v->as.edge.prop_count; i++) {
             int idx = dict_find(dict, v->as.edge.props[i].key, v->as.edge.props[i].key_len);
             if (idx < 0) return -1;
-            if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+            if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
             if (encode_value(buf, v->as.edge.props[i].value, dict) != 0) return -1;
         }
         return 0;
     }
 
-    case SJSON_NODE_BATCH: {
+    case COWRIE_NODE_BATCH: {
         if (buf_put_byte(buf, SJT_NODE_BATCH) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.node_batch.node_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.node_batch.node_count) != 0) return -1;
         for (size_t i = 0; i < v->as.node_batch.node_count; i++) {
-            SJSONNode *n = &v->as.node_batch.nodes[i];
+            COWRIENode *n = &v->as.node_batch.nodes[i];
             /* Inline node encoding (without tag) */
             if (encode_string_raw(buf, n->id, n->id_len) != 0) return -1;
-            if (sjson_put_uvarint(buf, n->label_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, n->label_count) != 0) return -1;
             for (size_t j = 0; j < n->label_count; j++) {
                 if (encode_string_raw(buf, n->labels[j], n->label_lens[j]) != 0) return -1;
             }
-            if (sjson_put_uvarint(buf, n->prop_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, n->prop_count) != 0) return -1;
             for (size_t j = 0; j < n->prop_count; j++) {
                 int idx = dict_find(dict, n->props[j].key, n->props[j].key_len);
                 if (idx < 0) return -1;
-                if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+                if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
                 if (encode_value(buf, n->props[j].value, dict) != 0) return -1;
             }
         }
         return 0;
     }
 
-    case SJSON_EDGE_BATCH: {
+    case COWRIE_EDGE_BATCH: {
         if (buf_put_byte(buf, SJT_EDGE_BATCH) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.edge_batch.edge_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.edge_batch.edge_count) != 0) return -1;
         for (size_t i = 0; i < v->as.edge_batch.edge_count; i++) {
-            SJSONEdge *e = &v->as.edge_batch.edges[i];
+            COWRIEEdge *e = &v->as.edge_batch.edges[i];
             /* Inline edge encoding (without tag) */
             if (encode_string_raw(buf, e->from_id, e->from_id_len) != 0) return -1;
             if (encode_string_raw(buf, e->to_id, e->to_id_len) != 0) return -1;
             if (encode_string_raw(buf, e->edge_type, e->edge_type_len) != 0) return -1;
-            if (sjson_put_uvarint(buf, e->prop_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, e->prop_count) != 0) return -1;
             for (size_t j = 0; j < e->prop_count; j++) {
                 int idx = dict_find(dict, e->props[j].key, e->props[j].key_len);
                 if (idx < 0) return -1;
-                if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+                if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
                 if (encode_value(buf, e->props[j].value, dict) != 0) return -1;
             }
         }
         return 0;
     }
 
-    case SJSON_GRAPH_SHARD: {
+    case COWRIE_GRAPH_SHARD: {
         if (buf_put_byte(buf, SJT_GRAPH_SHARD) != 0) return -1;
         /* nodeCount:uvarint + Node* */
-        if (sjson_put_uvarint(buf, v->as.graph_shard.node_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.graph_shard.node_count) != 0) return -1;
         for (size_t i = 0; i < v->as.graph_shard.node_count; i++) {
-            SJSONNode *n = &v->as.graph_shard.nodes[i];
+            COWRIENode *n = &v->as.graph_shard.nodes[i];
             if (encode_string_raw(buf, n->id, n->id_len) != 0) return -1;
-            if (sjson_put_uvarint(buf, n->label_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, n->label_count) != 0) return -1;
             for (size_t j = 0; j < n->label_count; j++) {
                 if (encode_string_raw(buf, n->labels[j], n->label_lens[j]) != 0) return -1;
             }
-            if (sjson_put_uvarint(buf, n->prop_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, n->prop_count) != 0) return -1;
             for (size_t j = 0; j < n->prop_count; j++) {
                 int idx = dict_find(dict, n->props[j].key, n->props[j].key_len);
                 if (idx < 0) return -1;
-                if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+                if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
                 if (encode_value(buf, n->props[j].value, dict) != 0) return -1;
             }
         }
         /* edgeCount:uvarint + Edge* */
-        if (sjson_put_uvarint(buf, v->as.graph_shard.edge_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.graph_shard.edge_count) != 0) return -1;
         for (size_t i = 0; i < v->as.graph_shard.edge_count; i++) {
-            SJSONEdge *e = &v->as.graph_shard.edges[i];
+            COWRIEEdge *e = &v->as.graph_shard.edges[i];
             if (encode_string_raw(buf, e->from_id, e->from_id_len) != 0) return -1;
             if (encode_string_raw(buf, e->to_id, e->to_id_len) != 0) return -1;
             if (encode_string_raw(buf, e->edge_type, e->edge_type_len) != 0) return -1;
-            if (sjson_put_uvarint(buf, e->prop_count) != 0) return -1;
+            if (cowrie_put_uvarint(buf, e->prop_count) != 0) return -1;
             for (size_t j = 0; j < e->prop_count; j++) {
                 int idx = dict_find(dict, e->props[j].key, e->props[j].key_len);
                 if (idx < 0) return -1;
-                if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+                if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
                 if (encode_value(buf, e->props[j].value, dict) != 0) return -1;
             }
         }
         /* metaCount:uvarint + (dictIdx:uvarint + value)* */
-        if (sjson_put_uvarint(buf, v->as.graph_shard.meta_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.graph_shard.meta_count) != 0) return -1;
         for (size_t i = 0; i < v->as.graph_shard.meta_count; i++) {
             int idx = dict_find(dict, v->as.graph_shard.metadata[i].key, v->as.graph_shard.metadata[i].key_len);
             if (idx < 0) return -1;
-            if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
+            if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
             if (encode_value(buf, v->as.graph_shard.metadata[i].value, dict) != 0) return -1;
         }
         return 0;
@@ -1383,20 +1383,20 @@ static int encode_value(SJSONBuf *buf, const SJSONValue *v, const Dict *dict) {
 }
 
 /* Forward declaration for deterministic encoding */
-static int encode_value_deterministic(SJSONBuf *buf, const SJSONValue *v, const Dict *dict, const SJSONEncodeOpts *opts);
+static int encode_value_deterministic(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict, const COWRIEEncodeOpts *opts);
 
 /* Compare function for sorting object members by key */
 static int member_key_compare(const void *a, const void *b) {
-    const SJSONMember *ma = (const SJSONMember *)a;
-    const SJSONMember *mb = (const SJSONMember *)b;
+    const COWRIEMember *ma = (const COWRIEMember *)a;
+    const COWRIEMember *mb = (const COWRIEMember *)b;
     return strcmp(ma->key, mb->key);
 }
 
 /* Count non-null members in object */
-static size_t count_non_null_members(const SJSONValue *v) {
+static size_t count_non_null_members(const COWRIEValue *v) {
     size_t count = 0;
     for (size_t i = 0; i < v->as.object.len; i++) {
-        if (v->as.object.members[i].value->type != SJSON_NULL) {
+        if (v->as.object.members[i].value->type != COWRIE_NULL) {
             count++;
         }
     }
@@ -1404,49 +1404,49 @@ static size_t count_non_null_members(const SJSONValue *v) {
 }
 
 /* Encode value with deterministic key ordering for objects */
-static int encode_value_deterministic(SJSONBuf *buf, const SJSONValue *v, const Dict *dict, const SJSONEncodeOpts *opts) {
+static int encode_value_deterministic(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict, const COWRIEEncodeOpts *opts) {
     if (!v) return -1;
 
     switch (v->type) {
-    case SJSON_NULL:
+    case COWRIE_NULL:
         return buf_put_byte(buf, SJT_NULL);
 
-    case SJSON_BOOL:
+    case COWRIE_BOOL:
         return buf_put_byte(buf, v->as.boolean ? SJT_TRUE : SJT_FALSE);
 
-    case SJSON_INT64: {
+    case COWRIE_INT64: {
         if (buf_put_byte(buf, SJT_INT64) != 0) return -1;
-        return sjson_put_uvarint(buf, sjson_zigzag_encode(v->as.i64));
+        return cowrie_put_uvarint(buf, cowrie_zigzag_encode(v->as.i64));
     }
 
-    case SJSON_UINT64:
+    case COWRIE_UINT64:
         if (buf_put_byte(buf, SJT_UINT64) != 0) return -1;
-        return sjson_put_uvarint(buf, v->as.u64);
+        return cowrie_put_uvarint(buf, v->as.u64);
 
-    case SJSON_FLOAT64: {
+    case COWRIE_FLOAT64: {
         if (buf_put_byte(buf, SJT_FLOAT64) != 0) return -1;
         /* Write float64 as 8 bytes LE - use direct memcpy (assumes LE platform) */
         return buf_put(buf, &v->as.f64, 8);
     }
 
-    case SJSON_STRING:
+    case COWRIE_STRING:
         if (buf_put_byte(buf, SJT_STRING) != 0) return -1;
         return encode_string_raw(buf, v->as.str.data, v->as.str.len);
 
-    case SJSON_BYTES:
+    case COWRIE_BYTES:
         if (buf_put_byte(buf, SJT_BYTES) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.bytes.len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.bytes.len) != 0) return -1;
         return buf_put(buf, v->as.bytes.data, v->as.bytes.len);
 
-    case SJSON_ARRAY:
+    case COWRIE_ARRAY:
         if (buf_put_byte(buf, SJT_ARRAY) != 0) return -1;
-        if (sjson_put_uvarint(buf, v->as.array.len) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.array.len) != 0) return -1;
         for (size_t i = 0; i < v->as.array.len; i++) {
             if (encode_value_deterministic(buf, v->as.array.items[i], dict, opts) != 0) return -1;
         }
         return 0;
 
-    case SJSON_OBJECT: {
+    case COWRIE_OBJECT: {
         /* Sort members by key for deterministic output */
         size_t n = v->as.object.len;
 
@@ -1454,23 +1454,23 @@ static int encode_value_deterministic(SJSONBuf *buf, const SJSONValue *v, const 
         size_t encode_count = (opts && opts->omit_null) ? count_non_null_members(v) : n;
 
         if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
-        if (sjson_put_uvarint(buf, encode_count) != 0) return -1;
+        if (cowrie_put_uvarint(buf, encode_count) != 0) return -1;
 
         if (n == 0) return 0;
 
-        SJSONMember *sorted = malloc(n * sizeof(SJSONMember));
+        COWRIEMember *sorted = malloc(n * sizeof(COWRIEMember));
         if (!sorted) return -1;
-        memcpy(sorted, v->as.object.members, n * sizeof(SJSONMember));
-        qsort(sorted, n, sizeof(SJSONMember), member_key_compare);
+        memcpy(sorted, v->as.object.members, n * sizeof(COWRIEMember));
+        qsort(sorted, n, sizeof(COWRIEMember), member_key_compare);
 
         for (size_t i = 0; i < n; i++) {
             /* Skip null values if omit_null is set */
-            if (opts && opts->omit_null && sorted[i].value->type == SJSON_NULL) {
+            if (opts && opts->omit_null && sorted[i].value->type == COWRIE_NULL) {
                 continue;
             }
             int idx = dict_find(dict, sorted[i].key, sorted[i].key_len);
             if (idx < 0) { free(sorted); return -1; }
-            if (sjson_put_uvarint(buf, (uint64_t)idx) != 0) { free(sorted); return -1; }
+            if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) { free(sorted); return -1; }
             if (encode_value_deterministic(buf, sorted[i].value, dict, opts) != 0) { free(sorted); return -1; }
         }
         free(sorted);
@@ -1483,8 +1483,8 @@ static int encode_value_deterministic(SJSONBuf *buf, const SJSONValue *v, const 
     }
 }
 
-int sjson_encode(const SJSONValue *root, SJSONBuf *buf) {
-    sjson_buf_init(buf);
+int cowrie_encode(const COWRIEValue *root, COWRIEBuf *buf) {
+    cowrie_buf_init(buf);
 
     /* Build dictionary */
     Dict dict;
@@ -1492,13 +1492,13 @@ int sjson_encode(const SJSONValue *root, SJSONBuf *buf) {
     collect_keys(root, &dict);
 
     /* Write header */
-    if (buf_put_byte(buf, SJSON_MAGIC_0) != 0) goto fail;
-    if (buf_put_byte(buf, SJSON_MAGIC_1) != 0) goto fail;
-    if (buf_put_byte(buf, SJSON_VERSION) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_MAGIC_0) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_MAGIC_1) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_VERSION) != 0) goto fail;
     if (buf_put_byte(buf, 0) != 0) goto fail; /* flags = 0 (no compression) */
 
     /* Write dictionary */
-    if (sjson_put_uvarint(buf, dict.count) != 0) goto fail;
+    if (cowrie_put_uvarint(buf, dict.count) != 0) goto fail;
     for (size_t i = 0; i < dict.count; i++) {
         if (encode_string_raw(buf, dict.keys[i], dict.lens[i]) != 0) goto fail;
     }
@@ -1511,12 +1511,12 @@ int sjson_encode(const SJSONValue *root, SJSONBuf *buf) {
 
 fail:
     dict_free(&dict);
-    sjson_buf_free(buf);
+    cowrie_buf_free(buf);
     return -1;
 }
 
-int sjson_encode_with_opts(const SJSONValue *root, const SJSONEncodeOpts *opts, SJSONBuf *buf) {
-    sjson_buf_init(buf);
+int cowrie_encode_with_opts(const COWRIEValue *root, const COWRIEEncodeOpts *opts, COWRIEBuf *buf) {
+    cowrie_buf_init(buf);
 
     /* Build dictionary - need to sort keys for deterministic dictionary order */
     Dict dict;
@@ -1543,13 +1543,13 @@ int sjson_encode_with_opts(const SJSONValue *root, const SJSONEncodeOpts *opts, 
     }
 
     /* Write header */
-    if (buf_put_byte(buf, SJSON_MAGIC_0) != 0) goto fail;
-    if (buf_put_byte(buf, SJSON_MAGIC_1) != 0) goto fail;
-    if (buf_put_byte(buf, SJSON_VERSION) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_MAGIC_0) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_MAGIC_1) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_VERSION) != 0) goto fail;
     if (buf_put_byte(buf, 0) != 0) goto fail; /* flags = 0 (no compression) */
 
     /* Write dictionary */
-    if (sjson_put_uvarint(buf, dict.count) != 0) goto fail;
+    if (cowrie_put_uvarint(buf, dict.count) != 0) goto fail;
     for (size_t i = 0; i < dict.count; i++) {
         if (encode_string_raw(buf, dict.keys[i], dict.lens[i]) != 0) goto fail;
     }
@@ -1566,7 +1566,7 @@ int sjson_encode_with_opts(const SJSONValue *root, const SJSONEncodeOpts *opts, 
 
 fail:
     dict_free(&dict);
-    sjson_buf_free(buf);
+    cowrie_buf_free(buf);
     return -1;
 }
 
@@ -1579,7 +1579,7 @@ typedef struct {
     size_t len;
     size_t pos;
     int depth;              /* Current nesting depth */
-    SJSONDecodeOpts opts;   /* Security limits */
+    COWRIEDecodeOpts opts;   /* Security limits */
 } Reader;
 
 /* Check remaining bytes in reader */
@@ -1602,7 +1602,7 @@ static int rd_get(Reader *r, void *out, size_t n) {
 
 static int rd_get_uvarint(Reader *r, uint64_t *out) {
     size_t bytes_read;
-    if (sjson_get_uvarint(r->data + r->pos, r->len - r->pos, out, &bytes_read) != 0) {
+    if (cowrie_get_uvarint(r->data + r->pos, r->len - r->pos, out, &bytes_read) != 0) {
         return -1;
     }
     r->pos += bytes_read;
@@ -1676,7 +1676,7 @@ static int validate_utf8(const char *data, size_t len) {
     return 0;
 }
 
-static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **out);
+static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **out);
 
 static int skip_hints(Reader *r) {
     uint64_t count;
@@ -1738,34 +1738,34 @@ static int decode_string_raw(Reader *r, char **out, size_t *out_len) {
     return 0;
 }
 
-static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **out) {
+static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **out) {
     uint8_t tag;
     if (rd_get_byte(r, &tag) != 0) return -1;
 
     switch (tag) {
     case SJT_NULL:
-        *out = sjson_new_null();
+        *out = cowrie_new_null();
         return *out ? 0 : -1;
 
     case SJT_FALSE:
-        *out = sjson_new_bool(0);
+        *out = cowrie_new_bool(0);
         return *out ? 0 : -1;
 
     case SJT_TRUE:
-        *out = sjson_new_bool(1);
+        *out = cowrie_new_bool(1);
         return *out ? 0 : -1;
 
     case SJT_INT64: {
         uint64_t ux;
         if (rd_get_uvarint(r, &ux) != 0) return -1;
-        *out = sjson_new_int64(sjson_zigzag_decode(ux));
+        *out = cowrie_new_int64(cowrie_zigzag_decode(ux));
         return *out ? 0 : -1;
     }
 
     case SJT_UINT64: {
         uint64_t u;
         if (rd_get_uvarint(r, &u) != 0) return -1;
-        *out = sjson_new_uint64(u);
+        *out = cowrie_new_uint64(u);
         return *out ? 0 : -1;
     }
 
@@ -1774,7 +1774,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         if (rd_get(r, &bits, sizeof(bits)) != 0) return -1;
         double f;
         memcpy(&f, &bits, sizeof(f));
-        *out = sjson_new_float64(f);
+        *out = cowrie_new_float64(f);
         return *out ? 0 : -1;
     }
 
@@ -1783,7 +1783,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         uint8_t coef[16];
         if (rd_get_byte(r, &scale) != 0) return -1;
         if (rd_get(r, coef, 16) != 0) return -1;
-        *out = sjson_new_decimal128((int8_t)scale, coef);
+        *out = cowrie_new_decimal128((int8_t)scale, coef);
         return *out ? 0 : -1;
     }
 
@@ -1791,7 +1791,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         char *s;
         size_t len;
         if (decode_string_raw(r, &s, &len) != 0) return -1;
-        SJSONValue *v = alloc_value(SJSON_STRING);
+        COWRIEValue *v = alloc_value(COWRIE_STRING);
         if (!v) { free(s); return -1; }
         v->as.str.data = s;
         v->as.str.len = len;
@@ -1806,7 +1806,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         uint8_t *data = malloc((size_t)len);
         if (!data && len > 0) return -1;
         if (len > 0 && rd_get(r, data, (size_t)len) != 0) { free(data); return -1; }
-        *out = sjson_new_bytes(data, (size_t)len);
+        *out = cowrie_new_bytes(data, (size_t)len);
         free(data);
         return *out ? 0 : -1;
     }
@@ -1814,14 +1814,14 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
     case SJT_DATETIME64: {
         int64_t nanos;
         if (rd_get(r, &nanos, sizeof(nanos)) != 0) return -1;
-        *out = sjson_new_datetime64(nanos);
+        *out = cowrie_new_datetime64(nanos);
         return *out ? 0 : -1;
     }
 
     case SJT_UUID128: {
         uint8_t uuid[16];
         if (rd_get(r, uuid, 16) != 0) return -1;
-        *out = sjson_new_uuid128(uuid);
+        *out = cowrie_new_uuid128(uuid);
         return *out ? 0 : -1;
     }
 
@@ -1832,7 +1832,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         uint8_t *data = malloc((size_t)len);
         if (!data && len > 0) return -1;
         if (len > 0 && rd_get(r, data, (size_t)len) != 0) { free(data); return -1; }
-        *out = sjson_new_bigint(data, (size_t)len);
+        *out = cowrie_new_bigint(data, (size_t)len);
         free(data);
         return *out ? 0 : -1;
     }
@@ -1847,16 +1847,16 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         uint8_t *data = malloc((size_t)len);
         if (!data && len > 0) return -1;
         if (len > 0 && rd_get(r, data, (size_t)len) != 0) { free(data); return -1; }
-        if (r->opts.unknown_ext == SJSON_UNKNOWN_EXT_ERROR) {
+        if (r->opts.unknown_ext == COWRIE_UNKNOWN_EXT_ERROR) {
             free(data);
             return -1;
         }
-        if (r->opts.unknown_ext == SJSON_UNKNOWN_EXT_SKIP_AS_NULL) {
+        if (r->opts.unknown_ext == COWRIE_UNKNOWN_EXT_SKIP_AS_NULL) {
             free(data);
-            *out = sjson_new_null();
+            *out = cowrie_new_null();
             return *out ? 0 : -1;
         }
-        *out = sjson_new_ext(ext_type, data, (size_t)len);
+        *out = cowrie_new_ext(ext_type, data, (size_t)len);
         free(data);
         return *out ? 0 : -1;
     }
@@ -1881,19 +1881,19 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             return -1;
         }
 
-        SJSONValue *arr = sjson_new_array();
+        COWRIEValue *arr = cowrie_new_array();
         if (!arr) { r->depth--; return -1; }
 
         for (uint64_t i = 0; i < count; i++) {
-            SJSONValue *item;
+            COWRIEValue *item;
             if (decode_value(r, dict, dict_len, &item) != 0) {
-                sjson_free(arr);
+                cowrie_free(arr);
                 r->depth--;
                 return -1;
             }
-            if (sjson_array_append(arr, item) != 0) {
-                sjson_free(item);
-                sjson_free(arr);
+            if (cowrie_array_append(arr, item) != 0) {
+                cowrie_free(item);
+                cowrie_free(arr);
                 r->depth--;
                 return -1;
             }
@@ -1923,33 +1923,33 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             return -1;
         }
 
-        SJSONValue *obj = sjson_new_object();
+        COWRIEValue *obj = cowrie_new_object();
         if (!obj) { r->depth--; return -1; }
 
         for (uint64_t i = 0; i < count; i++) {
             uint64_t field_id;
             if (rd_get_uvarint(r, &field_id) != 0) {
-                sjson_free(obj);
+                cowrie_free(obj);
                 r->depth--;
                 return -1;
             }
             if (field_id >= dict_len) {
-                sjson_free(obj);
+                cowrie_free(obj);
                 r->depth--;
                 return -1;
             }
 
-            SJSONValue *val;
+            COWRIEValue *val;
             if (decode_value(r, dict, dict_len, &val) != 0) {
-                sjson_free(obj);
+                cowrie_free(obj);
                 r->depth--;
                 return -1;
             }
 
             size_t key_len = strlen(dict[field_id]);
-            if (sjson_object_set(obj, dict[field_id], key_len, val) != 0) {
-                sjson_free(val);
-                sjson_free(obj);
+            if (cowrie_object_set(obj, dict[field_id], key_len, val) != 0) {
+                cowrie_free(val);
+                cowrie_free(obj);
                 r->depth--;
                 return -1;
             }
@@ -1995,7 +1995,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             if (rd_get(r, data, (size_t)data_len) != 0) { free(data); free(dims); return -1; }
         }
 
-        *out = sjson_new_tensor(dtype, rank, dims, data, (size_t)data_len);
+        *out = cowrie_new_tensor(dtype, rank, dims, data, (size_t)data_len);
         free(dims);
         free(data);
         return *out ? 0 : -1;
@@ -2015,7 +2015,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             if (rd_get(r, key, (size_t)key_len) != 0) { free(key); return -1; }
         }
 
-        *out = sjson_new_tensor_ref(store_id, key, (size_t)key_len);
+        *out = cowrie_new_tensor_ref(store_id, key, (size_t)key_len);
         free(key);
         return *out ? 0 : -1;
     }
@@ -2037,7 +2037,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             if (rd_get(r, data, (size_t)data_len) != 0) { free(data); return -1; }
         }
 
-        *out = sjson_new_image(format, width, height, data, (size_t)data_len);
+        *out = cowrie_new_image(format, width, height, data, (size_t)data_len);
         free(data);
         return *out ? 0 : -1;
     }
@@ -2059,7 +2059,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             if (rd_get(r, data, (size_t)data_len) != 0) { free(data); return -1; }
         }
 
-        *out = sjson_new_audio(encoding, sample_rate, channels, data, (size_t)data_len);
+        *out = cowrie_new_audio(encoding, sample_rate, channels, data, (size_t)data_len);
         free(data);
         return *out ? 0 : -1;
     }
@@ -2082,7 +2082,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
 
         void *col_indices = NULL;
         if (edge_count > 0) {
-            size_t elem_size = (id_width == SJSON_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
+            size_t elem_size = (id_width == COWRIE_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
             col_indices = malloc((size_t)edge_count * elem_size);
             if (!col_indices) { free(row_offsets); return -1; }
             if (rd_get(r, col_indices, (size_t)edge_count * elem_size) != 0) {
@@ -2092,7 +2092,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_adjlist(id_width, (size_t)node_count, (size_t)edge_count, row_offsets, col_indices);
+        *out = cowrie_new_adjlist(id_width, (size_t)node_count, (size_t)edge_count, row_offsets, col_indices);
         free(row_offsets);
         free(col_indices);
         return *out ? 0 : -1;
@@ -2127,14 +2127,14 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        SJSONRichTextSpan *spans = NULL;
+        COWRIERichTextSpan *spans = NULL;
         size_t span_count = 0;
         if (flags & 0x02) {
             uint64_t sc;
             if (rd_get_uvarint(r, &sc) != 0) { free(tokens); free(text); return -1; }
             span_count = (size_t)sc;
             if (span_count > 0) {
-                spans = malloc(span_count * sizeof(SJSONRichTextSpan));
+                spans = malloc(span_count * sizeof(COWRIERichTextSpan));
                 if (!spans) { free(tokens); free(text); return -1; }
                 for (size_t i = 0; i < span_count; i++) {
                     uint64_t start, end, kind_id;
@@ -2153,7 +2153,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_rich_text(text, (size_t)text_len, tokens, token_count, spans, span_count);
+        *out = cowrie_new_rich_text(text, (size_t)text_len, tokens, token_count, spans, span_count);
         free(spans);
         free(tokens);
         free(text);
@@ -2165,9 +2165,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         if (rd_get_uvarint(r, &base_id) != 0) return -1;
         if (rd_get_uvarint(r, &op_count) != 0) return -1;
 
-        SJSONDeltaOp_t *ops = NULL;
+        COWRIEDeltaOp_t *ops = NULL;
         if (op_count > 0) {
-            ops = malloc((size_t)op_count * sizeof(SJSONDeltaOp_t));
+            ops = malloc((size_t)op_count * sizeof(COWRIEDeltaOp_t));
             if (!ops) return -1;
 
             for (size_t i = 0; i < (size_t)op_count; i++) {
@@ -2180,11 +2180,11 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
                 ops[i].field_id = (size_t)field_id;
                 ops[i].value = NULL;
 
-                if (op_code == SJSON_DELTA_SET_FIELD || op_code == SJSON_DELTA_APPEND_ARRAY) {
+                if (op_code == COWRIE_DELTA_SET_FIELD || op_code == COWRIE_DELTA_APPEND_ARRAY) {
                     if (decode_value(r, dict, dict_len, &ops[i].value) != 0) {
                         /* Free previously allocated values */
                         for (size_t j = 0; j < i; j++) {
-                            sjson_free(ops[j].value);
+                            cowrie_free(ops[j].value);
                         }
                         free(ops);
                         return -1;
@@ -2193,8 +2193,8 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_delta((size_t)base_id, ops, (size_t)op_count);
-        /* Note: sjson_new_delta takes ownership of value pointers */
+        *out = cowrie_new_delta((size_t)base_id, ops, (size_t)op_count);
+        /* Note: cowrie_new_delta takes ownership of value pointers */
         free(ops);  /* Free the array but not the values */
         return *out ? 0 : -1;
     }
@@ -2247,9 +2247,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             return -1;
         }
 
-        SJSONMember *props = NULL;
+        COWRIEMember *props = NULL;
         if (prop_count > 0) {
-            props = malloc((size_t)prop_count * sizeof(SJSONMember));
+            props = malloc((size_t)prop_count * sizeof(COWRIEMember));
             if (!props) {
                 for (size_t i = 0; i < (size_t)label_count; i++) free(labels[i]);
                 free(labels); free(label_lens); free(id);
@@ -2260,7 +2260,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
                 if (rd_get_uvarint(r, &field_id) != 0 || field_id >= dict_len) {
                     for (size_t j = 0; j < i; j++) {
                         free(props[j].key);
-                        sjson_free(props[j].value);
+                        cowrie_free(props[j].value);
                     }
                     free(props);
                     for (size_t j = 0; j < (size_t)label_count; j++) free(labels[j]);
@@ -2273,7 +2273,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
                     free(props[i].key);
                     for (size_t j = 0; j < i; j++) {
                         free(props[j].key);
-                        sjson_free(props[j].value);
+                        cowrie_free(props[j].value);
                     }
                     free(props);
                     for (size_t j = 0; j < (size_t)label_count; j++) free(labels[j]);
@@ -2283,7 +2283,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_node(id, id_len, (const char **)labels, label_lens, (size_t)label_count, props, (size_t)prop_count);
+        *out = cowrie_new_node(id, id_len, (const char **)labels, label_lens, (size_t)label_count, props, (size_t)prop_count);
         /* Cleanup temps (constructor copies) */
         for (size_t i = 0; i < (size_t)label_count; i++) free(labels[i]);
         free(labels); free(label_lens); free(id);
@@ -2312,9 +2312,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             return -1;
         }
 
-        SJSONMember *props = NULL;
+        COWRIEMember *props = NULL;
         if (prop_count > 0) {
-            props = malloc((size_t)prop_count * sizeof(SJSONMember));
+            props = malloc((size_t)prop_count * sizeof(COWRIEMember));
             if (!props) {
                 free(edge_type); free(to_id); free(from_id);
                 return -1;
@@ -2324,7 +2324,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
                 if (rd_get_uvarint(r, &field_id) != 0 || field_id >= dict_len) {
                     for (size_t j = 0; j < i; j++) {
                         free(props[j].key);
-                        sjson_free(props[j].value);
+                        cowrie_free(props[j].value);
                     }
                     free(props); free(edge_type); free(to_id); free(from_id);
                     return -1;
@@ -2335,7 +2335,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
                     free(props[i].key);
                     for (size_t j = 0; j < i; j++) {
                         free(props[j].key);
-                        sjson_free(props[j].value);
+                        cowrie_free(props[j].value);
                     }
                     free(props); free(edge_type); free(to_id); free(from_id);
                     return -1;
@@ -2343,7 +2343,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_edge(from_id, from_id_len, to_id, to_id_len, edge_type, edge_type_len, props, (size_t)prop_count);
+        *out = cowrie_new_edge(from_id, from_id_len, to_id, to_id_len, edge_type, edge_type_len, props, (size_t)prop_count);
         free(from_id); free(to_id); free(edge_type);
         for (size_t i = 0; i < (size_t)prop_count; i++) free(props[i].key);
         free(props);
@@ -2356,9 +2356,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         /* Security limit check */
         if (r->opts.max_array_len > 0 && count > r->opts.max_array_len) return -1;
 
-        SJSONNode *nodes = NULL;
+        COWRIENode *nodes = NULL;
         if (count > 0) {
-            nodes = calloc((size_t)count, sizeof(SJSONNode));
+            nodes = calloc((size_t)count, sizeof(COWRIENode));
             if (!nodes) return -1;
         }
 
@@ -2384,7 +2384,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             nodes[i].prop_count = (size_t)pc;
 
             if (pc > 0) {
-                nodes[i].props = malloc((size_t)pc * sizeof(SJSONMember));
+                nodes[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
                 if (!nodes[i].props) goto node_batch_fail;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2396,7 +2396,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_node_batch(nodes, (size_t)count);
+        *out = cowrie_new_node_batch(nodes, (size_t)count);
         free(nodes);  /* shallow copy in constructor */
         return *out ? 0 : -1;
 
@@ -2411,9 +2411,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         /* Security limit check */
         if (r->opts.max_array_len > 0 && count > r->opts.max_array_len) return -1;
 
-        SJSONEdge *edges = NULL;
+        COWRIEEdge *edges = NULL;
         if (count > 0) {
-            edges = calloc((size_t)count, sizeof(SJSONEdge));
+            edges = calloc((size_t)count, sizeof(COWRIEEdge));
             if (!edges) return -1;
         }
 
@@ -2427,7 +2427,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             edges[i].prop_count = (size_t)pc;
 
             if (pc > 0) {
-                edges[i].props = malloc((size_t)pc * sizeof(SJSONMember));
+                edges[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
                 if (!edges[i].props) goto edge_batch_fail;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2439,7 +2439,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_edge_batch(edges, (size_t)count);
+        *out = cowrie_new_edge_batch(edges, (size_t)count);
         free(edges);  /* shallow copy in constructor */
         return *out ? 0 : -1;
 
@@ -2455,9 +2455,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         /* Security limit check */
         if (r->opts.max_array_len > 0 && node_count > r->opts.max_array_len) return -1;
 
-        SJSONNode *nodes = NULL;
+        COWRIENode *nodes = NULL;
         if (node_count > 0) {
-            nodes = calloc((size_t)node_count, sizeof(SJSONNode));
+            nodes = calloc((size_t)node_count, sizeof(COWRIENode));
             if (!nodes) return -1;
         }
 
@@ -2478,7 +2478,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             if (rd_get_uvarint(r, &pc) != 0) goto shard_fail;
             nodes[i].prop_count = (size_t)pc;
             if (pc > 0) {
-                nodes[i].props = malloc((size_t)pc * sizeof(SJSONMember));
+                nodes[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
                 if (!nodes[i].props) goto shard_fail;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2496,9 +2496,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         /* Security limit check */
         if (r->opts.max_array_len > 0 && edge_count > r->opts.max_array_len) goto shard_fail;
 
-        SJSONEdge *edges = NULL;
+        COWRIEEdge *edges = NULL;
         if (edge_count > 0) {
-            edges = calloc((size_t)edge_count, sizeof(SJSONEdge));
+            edges = calloc((size_t)edge_count, sizeof(COWRIEEdge));
             if (!edges) goto shard_fail;
         }
 
@@ -2510,7 +2510,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             if (rd_get_uvarint(r, &pc) != 0) goto shard_fail2;
             edges[i].prop_count = (size_t)pc;
             if (pc > 0) {
-                edges[i].props = malloc((size_t)pc * sizeof(SJSONMember));
+                edges[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
                 if (!edges[i].props) goto shard_fail2;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2526,16 +2526,16 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
         uint64_t meta_count;
         if (rd_get_uvarint(r, &meta_count) != 0) goto shard_fail2;
 
-        SJSONMember *metadata = NULL;
+        COWRIEMember *metadata = NULL;
         if (meta_count > 0) {
-            metadata = malloc((size_t)meta_count * sizeof(SJSONMember));
+            metadata = malloc((size_t)meta_count * sizeof(COWRIEMember));
             if (!metadata) goto shard_fail2;
             for (size_t i = 0; i < (size_t)meta_count; i++) {
                 uint64_t fid;
                 if (rd_get_uvarint(r, &fid) != 0 || fid >= dict_len) {
                     for (size_t j = 0; j < i; j++) {
                         free(metadata[j].key);
-                        sjson_free(metadata[j].value);
+                        cowrie_free(metadata[j].value);
                     }
                     free(metadata);
                     goto shard_fail2;
@@ -2546,7 +2546,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
                     free(metadata[i].key);
                     for (size_t j = 0; j < i; j++) {
                         free(metadata[j].key);
-                        sjson_free(metadata[j].value);
+                        cowrie_free(metadata[j].value);
                     }
                     free(metadata);
                     goto shard_fail2;
@@ -2554,7 +2554,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
             }
         }
 
-        *out = sjson_new_graph_shard(nodes, (size_t)node_count, edges, (size_t)edge_count, metadata, (size_t)meta_count);
+        *out = cowrie_new_graph_shard(nodes, (size_t)node_count, edges, (size_t)edge_count, metadata, (size_t)meta_count);
         free(nodes); free(edges);
         for (size_t i = 0; i < (size_t)meta_count; i++) free(metadata[i].key);
         free(metadata);
@@ -2572,8 +2572,8 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, SJSONValue **ou
     }
 }
 
-int sjson_decode_with_opts(const uint8_t *data, size_t len, 
-                           const SJSONDecodeOpts *opts, SJSONValue **out) {
+int cowrie_decode_with_opts(const uint8_t *data, size_t len, 
+                           const COWRIEDecodeOpts *opts, COWRIEValue **out) {
     Reader r;
     r.data = data;
     r.len = len;
@@ -2584,28 +2584,28 @@ int sjson_decode_with_opts(const uint8_t *data, size_t len,
     if (opts) {
         r.opts = *opts;
     } else {
-        sjson_decode_opts_init(&r.opts);
+        cowrie_decode_opts_init(&r.opts);
     }
     
     /* Apply defaults for zero values */
-    if (r.opts.max_depth == 0) r.opts.max_depth = SJSON_DEFAULT_MAX_DEPTH;
-    if (r.opts.max_array_len == 0) r.opts.max_array_len = SJSON_DEFAULT_MAX_ARRAY_LEN;
-    if (r.opts.max_object_len == 0) r.opts.max_object_len = SJSON_DEFAULT_MAX_OBJECT_LEN;
-    if (r.opts.max_string_len == 0) r.opts.max_string_len = SJSON_DEFAULT_MAX_STRING_LEN;
-    if (r.opts.max_bytes_len == 0) r.opts.max_bytes_len = SJSON_DEFAULT_MAX_BYTES_LEN;
+    if (r.opts.max_depth == 0) r.opts.max_depth = COWRIE_DEFAULT_MAX_DEPTH;
+    if (r.opts.max_array_len == 0) r.opts.max_array_len = COWRIE_DEFAULT_MAX_ARRAY_LEN;
+    if (r.opts.max_object_len == 0) r.opts.max_object_len = COWRIE_DEFAULT_MAX_OBJECT_LEN;
+    if (r.opts.max_string_len == 0) r.opts.max_string_len = COWRIE_DEFAULT_MAX_STRING_LEN;
+    if (r.opts.max_bytes_len == 0) r.opts.max_bytes_len = COWRIE_DEFAULT_MAX_BYTES_LEN;
 
     /* Read header */
     uint8_t magic0, magic1, version, flags;
     if (rd_get_byte(&r, &magic0) != 0) return -1;
     if (rd_get_byte(&r, &magic1) != 0) return -1;
-    if (magic0 != SJSON_MAGIC_0 || magic1 != SJSON_MAGIC_1) return -1;
+    if (magic0 != COWRIE_MAGIC_0 || magic1 != COWRIE_MAGIC_1) return -1;
 
     if (rd_get_byte(&r, &version) != 0) return -1;
-    if (version != SJSON_VERSION) return -1;
+    if (version != COWRIE_VERSION) return -1;
 
     if (rd_get_byte(&r, &flags) != 0) return -1;
-    /* For now, we don't handle compression here - use sjson_decode_framed */
-    if (flags & SJSON_FLAG_HAS_COLUMN_HINTS) {
+    /* For now, we don't handle compression here - use cowrie_decode_framed */
+    if (flags & COWRIE_FLAG_HAS_COLUMN_HINTS) {
         if (skip_hints(&r) != 0) return -1;
     }
 
@@ -2641,9 +2641,9 @@ int sjson_decode_with_opts(const uint8_t *data, size_t len,
     return result;
 }
 
-int sjson_decode(const uint8_t *data, size_t len, SJSONValue **out) {
+int cowrie_decode(const uint8_t *data, size_t len, COWRIEValue **out) {
     /* Use default options */
-    return sjson_decode_with_opts(data, len, NULL, out);
+    return cowrie_decode_with_opts(data, len, NULL, out);
 }
 
 /* ============================================================
@@ -2696,7 +2696,7 @@ static const uint32_t crc32_table[256] = {
     0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
-uint32_t sjson_crc32(const uint8_t *data, size_t len) {
+uint32_t cowrie_crc32(const uint8_t *data, size_t len) {
     if (!data || len == 0) return 0;
 
     uint32_t crc = 0xFFFFFFFF;
@@ -2743,35 +2743,35 @@ static uint64_t fnv1a_string(uint64_t hash, const char *s, size_t len) {
 
 /* Compare function for sorting object keys */
 static int key_compare(const void *a, const void *b) {
-    const SJSONMember *ma = (const SJSONMember *)a;
-    const SJSONMember *mb = (const SJSONMember *)b;
+    const COWRIEMember *ma = (const COWRIEMember *)a;
+    const COWRIEMember *mb = (const COWRIEMember *)b;
     return strcmp(ma->key, mb->key);
 }
 
-static uint64_t schema_fingerprint_impl(const SJSONValue *v, uint64_t hash) {
+static uint64_t schema_fingerprint_impl(const COWRIEValue *v, uint64_t hash) {
     if (!v) {
-        return fnv1a_byte(hash, (uint8_t)SJSON_NULL);
+        return fnv1a_byte(hash, (uint8_t)COWRIE_NULL);
     }
 
     /* Hash the type ordinal */
     hash = fnv1a_byte(hash, (uint8_t)v->type);
 
     switch (v->type) {
-    case SJSON_NULL:
-    case SJSON_BOOL:
-    case SJSON_INT64:
-    case SJSON_UINT64:
-    case SJSON_FLOAT64:
-    case SJSON_DECIMAL128:
-    case SJSON_STRING:
-    case SJSON_BYTES:
-    case SJSON_DATETIME64:
-    case SJSON_UUID128:
-    case SJSON_BIGINT:
+    case COWRIE_NULL:
+    case COWRIE_BOOL:
+    case COWRIE_INT64:
+    case COWRIE_UINT64:
+    case COWRIE_FLOAT64:
+    case COWRIE_DECIMAL128:
+    case COWRIE_STRING:
+    case COWRIE_BYTES:
+    case COWRIE_DATETIME64:
+    case COWRIE_UUID128:
+    case COWRIE_BIGINT:
         /* Scalar types: just the type ordinal */
         break;
 
-    case SJSON_ARRAY:
+    case COWRIE_ARRAY:
         /* Array: hash count + each element schema */
         hash = fnv1a_uint64(hash, v->as.array.len);
         for (size_t i = 0; i < v->as.array.len; i++) {
@@ -2779,7 +2779,7 @@ static uint64_t schema_fingerprint_impl(const SJSONValue *v, uint64_t hash) {
         }
         break;
 
-    case SJSON_OBJECT: {
+    case COWRIE_OBJECT: {
         /* Object: hash count + sorted keys and their value schemas */
         size_t n = v->as.object.len;
         hash = fnv1a_uint64(hash, n);
@@ -2787,10 +2787,10 @@ static uint64_t schema_fingerprint_impl(const SJSONValue *v, uint64_t hash) {
         if (n == 0) break;
 
         /* Sort keys for deterministic hashing */
-        SJSONMember *sorted = malloc(n * sizeof(SJSONMember));
+        COWRIEMember *sorted = malloc(n * sizeof(COWRIEMember));
         if (!sorted) break;
-        memcpy(sorted, v->as.object.members, n * sizeof(SJSONMember));
-        qsort(sorted, n, sizeof(SJSONMember), key_compare);
+        memcpy(sorted, v->as.object.members, n * sizeof(COWRIEMember));
+        qsort(sorted, n, sizeof(COWRIEMember), key_compare);
 
         for (size_t i = 0; i < n; i++) {
             /* Hash key name with length prefix */
@@ -2802,39 +2802,39 @@ static uint64_t schema_fingerprint_impl(const SJSONValue *v, uint64_t hash) {
         break;
     }
 
-    case SJSON_TENSOR:
+    case COWRIE_TENSOR:
         /* Tensor: include dtype and rank (as uint64) in schema */
         hash = fnv1a_byte(hash, v->as.tensor.dtype);
         hash = fnv1a_uint64(hash, v->as.tensor.rank);
         break;
 
-    case SJSON_TENSOR_REF:
+    case COWRIE_TENSOR_REF:
         /* TensorRef: include store ID */
         hash = fnv1a_byte(hash, v->as.tensor_ref.store_id);
         break;
 
-    case SJSON_EXT:
+    case COWRIE_EXT:
         /* Ext: include ext_type */
         hash = fnv1a_uint64(hash, v->as.ext.ext_type);
         break;
 
-    case SJSON_IMAGE:
+    case COWRIE_IMAGE:
         /* Image: include format */
         hash = fnv1a_byte(hash, v->as.image.format);
         break;
 
-    case SJSON_AUDIO:
+    case COWRIE_AUDIO:
         /* Audio: include encoding and channels */
         hash = fnv1a_byte(hash, v->as.audio.encoding);
         hash = fnv1a_byte(hash, v->as.audio.channels);
         break;
 
-    case SJSON_ADJLIST:
+    case COWRIE_ADJLIST:
         /* Adjlist: include ID width */
         hash = fnv1a_byte(hash, v->as.adjlist.id_width);
         break;
 
-    case SJSON_RICH_TEXT: {
+    case COWRIE_RICH_TEXT: {
         /* RichText: include presence of tokens and spans */
         uint8_t flags = 0;
         if (v->as.rich_text.token_count > 0) flags |= 0x01;
@@ -2843,7 +2843,7 @@ static uint64_t schema_fingerprint_impl(const SJSONValue *v, uint64_t hash) {
         break;
     }
 
-    case SJSON_DELTA:
+    case COWRIE_DELTA:
         /* Delta: include base ID and ops */
         hash = fnv1a_uint64(hash, v->as.delta.base_id);
         hash = fnv1a_uint64(hash, v->as.delta.op_count);
@@ -2857,7 +2857,7 @@ static uint64_t schema_fingerprint_impl(const SJSONValue *v, uint64_t hash) {
     return hash;
 }
 
-uint32_t sjson_schema_fingerprint32(const SJSONValue *v) {
+uint32_t cowrie_schema_fingerprint32(const COWRIEValue *v) {
     uint64_t hash = schema_fingerprint_impl(v, FNV_OFFSET_BASIS);
     return (uint32_t)(hash & 0xFFFFFFFF);
 }
@@ -2867,7 +2867,7 @@ uint32_t sjson_schema_fingerprint32(const SJSONValue *v) {
  * ============================================================ */
 
 /* Buffer append helper */
-static int sjson_buf_append(SJSONBuf *buf, const uint8_t *data, size_t len) {
+static int cowrie_buf_append(COWRIEBuf *buf, const uint8_t *data, size_t len) {
     if (buf->len + len > buf->cap) {
         size_t new_cap = buf->cap ? buf->cap * 2 : 256;
         while (new_cap < buf->len + len) new_cap *= 2;
@@ -2882,20 +2882,20 @@ static int sjson_buf_append(SJSONBuf *buf, const uint8_t *data, size_t len) {
 }
 
 /* Helper to write little-endian uint16 */
-static void write_u16_le(SJSONBuf *buf, uint16_t v) {
+static void write_u16_le(COWRIEBuf *buf, uint16_t v) {
     uint8_t bytes[2] = { (uint8_t)(v & 0xFF), (uint8_t)((v >> 8) & 0xFF) };
-    sjson_buf_append(buf, bytes, 2);
+    cowrie_buf_append(buf, bytes, 2);
 }
 
 /* Helper to write little-endian uint32 */
-static void write_u32_le(SJSONBuf *buf, uint32_t v) {
+static void write_u32_le(COWRIEBuf *buf, uint32_t v) {
     uint8_t bytes[4] = {
         (uint8_t)(v & 0xFF),
         (uint8_t)((v >> 8) & 0xFF),
         (uint8_t)((v >> 16) & 0xFF),
         (uint8_t)((v >> 24) & 0xFF)
     };
-    sjson_buf_append(buf, bytes, 4);
+    cowrie_buf_append(buf, bytes, 4);
 }
 
 /* Helper to read little-endian uint16 */
@@ -2909,54 +2909,54 @@ static uint32_t read_u32_le(const uint8_t *p) {
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-int sjson_master_write_frame(const SJSONValue *value, const SJSONValue *meta,
-                              const SJSONMasterWriterOpts *opts, SJSONBuf *buf) {
+int cowrie_master_write_frame(const COWRIEValue *value, const COWRIEValue *meta,
+                              const COWRIEMasterWriterOpts *opts, COWRIEBuf *buf) {
     if (!value || !opts || !buf) return -1;
 
-    sjson_buf_init(buf);
+    cowrie_buf_init(buf);
 
     /* Encode payload */
-    SJSONBuf payload_buf;
-    sjson_buf_init(&payload_buf);
-    if (sjson_encode(value, &payload_buf) != 0) {
-        sjson_buf_free(&payload_buf);
+    COWRIEBuf payload_buf;
+    cowrie_buf_init(&payload_buf);
+    if (cowrie_encode(value, &payload_buf) != 0) {
+        cowrie_buf_free(&payload_buf);
         return -1;
     }
 
     /* Encode metadata if present */
-    SJSONBuf meta_buf;
-    sjson_buf_init(&meta_buf);
+    COWRIEBuf meta_buf;
+    cowrie_buf_init(&meta_buf);
     if (meta) {
-        if (sjson_encode(meta, &meta_buf) != 0) {
-            sjson_buf_free(&payload_buf);
-            sjson_buf_free(&meta_buf);
+        if (cowrie_encode(meta, &meta_buf) != 0) {
+            cowrie_buf_free(&payload_buf);
+            cowrie_buf_free(&meta_buf);
             return -1;
         }
     }
 
     /* Compute type ID from schema */
-    uint32_t type_id = sjson_schema_fingerprint32(value);
+    uint32_t type_id = cowrie_schema_fingerprint32(value);
 
     /* Build flags */
     uint8_t frame_flags = 0;
-    if (opts->deterministic) frame_flags |= SJSON_MFLAG_DETERMINISTIC;
-    if (opts->enable_crc) frame_flags |= SJSON_MFLAG_CRC;
-    if (meta_buf.len > 0) frame_flags |= SJSON_MFLAG_META;
+    if (opts->deterministic) frame_flags |= COWRIE_MFLAG_DETERMINISTIC;
+    if (opts->enable_crc) frame_flags |= COWRIE_MFLAG_CRC;
+    if (meta_buf.len > 0) frame_flags |= COWRIE_MFLAG_META;
 
     /* Header length (fixed at 24 bytes for v2) */
     uint16_t header_len = 24;
 
     /* Write magic */
-    uint8_t magic[4] = { SJSON_MASTER_MAGIC_0, SJSON_MASTER_MAGIC_1,
-                         SJSON_MASTER_MAGIC_2, SJSON_MASTER_MAGIC_3 };
-    sjson_buf_append(buf, magic, 4);
+    uint8_t magic[4] = { COWRIE_MASTER_MAGIC_0, COWRIE_MASTER_MAGIC_1,
+                         COWRIE_MASTER_MAGIC_2, COWRIE_MASTER_MAGIC_3 };
+    cowrie_buf_append(buf, magic, 4);
 
     /* Write version */
-    uint8_t version = SJSON_MASTER_VERSION;
-    sjson_buf_append(buf, &version, 1);
+    uint8_t version = COWRIE_MASTER_VERSION;
+    cowrie_buf_append(buf, &version, 1);
 
     /* Write flags */
-    sjson_buf_append(buf, &frame_flags, 1);
+    cowrie_buf_append(buf, &frame_flags, 1);
 
     /* Write header length */
     write_u16_le(buf, header_len);
@@ -2975,38 +2975,38 @@ int sjson_master_write_frame(const SJSONValue *value, const SJSONValue *meta,
 
     /* Write metadata */
     if (meta_buf.len > 0) {
-        sjson_buf_append(buf, meta_buf.data, meta_buf.len);
+        cowrie_buf_append(buf, meta_buf.data, meta_buf.len);
     }
 
     /* Write payload */
-    sjson_buf_append(buf, payload_buf.data, payload_buf.len);
+    cowrie_buf_append(buf, payload_buf.data, payload_buf.len);
 
     /* Write CRC32 if enabled */
     if (opts->enable_crc) {
-        uint32_t crc = sjson_crc32(buf->data, buf->len);
+        uint32_t crc = cowrie_crc32(buf->data, buf->len);
         write_u32_le(buf, crc);
     }
 
-    sjson_buf_free(&payload_buf);
-    sjson_buf_free(&meta_buf);
+    cowrie_buf_free(&payload_buf);
+    cowrie_buf_free(&meta_buf);
 
     return 0;
 }
 
-int sjson_master_read_frame(const uint8_t *data, size_t len, SJSONMasterFrame *frame) {
+int cowrie_master_read_frame(const uint8_t *data, size_t len, COWRIEMasterFrame *frame) {
     if (!data || len < 24 || !frame) return -1;
 
     /* Initialize frame */
     memset(frame, 0, sizeof(*frame));
 
     /* Check magic */
-    if (!sjson_is_master_stream(data, len)) {
+    if (!cowrie_is_master_stream(data, len)) {
         return -1;
     }
 
     /* Read header */
     uint8_t version = data[4];
-    if (version != SJSON_MASTER_VERSION) return -1;
+    if (version != COWRIE_MASTER_VERSION) return -1;
 
     uint8_t flags = data[5];
     uint16_t header_len = read_u16_le(&data[6]);
@@ -3029,9 +3029,9 @@ int sjson_master_read_frame(const uint8_t *data, size_t len, SJSONMasterFrame *f
     size_t pos = (header_len > 24) ? header_len : 24;
 
     /* Read metadata if present */
-    if ((flags & SJSON_MFLAG_META) && meta_len > 0) {
+    if ((flags & COWRIE_MFLAG_META) && meta_len > 0) {
         if (pos + meta_len > len) return -1;
-        if (sjson_decode(&data[pos], meta_len, &frame->meta) != 0) {
+        if (cowrie_decode(&data[pos], meta_len, &frame->meta) != 0) {
             return -1;
         }
         pos += meta_len;
@@ -3042,27 +3042,27 @@ int sjson_master_read_frame(const uint8_t *data, size_t len, SJSONMasterFrame *f
 
     /* Read payload */
     if (pos + payload_len > len) {
-        if (frame->meta) sjson_free(frame->meta);
+        if (frame->meta) cowrie_free(frame->meta);
         return -1;
     }
-    if (sjson_decode(&data[pos], payload_len, &frame->payload) != 0) {
-        if (frame->meta) sjson_free(frame->meta);
+    if (cowrie_decode(&data[pos], payload_len, &frame->payload) != 0) {
+        if (frame->meta) cowrie_free(frame->meta);
         return -1;
     }
     pos += payload_len;
 
     /* Verify CRC if enabled */
-    if (flags & SJSON_MFLAG_CRC) {
+    if (flags & COWRIE_MFLAG_CRC) {
         if (pos + 4 > len) {
-            sjson_free(frame->payload);
-            if (frame->meta) sjson_free(frame->meta);
+            cowrie_free(frame->payload);
+            if (frame->meta) cowrie_free(frame->meta);
             return -1;
         }
         uint32_t expected_crc = read_u32_le(&data[pos]);
-        uint32_t actual_crc = sjson_crc32(data, pos);
+        uint32_t actual_crc = cowrie_crc32(data, pos);
         if (actual_crc != expected_crc) {
-            sjson_free(frame->payload);
-            if (frame->meta) sjson_free(frame->meta);
+            cowrie_free(frame->payload);
+            if (frame->meta) cowrie_free(frame->meta);
             return -1;
         }
         pos += 4;
@@ -3071,14 +3071,14 @@ int sjson_master_read_frame(const uint8_t *data, size_t len, SJSONMasterFrame *f
     return (int)pos;  /* Return bytes consumed */
 }
 
-void sjson_master_frame_free(SJSONMasterFrame *frame) {
+void cowrie_master_frame_free(COWRIEMasterFrame *frame) {
     if (!frame) return;
     if (frame->payload) {
-        sjson_free(frame->payload);
+        cowrie_free(frame->payload);
         frame->payload = NULL;
     }
     if (frame->meta) {
-        sjson_free(frame->meta);
+        cowrie_free(frame->meta);
         frame->meta = NULL;
     }
 }
@@ -3087,9 +3087,9 @@ void sjson_master_frame_free(SJSONMasterFrame *frame) {
  * Zero-Copy Tensor View Helpers (copy implementations)
  * ============================================================ */
 
-float* sjson_tensor_copy_float32(const SJSONTensor *t, size_t *count) {
+float* cowrie_tensor_copy_float32(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_FLOAT32) return NULL;
+    if (t->dtype != COWRIE_DTYPE_FLOAT32) return NULL;
     if (t->data_len == 0) {
         *count = 0;
         return NULL;
@@ -3111,7 +3111,7 @@ float* sjson_tensor_copy_float32(const SJSONTensor *t, size_t *count) {
     return out;
 }
 
-double* sjson_tensor_copy_float64(const SJSONTensor *t, size_t *count) {
+double* cowrie_tensor_copy_float64(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
     /* No FLOAT64 dtype currently, but support the operation */
     if (t->data_len == 0) {
@@ -3138,9 +3138,9 @@ double* sjson_tensor_copy_float64(const SJSONTensor *t, size_t *count) {
     return out;
 }
 
-int32_t* sjson_tensor_copy_int32(const SJSONTensor *t, size_t *count) {
+int32_t* cowrie_tensor_copy_int32(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_INT32) return NULL;
+    if (t->dtype != COWRIE_DTYPE_INT32) return NULL;
     if (t->data_len == 0) {
         *count = 0;
         return NULL;
@@ -3160,9 +3160,9 @@ int32_t* sjson_tensor_copy_int32(const SJSONTensor *t, size_t *count) {
     return out;
 }
 
-int64_t* sjson_tensor_copy_int64(const SJSONTensor *t, size_t *count) {
+int64_t* cowrie_tensor_copy_int64(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_INT64) return NULL;
+    if (t->dtype != COWRIE_DTYPE_INT64) return NULL;
     if (t->data_len == 0) {
         *count = 0;
         return NULL;

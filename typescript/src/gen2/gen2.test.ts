@@ -1,10 +1,10 @@
 /**
- * SJSON Cross-Language Parity Tests for TypeScript
+ * Cowrie Cross-Language Parity Tests for TypeScript
  *
  * Tests deterministic encoding, schema fingerprinting, and master stream
  * against Go-generated golden files.
  *
- * Run: npx ts-node sjson.test.ts
+ * Run: npx ts-node cowrie.test.ts
  */
 
 import * as fs from "fs";
@@ -55,12 +55,12 @@ function assertClose(actual: number, expected: number, epsilon: number, msg: str
 }
 
 function readGolden(name: string): Uint8Array {
-  const filePath = path.join(TESTDATA_DIR, `${name}.sjson`);
+  const filePath = path.join(TESTDATA_DIR, `${name}.cowrie`);
   return new Uint8Array(fs.readFileSync(filePath));
 }
 
 function readGoldenFingerprint(name: string): number {
-  const filePath = path.join(TESTDATA_DIR, `${name}.sjson.fingerprint`);
+  const filePath = path.join(TESTDATA_DIR, `${name}.cowrie.fingerprint`);
   const hex = fs.readFileSync(filePath, "utf-8").trim();
   return parseInt(hex, 16);
 }
@@ -71,7 +71,7 @@ function readGoldenFingerprint(name: string): number {
 
 console.log("\n--- Primitives Parity Tests ---");
 
-test("decode primitives.sjson", () => {
+test("decode primitives.cowrie", () => {
   const data = readGolden("primitives");
   const val = decode(data);
   assertEqual(val.type, Type.OBJECT, "should be object");
@@ -100,7 +100,7 @@ test("decode primitives.sjson", () => {
   assertEqual(obj["string_unicode"]?.data, "你好世界 🌍", "string_unicode value");
 });
 
-test("decode nested.sjson", () => {
+test("decode nested.cowrie", () => {
   const data = readGolden("nested");
   const val = decode(data);
   const obj = val.data as Record<string, Value>;
@@ -114,7 +114,7 @@ test("decode nested.sjson", () => {
   assertEqual(emails[0].data, "alice@example.com", "emails[0]");
 });
 
-test("decode empty.sjson", () => {
+test("decode empty.cowrie", () => {
   const data = readGolden("empty");
   const val = decode(data);
   const obj = val.data as Record<string, Value>;
@@ -128,7 +128,7 @@ test("decode empty.sjson", () => {
   assertEqual(obj["empty_string"]?.data, "", "empty_string");
 });
 
-test("decode integers.sjson", () => {
+test("decode integers.cowrie", () => {
   const data = readGolden("integers");
   const val = decode(data);
   const obj = val.data as Record<string, Value>;
@@ -141,7 +141,7 @@ test("decode integers.sjson", () => {
   assertEqual(obj["uint_max"]?.data, 18446744073709551615n, "uint_max");
 });
 
-test("decode floats.sjson", () => {
+test("decode floats.cowrie", () => {
   const data = readGolden("floats");
   const val = decode(data);
   const obj = val.data as Record<string, Value>;
@@ -151,7 +151,7 @@ test("decode floats.sjson", () => {
   assertClose(obj["e"]?.data as number, Math.E, 1e-10, "e");
 });
 
-test("decode mixed_array.sjson", () => {
+test("decode mixed_array.cowrie", () => {
   const data = readGolden("mixed_array");
   const val = decode(data);
   const arr = val.data as Value[];
@@ -169,7 +169,7 @@ test("decode mixed_array.sjson", () => {
 
 console.log("\n--- Deterministic Encoding Tests ---");
 
-test("decode deterministic.sjson", () => {
+test("decode deterministic.cowrie", () => {
   const data = readGolden("deterministic");
   const val = decode(data);
   const obj = val.data as Record<string, Value>;

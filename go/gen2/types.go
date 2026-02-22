@@ -1,6 +1,6 @@
-// Package sjson implements SJSON v2, a binary "JSON++" codec with extended types.
+// Package gen2 implements Cowrie v2, a binary "JSON++" codec with extended types.
 //
-// SJSON v2 extends JSON with:
+// Cowrie v2 extends JSON with:
 //   - Explicit integer types (int64, uint64)
 //   - Decimal128 for high-precision decimals
 //   - Native binary data (no base64)
@@ -86,7 +86,7 @@ const (
 	TagGraphShard = 0x39
 )
 
-// Type represents the type of an SJSON value.
+// Type represents the type of an Cowrie value.
 type Type uint8
 
 const (
@@ -474,7 +474,7 @@ type Member struct {
 	Value *Value
 }
 
-// Value represents an SJSON value of any type.
+// Value represents an Cowrie value of any type.
 type Value struct {
 	typ Type
 
@@ -528,7 +528,7 @@ func (v *Value) IsNull() bool {
 // Bool returns the boolean value. Panics if not a bool.
 func (v *Value) Bool() bool {
 	if v.typ != TypeBool {
-		panic("sjson: not a bool")
+		panic("cowrie: not a bool")
 	}
 	return v.boolVal
 }
@@ -536,7 +536,7 @@ func (v *Value) Bool() bool {
 // Int64 returns the int64 value. Panics if not an int64.
 func (v *Value) Int64() int64 {
 	if v.typ != TypeInt64 {
-		panic("sjson: not an int64")
+		panic("cowrie: not an int64")
 	}
 	return v.int64Val
 }
@@ -544,7 +544,7 @@ func (v *Value) Int64() int64 {
 // Uint64 returns the uint64 value. Panics if not a uint64.
 func (v *Value) Uint64() uint64 {
 	if v.typ != TypeUint64 {
-		panic("sjson: not a uint64")
+		panic("cowrie: not a uint64")
 	}
 	return v.uint64Val
 }
@@ -552,7 +552,7 @@ func (v *Value) Uint64() uint64 {
 // Float64 returns the float64 value. Panics if not a float64.
 func (v *Value) Float64() float64 {
 	if v.typ != TypeFloat64 {
-		panic("sjson: not a float64")
+		panic("cowrie: not a float64")
 	}
 	return v.float64Val
 }
@@ -560,7 +560,7 @@ func (v *Value) Float64() float64 {
 // Decimal128 returns the decimal128 value. Panics if not a decimal128.
 func (v *Value) Decimal128() Decimal128 {
 	if v.typ != TypeDecimal128 {
-		panic("sjson: not a decimal128")
+		panic("cowrie: not a decimal128")
 	}
 	return v.decimal128
 }
@@ -568,7 +568,7 @@ func (v *Value) Decimal128() Decimal128 {
 // String returns the string value. Panics if not a string.
 func (v *Value) String() string {
 	if v.typ != TypeString {
-		panic("sjson: not a string")
+		panic("cowrie: not a string")
 	}
 	return v.stringVal
 }
@@ -576,7 +576,7 @@ func (v *Value) String() string {
 // Bytes returns the bytes value. Panics if not bytes.
 func (v *Value) Bytes() []byte {
 	if v.typ != TypeBytes {
-		panic("sjson: not bytes")
+		panic("cowrie: not bytes")
 	}
 	return v.bytesVal
 }
@@ -585,7 +585,7 @@ func (v *Value) Bytes() []byte {
 // Panics if not a datetime64.
 func (v *Value) Datetime64() int64 {
 	if v.typ != TypeDatetime64 {
-		panic("sjson: not a datetime64")
+		panic("cowrie: not a datetime64")
 	}
 	return v.datetime64
 }
@@ -593,7 +593,7 @@ func (v *Value) Datetime64() int64 {
 // UUID128 returns the UUID value. Panics if not a uuid128.
 func (v *Value) UUID128() [16]byte {
 	if v.typ != TypeUUID128 {
-		panic("sjson: not a uuid128")
+		panic("cowrie: not a uuid128")
 	}
 	return v.uuid128
 }
@@ -602,7 +602,7 @@ func (v *Value) UUID128() [16]byte {
 // Panics if not a bigint.
 func (v *Value) BigInt() []byte {
 	if v.typ != TypeBigInt {
-		panic("sjson: not a bigint")
+		panic("cowrie: not a bigint")
 	}
 	return v.bigintVal
 }
@@ -622,7 +622,7 @@ func (v *Value) Len() int {
 // Index returns the i-th element of an array. Panics if not an array or out of bounds.
 func (v *Value) Index(i int) *Value {
 	if v.typ != TypeArray {
-		panic("sjson: not an array")
+		panic("cowrie: not an array")
 	}
 	return v.arrayVal[i]
 }
@@ -631,7 +631,7 @@ func (v *Value) Index(i int) *Value {
 // Panics if not an object.
 func (v *Value) Get(key string) *Value {
 	if v.typ != TypeObject {
-		panic("sjson: not an object")
+		panic("cowrie: not an object")
 	}
 	for _, m := range v.objectVal {
 		if m.Key == key {
@@ -644,7 +644,7 @@ func (v *Value) Get(key string) *Value {
 // Members returns all members of an object. Panics if not an object.
 func (v *Value) Members() []Member {
 	if v.typ != TypeObject {
-		panic("sjson: not an object")
+		panic("cowrie: not an object")
 	}
 	return v.objectVal
 }
@@ -652,7 +652,7 @@ func (v *Value) Members() []Member {
 // Array returns all elements of an array. Panics if not an array.
 func (v *Value) Array() []*Value {
 	if v.typ != TypeArray {
-		panic("sjson: not an array")
+		panic("cowrie: not an array")
 	}
 	return v.arrayVal
 }
@@ -660,7 +660,7 @@ func (v *Value) Array() []*Value {
 // Set sets a key-value pair on an object. Panics if not an object.
 func (v *Value) Set(key string, val *Value) {
 	if v.typ != TypeObject {
-		panic("sjson: not an object")
+		panic("cowrie: not an object")
 	}
 	// Check if key exists
 	for i := range v.objectVal {
@@ -676,7 +676,7 @@ func (v *Value) Set(key string, val *Value) {
 // Append adds a value to an array. Panics if not an array.
 func (v *Value) Append(val *Value) {
 	if v.typ != TypeArray {
-		panic("sjson: not an array")
+		panic("cowrie: not an array")
 	}
 	v.arrayVal = append(v.arrayVal, val)
 }
@@ -688,7 +688,7 @@ func (v *Value) Append(val *Value) {
 // Tensor returns the tensor data. Panics if not a tensor.
 func (v *Value) Tensor() TensorData {
 	if v.typ != TypeTensor {
-		panic("sjson: not a tensor")
+		panic("cowrie: not a tensor")
 	}
 	return v.tensorVal
 }
@@ -696,7 +696,7 @@ func (v *Value) Tensor() TensorData {
 // TensorRef returns the tensor reference data. Panics if not a tensor_ref.
 func (v *Value) TensorRef() TensorRefData {
 	if v.typ != TypeTensorRef {
-		panic("sjson: not a tensor_ref")
+		panic("cowrie: not a tensor_ref")
 	}
 	return v.tensorRefVal
 }
@@ -704,7 +704,7 @@ func (v *Value) TensorRef() TensorRefData {
 // Image returns the image data. Panics if not an image.
 func (v *Value) Image() ImageData {
 	if v.typ != TypeImage {
-		panic("sjson: not an image")
+		panic("cowrie: not an image")
 	}
 	return v.imageVal
 }
@@ -712,7 +712,7 @@ func (v *Value) Image() ImageData {
 // Audio returns the audio data. Panics if not an audio.
 func (v *Value) Audio() AudioData {
 	if v.typ != TypeAudio {
-		panic("sjson: not an audio")
+		panic("cowrie: not an audio")
 	}
 	return v.audioVal
 }
@@ -720,7 +720,7 @@ func (v *Value) Audio() AudioData {
 // Adjlist returns the adjacency list data. Panics if not an adjlist.
 func (v *Value) Adjlist() AdjlistData {
 	if v.typ != TypeAdjlist {
-		panic("sjson: not an adjlist")
+		panic("cowrie: not an adjlist")
 	}
 	return v.adjlistVal
 }
@@ -728,7 +728,7 @@ func (v *Value) Adjlist() AdjlistData {
 // RichText returns the rich text data. Panics if not a rich_text.
 func (v *Value) RichText() RichTextData {
 	if v.typ != TypeRichText {
-		panic("sjson: not a rich_text")
+		panic("cowrie: not a rich_text")
 	}
 	return v.richTextVal
 }
@@ -736,7 +736,7 @@ func (v *Value) RichText() RichTextData {
 // Delta returns the delta data. Panics if not a delta.
 func (v *Value) Delta() DeltaData {
 	if v.typ != TypeDelta {
-		panic("sjson: not a delta")
+		panic("cowrie: not a delta")
 	}
 	return v.deltaVal
 }
@@ -744,7 +744,7 @@ func (v *Value) Delta() DeltaData {
 // UnknownExt returns the unknown extension data. Panics if not an unknown_ext.
 func (v *Value) UnknownExt() UnknownExtData {
 	if v.typ != TypeUnknownExt {
-		panic("sjson: not an unknown_ext")
+		panic("cowrie: not an unknown_ext")
 	}
 	return v.unknownExtVal
 }
@@ -918,7 +918,7 @@ func (v *Value) IndexOr(i int, defaultVal *Value) *Value {
 // Node returns the node data. Panics if not a node.
 func (v *Value) Node() NodeData {
 	if v.typ != TypeNode {
-		panic("sjson: not a node")
+		panic("cowrie: not a node")
 	}
 	return v.nodeVal
 }
@@ -934,7 +934,7 @@ func (v *Value) TryNode() (NodeData, bool) {
 // Edge returns the edge data. Panics if not an edge.
 func (v *Value) Edge() EdgeData {
 	if v.typ != TypeEdge {
-		panic("sjson: not an edge")
+		panic("cowrie: not an edge")
 	}
 	return v.edgeVal
 }
@@ -950,7 +950,7 @@ func (v *Value) TryEdge() (EdgeData, bool) {
 // NodeBatch returns the node batch data. Panics if not a node_batch.
 func (v *Value) NodeBatch() NodeBatchData {
 	if v.typ != TypeNodeBatch {
-		panic("sjson: not a node_batch")
+		panic("cowrie: not a node_batch")
 	}
 	return v.nodeBatchVal
 }
@@ -966,7 +966,7 @@ func (v *Value) TryNodeBatch() (NodeBatchData, bool) {
 // EdgeBatch returns the edge batch data. Panics if not an edge_batch.
 func (v *Value) EdgeBatch() EdgeBatchData {
 	if v.typ != TypeEdgeBatch {
-		panic("sjson: not an edge_batch")
+		panic("cowrie: not an edge_batch")
 	}
 	return v.edgeBatchVal
 }
@@ -982,7 +982,7 @@ func (v *Value) TryEdgeBatch() (EdgeBatchData, bool) {
 // GraphShard returns the graph shard data. Panics if not a graph_shard.
 func (v *Value) GraphShard() GraphShardData {
 	if v.typ != TypeGraphShard {
-		panic("sjson: not a graph_shard")
+		panic("cowrie: not a graph_shard")
 	}
 	return v.graphShardVal
 }

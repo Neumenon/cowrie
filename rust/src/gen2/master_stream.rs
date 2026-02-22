@@ -1,4 +1,4 @@
-//! Master Stream - unified stream framing for SJSON.
+//! Master Stream - unified stream framing for Cowrie.
 //!
 //! Provides a higher-level stream format with:
 //! - Type routing via schema fingerprints
@@ -8,7 +8,7 @@
 //! - Legacy stream compatibility
 
 use std::io::Write;
-use super::types::{Value, SjsonError};
+use super::types::{Value, CowrieError};
 use super::encode::encode;
 use super::decode::decode;
 use super::schema::schema_fingerprint32;
@@ -37,12 +37,12 @@ pub enum MasterStreamError {
     InvalidVersion(u8),
     Truncated,
     CrcMismatch,
-    Sjson(SjsonError),
+    Sjson(CowrieError),
     Io(std::io::Error),
 }
 
-impl From<SjsonError> for MasterStreamError {
-    fn from(e: SjsonError) -> Self {
+impl From<CowrieError> for MasterStreamError {
+    fn from(e: CowrieError) -> Self {
         MasterStreamError::Sjson(e)
     }
 }
@@ -248,8 +248,8 @@ pub fn is_master_stream(data: &[u8]) -> bool {
     data.len() >= 4 && &data[0..4] == MASTER_MAGIC
 }
 
-/// Check if data starts with SJSON document magic
-pub fn is_sjson_document(data: &[u8]) -> bool {
+/// Check if data starts with Cowrie document magic
+pub fn is_cowrie_document(data: &[u8]) -> bool {
     if data.len() < 4 {
         return false;
     }
@@ -356,10 +356,10 @@ mod tests {
     }
 
     #[test]
-    fn test_is_sjson_document() {
-        assert!(is_sjson_document(b"SJ\x02\x00"));
-        assert!(!is_sjson_document(b"SJST"));
-        assert!(!is_sjson_document(b""));
+    fn test_is_cowrie_document() {
+        assert!(is_cowrie_document(b"SJ\x02\x00"));
+        assert!(!is_cowrie_document(b"SJST"));
+        assert!(!is_cowrie_document(b""));
     }
 
     #[test]

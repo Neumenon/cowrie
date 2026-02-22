@@ -9,7 +9,7 @@
  *
  * @example
  * ```typescript
- * import { encode, decode } from 'sjson/gen1';
+ * import { encode, decode } from 'cowrie/gen1';
  *
  * const data = encode({ name: 'Alice', scores: [1.0, 2.0, 3.0] });
  * const decoded = decode(data);

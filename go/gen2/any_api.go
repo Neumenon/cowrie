@@ -10,7 +10,7 @@ import (
 // AnyOptions controls EncodeAny behavior.
 //
 // EncodeAny/DecodeAny provides a Gen-1-like API surface on top of the Gen-2 wire
-// format (SJSON v2). The key feature is optional tensorization of numeric slices
+// format (Cowrie v2). The key feature is optional tensorization of numeric slices
 // so embeddings don’t degrade into per-element arrays.
 //
 // DecodeAny returns Go-friendly values (e.g. `[]byte`, `time.Time`), whereas
@@ -27,18 +27,18 @@ func DefaultAnyOptions() AnyOptions {
 	return AnyOptions{TensorizeSlices: true}
 }
 
-// EncodeAny encodes v into SJSON v2 bytes.
+// EncodeAny encodes v into Cowrie v2 bytes.
 func EncodeAny(v any) ([]byte, error) {
 	return EncodeAnyWithOptions(v, DefaultAnyOptions())
 }
 
-// EncodeAnyWithOptions encodes v into SJSON v2 bytes with options.
+// EncodeAnyWithOptions encodes v into Cowrie v2 bytes with options.
 func EncodeAnyWithOptions(v any, opts AnyOptions) ([]byte, error) {
 	val := fromGoAny(v, opts)
 	return Encode(val)
 }
 
-// DecodeAny decodes SJSON v2 bytes into Go values.
+// DecodeAny decodes Cowrie v2 bytes into Go values.
 func DecodeAny(data []byte) (any, error) {
 	v, err := Decode(data)
 	if err != nil {
@@ -47,7 +47,7 @@ func DecodeAny(data []byte) (any, error) {
 	return ToGoAny(v), nil
 }
 
-// ToGoAny converts an SJSON value to Go-friendly values.
+// ToGoAny converts an Cowrie value to Go-friendly values.
 //
 // Differences vs ToAny:
 // - bytes -> []byte (not base64 string)

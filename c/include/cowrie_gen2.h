@@ -1,5 +1,5 @@
 /*
- * SJSON v2 - "JSON++" Binary Codec
+ * Cowrie v2 - "JSON++" Binary Codec
  *
  * A binary format that extends JSON with better types:
  * - Explicit int64/uint64/float64/decimal128
@@ -9,8 +9,8 @@
  * - Clean compression layering
  */
 
-#ifndef SJSON_H
-#define SJSON_H
+#ifndef COWRIE_H
+#define COWRIE_H
 
 #include <stdint.h>
 #include <stddef.h>
@@ -20,16 +20,16 @@ extern "C" {
 #endif
 
 /* Wire format constants */
-#define SJSON_MAGIC_0      'S'
-#define SJSON_MAGIC_1      'J'
-#define SJSON_VERSION      2
+#define COWRIE_MAGIC_0      'S'
+#define COWRIE_MAGIC_1      'J'
+#define COWRIE_VERSION      2
 
 /* Header flags (in header byte 3) */
-#define SJSON_FLAG_COMPRESSED       0x01
-#define SJSON_FLAG_HAS_COLUMN_HINTS 0x08
-#define SJSON_COMP_NONE         0
-#define SJSON_COMP_GZIP         1
-#define SJSON_COMP_ZSTD         2
+#define COWRIE_FLAG_COMPRESSED       0x01
+#define COWRIE_FLAG_HAS_COLUMN_HINTS 0x08
+#define COWRIE_COMP_NONE         0
+#define COWRIE_COMP_GZIP         1
+#define COWRIE_COMP_ZSTD         2
 
 /* Type tags - Core (0x00-0x1F) */
 typedef enum {
@@ -63,111 +63,111 @@ typedef enum {
     SJT_NODE_BATCH  = 0x37,   /* count:uvarint + Node[count] */
     SJT_EDGE_BATCH  = 0x38,   /* count:uvarint + Edge[count] */
     SJT_GRAPH_SHARD = 0x39    /* nodeCount:uvarint + Node* + edgeCount:uvarint + Edge* + metaCount:uvarint + (dictIdx:uvarint + value)* */
-} SJSONTag;
+} COWRIETag;
 
 /* DType enum for TENSOR - aligned with Go reference implementation */
 typedef enum {
-    SJSON_DTYPE_FLOAT32  = 0x01,
-    SJSON_DTYPE_FLOAT16  = 0x02,
-    SJSON_DTYPE_BFLOAT16 = 0x03,
-    SJSON_DTYPE_INT8     = 0x04,
-    SJSON_DTYPE_INT16    = 0x05,
-    SJSON_DTYPE_INT32    = 0x06,
-    SJSON_DTYPE_INT64    = 0x07,
-    SJSON_DTYPE_UINT8    = 0x08,
-    SJSON_DTYPE_UINT16   = 0x09,
-    SJSON_DTYPE_UINT32   = 0x0A,
-    SJSON_DTYPE_UINT64   = 0x0B,
-    SJSON_DTYPE_FLOAT64  = 0x0C,
-    SJSON_DTYPE_BOOL     = 0x0D,
+    COWRIE_DTYPE_FLOAT32  = 0x01,
+    COWRIE_DTYPE_FLOAT16  = 0x02,
+    COWRIE_DTYPE_BFLOAT16 = 0x03,
+    COWRIE_DTYPE_INT8     = 0x04,
+    COWRIE_DTYPE_INT16    = 0x05,
+    COWRIE_DTYPE_INT32    = 0x06,
+    COWRIE_DTYPE_INT64    = 0x07,
+    COWRIE_DTYPE_UINT8    = 0x08,
+    COWRIE_DTYPE_UINT16   = 0x09,
+    COWRIE_DTYPE_UINT32   = 0x0A,
+    COWRIE_DTYPE_UINT64   = 0x0B,
+    COWRIE_DTYPE_FLOAT64  = 0x0C,
+    COWRIE_DTYPE_BOOL     = 0x0D,
     /* Quantized types */
-    SJSON_DTYPE_QINT4    = 0x10,  /* 4-bit quantized integer */
-    SJSON_DTYPE_QINT2    = 0x11,  /* 2-bit quantized integer */
-    SJSON_DTYPE_QINT3    = 0x12,  /* 3-bit quantized integer */
-    SJSON_DTYPE_TERNARY  = 0x13,  /* Ternary (-1, 0, 1) */
-    SJSON_DTYPE_BINARY   = 0x14   /* Binary (0, 1) */
-} SJSONDType;
+    COWRIE_DTYPE_QINT4    = 0x10,  /* 4-bit quantized integer */
+    COWRIE_DTYPE_QINT2    = 0x11,  /* 2-bit quantized integer */
+    COWRIE_DTYPE_QINT3    = 0x12,  /* 3-bit quantized integer */
+    COWRIE_DTYPE_TERNARY  = 0x13,  /* Ternary (-1, 0, 1) */
+    COWRIE_DTYPE_BINARY   = 0x14   /* Binary (0, 1) */
+} COWRIEDType;
 
 /* Image format enum */
 typedef enum {
-    SJSON_IMG_JPEG = 0x01,
-    SJSON_IMG_PNG  = 0x02,
-    SJSON_IMG_WEBP = 0x03,
-    SJSON_IMG_AVIF = 0x04,
-    SJSON_IMG_BMP  = 0x05
-} SJSONImageFormat;
+    COWRIE_IMG_JPEG = 0x01,
+    COWRIE_IMG_PNG  = 0x02,
+    COWRIE_IMG_WEBP = 0x03,
+    COWRIE_IMG_AVIF = 0x04,
+    COWRIE_IMG_BMP  = 0x05
+} COWRIEImageFormat;
 
 /* Audio encoding enum */
 typedef enum {
-    SJSON_AUD_PCM_INT16   = 0x01,
-    SJSON_AUD_PCM_FLOAT32 = 0x02,
-    SJSON_AUD_OPUS        = 0x03,
-    SJSON_AUD_AAC         = 0x04
-} SJSONAudioEncoding;
+    COWRIE_AUD_PCM_INT16   = 0x01,
+    COWRIE_AUD_PCM_FLOAT32 = 0x02,
+    COWRIE_AUD_OPUS        = 0x03,
+    COWRIE_AUD_AAC         = 0x04
+} COWRIEAudioEncoding;
 
 /* ADJLIST id_width enum */
 typedef enum {
-    SJSON_ID_INT32 = 0x01,
-    SJSON_ID_INT64 = 0x02
-} SJSONIdWidth;
+    COWRIE_ID_INT32 = 0x01,
+    COWRIE_ID_INT64 = 0x02
+} COWRIEIdWidth;
 
 /* DELTA op codes */
 typedef enum {
-    SJSON_DELTA_SET_FIELD    = 0x01,
-    SJSON_DELTA_DELETE_FIELD = 0x02,
-    SJSON_DELTA_APPEND_ARRAY = 0x03
-} SJSONDeltaOp;
+    COWRIE_DELTA_SET_FIELD    = 0x01,
+    COWRIE_DELTA_DELETE_FIELD = 0x02,
+    COWRIE_DELTA_APPEND_ARRAY = 0x03
+} COWRIEDeltaOp;
 
 /* Value types for the AST */
 typedef enum {
-    SJSON_NULL,
-    SJSON_BOOL,
-    SJSON_INT64,
-    SJSON_UINT64,
-    SJSON_FLOAT64,
-    SJSON_DECIMAL128,
-    SJSON_STRING,
-    SJSON_BYTES,
-    SJSON_DATETIME64,
-    SJSON_UUID128,
-    SJSON_BIGINT,
-    SJSON_EXT,
-    SJSON_ARRAY,
-    SJSON_OBJECT,
+    COWRIE_NULL,
+    COWRIE_BOOL,
+    COWRIE_INT64,
+    COWRIE_UINT64,
+    COWRIE_FLOAT64,
+    COWRIE_DECIMAL128,
+    COWRIE_STRING,
+    COWRIE_BYTES,
+    COWRIE_DATETIME64,
+    COWRIE_UUID128,
+    COWRIE_BIGINT,
+    COWRIE_EXT,
+    COWRIE_ARRAY,
+    COWRIE_OBJECT,
     /* v2.1 extension types */
-    SJSON_TENSOR,
-    SJSON_TENSOR_REF,
-    SJSON_IMAGE,
-    SJSON_AUDIO,
-    SJSON_ADJLIST,
-    SJSON_RICH_TEXT,
-    SJSON_DELTA,
+    COWRIE_TENSOR,
+    COWRIE_TENSOR_REF,
+    COWRIE_IMAGE,
+    COWRIE_AUDIO,
+    COWRIE_ADJLIST,
+    COWRIE_RICH_TEXT,
+    COWRIE_DELTA,
     /* v2.1 Graph types */
-    SJSON_NODE,
-    SJSON_EDGE,
-    SJSON_NODE_BATCH,
-    SJSON_EDGE_BATCH,
-    SJSON_GRAPH_SHARD
-} SJSONType;
+    COWRIE_NODE,
+    COWRIE_EDGE,
+    COWRIE_NODE_BATCH,
+    COWRIE_EDGE_BATCH,
+    COWRIE_GRAPH_SHARD
+} COWRIEType;
 
 /* Forward declarations */
-typedef struct SJSONValue SJSONValue;
-typedef struct SJSONMember SJSONMember;
-typedef struct SJSONDeltaOp_t SJSONDeltaOp_t;
-typedef struct SJSONRichTextSpan SJSONRichTextSpan;
+typedef struct COWRIEValue COWRIEValue;
+typedef struct COWRIEMember COWRIEMember;
+typedef struct COWRIEDeltaOp_t COWRIEDeltaOp_t;
+typedef struct COWRIERichTextSpan COWRIERichTextSpan;
 
 /* Decimal128: value = coef * 10^(-scale) */
 typedef struct {
     int8_t scale;          /* -127 to +127 */
     uint8_t coef[16];      /* two's complement big-endian */
-} SJSONDecimal128;
+} COWRIEDecimal128;
 
 /* Unknown extension payload (TagExt) */
 typedef struct {
     uint64_t ext_type;
     uint8_t *payload;
     size_t payload_len;
-} SJSONExt;
+} COWRIEExt;
 
 /* ============================================================
  * v2.1 Extension Type Structs
@@ -175,49 +175,49 @@ typedef struct {
 
 /* Tensor: embeddings, feature vectors, model I/O */
 typedef struct {
-    uint8_t dtype;         /* SJSONDType enum */
+    uint8_t dtype;         /* COWRIEDType enum */
     uint8_t rank;          /* number of dimensions */
     size_t *dims;          /* dimension sizes [rank] */
     uint8_t *data;         /* raw tensor bytes, row-major */
     size_t data_len;
-} SJSONTensor;
+} COWRIETensor;
 
 /* TensorRef: reference to stored tensor (vector DB, KV cache) */
 typedef struct {
     uint8_t store_id;      /* which store/shard */
     uint8_t *key;          /* lookup key (UUID, hash, etc.) */
     size_t key_len;
-} SJSONTensorRef;
+} COWRIETensorRef;
 
 /* Image: raw images without base64 */
 typedef struct {
-    uint8_t format;        /* SJSONImageFormat enum */
+    uint8_t format;        /* COWRIEImageFormat enum */
     uint16_t width;
     uint16_t height;
     uint8_t *data;         /* encoded image bytes */
     size_t data_len;
-} SJSONImage;
+} COWRIEImage;
 
 /* Audio: waveforms, voice clips */
 typedef struct {
-    uint8_t encoding;      /* SJSONAudioEncoding enum */
+    uint8_t encoding;      /* COWRIEAudioEncoding enum */
     uint32_t sample_rate;
     uint8_t channels;
     uint8_t *data;
     size_t data_len;
-} SJSONAudio;
+} COWRIEAudio;
 
 /* Adjlist: CSR adjacency list for graphs/GNNs */
 typedef struct {
-    uint8_t id_width;      /* SJSONIdWidth: 1=int32, 2=int64 */
+    uint8_t id_width;      /* COWRIEIdWidth: 1=int32, 2=int64 */
     size_t node_count;
     size_t edge_count;
     size_t *row_offsets;   /* [node_count + 1] */
     void *col_indices;     /* int32_t* or int64_t* based on id_width */
-} SJSONAdjlist;
+} COWRIEAdjlist;
 
 /* RichTextSpan: annotated span within rich text */
-struct SJSONRichTextSpan {
+struct COWRIERichTextSpan {
     size_t start;          /* byte offset */
     size_t end;            /* byte offset */
     size_t kind_id;        /* application-defined */
@@ -229,23 +229,23 @@ typedef struct {
     size_t text_len;
     int32_t *tokens;       /* int32 token IDs, or NULL */
     size_t token_count;
-    SJSONRichTextSpan *spans;  /* annotated spans, or NULL */
+    COWRIERichTextSpan *spans;  /* annotated spans, or NULL */
     size_t span_count;
-} SJSONRichText;
+} COWRIERichText;
 
 /* DeltaOp: single operation in a delta patch */
-struct SJSONDeltaOp_t {
-    uint8_t op_code;       /* SJSONDeltaOp enum */
+struct COWRIEDeltaOp_t {
+    uint8_t op_code;       /* COWRIEDeltaOp enum */
     size_t field_id;       /* dictionary-coded field ID */
-    SJSONValue *value;     /* for SET_FIELD and APPEND_ARRAY */
+    COWRIEValue *value;     /* for SET_FIELD and APPEND_ARRAY */
 };
 
 /* Delta: semantic diff/patch vs previous state */
 typedef struct {
     size_t base_id;        /* reference to base object */
-    SJSONDeltaOp_t *ops;
+    COWRIEDeltaOp_t *ops;
     size_t op_count;
-} SJSONDelta;
+} COWRIEDelta;
 
 /* ============================================================
  * v2.1 Graph Type Structs
@@ -258,9 +258,9 @@ typedef struct {
     char **labels;         /* label strings */
     size_t *label_lens;    /* label string lengths */
     size_t label_count;
-    SJSONMember *props;    /* dictionary-coded properties */
+    COWRIEMember *props;    /* dictionary-coded properties */
     size_t prop_count;
-} SJSONNode;
+} COWRIENode;
 
 /* Edge: graph edge with source, destination, type, and properties */
 typedef struct {
@@ -270,85 +270,85 @@ typedef struct {
     size_t to_id_len;
     char *edge_type;       /* edge type/label */
     size_t edge_type_len;
-    SJSONMember *props;    /* dictionary-coded properties */
+    COWRIEMember *props;    /* dictionary-coded properties */
     size_t prop_count;
-} SJSONEdge;
+} COWRIEEdge;
 
 /* NodeBatch: batch of nodes for streaming */
 typedef struct {
-    SJSONNode *nodes;
+    COWRIENode *nodes;
     size_t node_count;
-} SJSONNodeBatch;
+} COWRIENodeBatch;
 
 /* EdgeBatch: batch of edges for streaming */
 typedef struct {
-    SJSONEdge *edges;
+    COWRIEEdge *edges;
     size_t edge_count;
-} SJSONEdgeBatch;
+} COWRIEEdgeBatch;
 
 /* GraphShard: self-contained subgraph */
 typedef struct {
-    SJSONNode *nodes;
+    COWRIENode *nodes;
     size_t node_count;
-    SJSONEdge *edges;
+    COWRIEEdge *edges;
     size_t edge_count;
-    SJSONMember *metadata; /* dictionary-coded metadata */
+    COWRIEMember *metadata; /* dictionary-coded metadata */
     size_t meta_count;
-} SJSONGraphShard;
+} COWRIEGraphShard;
 
 /* Object member (key-value pair) */
-struct SJSONMember {
+struct COWRIEMember {
     char *key;
     size_t key_len;
-    SJSONValue *value;
+    COWRIEValue *value;
 };
 
 /* The main value union */
-struct SJSONValue {
-    SJSONType type;
+struct COWRIEValue {
+    COWRIEType type;
     union {
-        int boolean;                    /* SJSON_BOOL */
-        int64_t i64;                    /* SJSON_INT64 */
-        uint64_t u64;                   /* SJSON_UINT64 */
-        double f64;                     /* SJSON_FLOAT64 */
-        SJSONDecimal128 decimal128;     /* SJSON_DECIMAL128 */
+        int boolean;                    /* COWRIE_BOOL */
+        int64_t i64;                    /* COWRIE_INT64 */
+        uint64_t u64;                   /* COWRIE_UINT64 */
+        double f64;                     /* COWRIE_FLOAT64 */
+        COWRIEDecimal128 decimal128;     /* COWRIE_DECIMAL128 */
         struct {
             char *data;
             size_t len;
-        } str;                          /* SJSON_STRING */
+        } str;                          /* COWRIE_STRING */
         struct {
             uint8_t *data;
             size_t len;
-        } bytes;                        /* SJSON_BYTES */
-        int64_t datetime64;             /* SJSON_DATETIME64 (nanos since epoch) */
-        uint8_t uuid[16];               /* SJSON_UUID128 */
+        } bytes;                        /* COWRIE_BYTES */
+        int64_t datetime64;             /* COWRIE_DATETIME64 (nanos since epoch) */
+        uint8_t uuid[16];               /* COWRIE_UUID128 */
         struct {
             uint8_t *data;
             size_t len;
-        } bigint;                       /* SJSON_BIGINT (two's complement BE) */
-        SJSONExt ext;                   /* SJSON_EXT */
+        } bigint;                       /* COWRIE_BIGINT (two's complement BE) */
+        COWRIEExt ext;                   /* COWRIE_EXT */
         struct {
-            SJSONValue **items;
+            COWRIEValue **items;
             size_t len;
-        } array;                        /* SJSON_ARRAY */
+        } array;                        /* COWRIE_ARRAY */
         struct {
-            SJSONMember *members;
+            COWRIEMember *members;
             size_t len;
-        } object;                       /* SJSON_OBJECT */
+        } object;                       /* COWRIE_OBJECT */
         /* v2.1 extension types */
-        SJSONTensor tensor;             /* SJSON_TENSOR */
-        SJSONTensorRef tensor_ref;      /* SJSON_TENSOR_REF */
-        SJSONImage image;               /* SJSON_IMAGE */
-        SJSONAudio audio;               /* SJSON_AUDIO */
-        SJSONAdjlist adjlist;           /* SJSON_ADJLIST */
-        SJSONRichText rich_text;        /* SJSON_RICH_TEXT */
-        SJSONDelta delta;               /* SJSON_DELTA */
+        COWRIETensor tensor;             /* COWRIE_TENSOR */
+        COWRIETensorRef tensor_ref;      /* COWRIE_TENSOR_REF */
+        COWRIEImage image;               /* COWRIE_IMAGE */
+        COWRIEAudio audio;               /* COWRIE_AUDIO */
+        COWRIEAdjlist adjlist;           /* COWRIE_ADJLIST */
+        COWRIERichText rich_text;        /* COWRIE_RICH_TEXT */
+        COWRIEDelta delta;               /* COWRIE_DELTA */
         /* v2.1 Graph types */
-        SJSONNode node;                 /* SJSON_NODE */
-        SJSONEdge edge;                 /* SJSON_EDGE */
-        SJSONNodeBatch node_batch;      /* SJSON_NODE_BATCH */
-        SJSONEdgeBatch edge_batch;      /* SJSON_EDGE_BATCH */
-        SJSONGraphShard graph_shard;    /* SJSON_GRAPH_SHARD */
+        COWRIENode node;                 /* COWRIE_NODE */
+        COWRIEEdge edge;                 /* COWRIE_EDGE */
+        COWRIENodeBatch node_batch;      /* COWRIE_NODE_BATCH */
+        COWRIEEdgeBatch edge_batch;      /* COWRIE_EDGE_BATCH */
+        COWRIEGraphShard graph_shard;    /* COWRIE_GRAPH_SHARD */
     } as;
 };
 
@@ -357,18 +357,18 @@ typedef struct {
     uint8_t *data;
     size_t len;
     size_t cap;
-} SJSONBuf;
+} COWRIEBuf;
 
 /* ============================================================
  * Security Limits (mirrors Go's DecodeOptions)
  * ============================================================ */
 
 /* Default security limits - generous for ML workloads but prevent exhaustion */
-#define SJSON_DEFAULT_MAX_DEPTH      1000
-#define SJSON_DEFAULT_MAX_ARRAY_LEN  100000000   /* 100M elements */
-#define SJSON_DEFAULT_MAX_OBJECT_LEN 10000000    /* 10M fields */
-#define SJSON_DEFAULT_MAX_STRING_LEN 500000000   /* 500MB */
-#define SJSON_DEFAULT_MAX_BYTES_LEN  1000000000  /* 1GB */
+#define COWRIE_DEFAULT_MAX_DEPTH      1000
+#define COWRIE_DEFAULT_MAX_ARRAY_LEN  100000000   /* 100M elements */
+#define COWRIE_DEFAULT_MAX_OBJECT_LEN 10000000    /* 10M fields */
+#define COWRIE_DEFAULT_MAX_STRING_LEN 500000000   /* 500MB */
+#define COWRIE_DEFAULT_MAX_BYTES_LEN  1000000000  /* 1GB */
 
 /* Decode options for configurable security limits */
 typedef struct {
@@ -378,87 +378,87 @@ typedef struct {
     size_t max_string_len;  /* Maximum string byte length */
     size_t max_bytes_len;   /* Maximum bytes length */
     int unknown_ext;        /* Unknown ext behavior (0=keep,1=skip,2=error) */
-} SJSONDecodeOpts;
+} COWRIEDecodeOpts;
 
 /* Unknown extension behavior */
-#define SJSON_UNKNOWN_EXT_KEEP        0
-#define SJSON_UNKNOWN_EXT_SKIP_AS_NULL 1
-#define SJSON_UNKNOWN_EXT_ERROR       2
+#define COWRIE_UNKNOWN_EXT_KEEP        0
+#define COWRIE_UNKNOWN_EXT_SKIP_AS_NULL 1
+#define COWRIE_UNKNOWN_EXT_ERROR       2
 
 /* Initialize decode options with defaults */
-static inline void sjson_decode_opts_init(SJSONDecodeOpts *opts) {
-    opts->max_depth = SJSON_DEFAULT_MAX_DEPTH;
-    opts->max_array_len = SJSON_DEFAULT_MAX_ARRAY_LEN;
-    opts->max_object_len = SJSON_DEFAULT_MAX_OBJECT_LEN;
-    opts->max_string_len = SJSON_DEFAULT_MAX_STRING_LEN;
-    opts->max_bytes_len = SJSON_DEFAULT_MAX_BYTES_LEN;
-    opts->unknown_ext = SJSON_UNKNOWN_EXT_KEEP;
+static inline void cowrie_decode_opts_init(COWRIEDecodeOpts *opts) {
+    opts->max_depth = COWRIE_DEFAULT_MAX_DEPTH;
+    opts->max_array_len = COWRIE_DEFAULT_MAX_ARRAY_LEN;
+    opts->max_object_len = COWRIE_DEFAULT_MAX_OBJECT_LEN;
+    opts->max_string_len = COWRIE_DEFAULT_MAX_STRING_LEN;
+    opts->max_bytes_len = COWRIE_DEFAULT_MAX_BYTES_LEN;
+    opts->unknown_ext = COWRIE_UNKNOWN_EXT_KEEP;
 }
 
 /* ============================================================
  * Value Constructors
  * ============================================================ */
 
-SJSONValue *sjson_new_null(void);
-SJSONValue *sjson_new_bool(int b);
-SJSONValue *sjson_new_int64(int64_t i);
-SJSONValue *sjson_new_uint64(uint64_t u);
-SJSONValue *sjson_new_float64(double f);
-SJSONValue *sjson_new_decimal128(int8_t scale, const uint8_t coef[16]);
-SJSONValue *sjson_new_string(const char *s, size_t len);
-SJSONValue *sjson_new_bytes(const uint8_t *data, size_t len);
-SJSONValue *sjson_new_datetime64(int64_t nanos);
-SJSONValue *sjson_new_uuid128(const uint8_t uuid[16]);
-SJSONValue *sjson_new_bigint(const uint8_t *data, size_t len);
-SJSONValue *sjson_new_ext(uint64_t ext_type, const uint8_t *payload, size_t payload_len);
-SJSONValue *sjson_new_array(void);
-SJSONValue *sjson_new_object(void);
+COWRIEValue *cowrie_new_null(void);
+COWRIEValue *cowrie_new_bool(int b);
+COWRIEValue *cowrie_new_int64(int64_t i);
+COWRIEValue *cowrie_new_uint64(uint64_t u);
+COWRIEValue *cowrie_new_float64(double f);
+COWRIEValue *cowrie_new_decimal128(int8_t scale, const uint8_t coef[16]);
+COWRIEValue *cowrie_new_string(const char *s, size_t len);
+COWRIEValue *cowrie_new_bytes(const uint8_t *data, size_t len);
+COWRIEValue *cowrie_new_datetime64(int64_t nanos);
+COWRIEValue *cowrie_new_uuid128(const uint8_t uuid[16]);
+COWRIEValue *cowrie_new_bigint(const uint8_t *data, size_t len);
+COWRIEValue *cowrie_new_ext(uint64_t ext_type, const uint8_t *payload, size_t payload_len);
+COWRIEValue *cowrie_new_array(void);
+COWRIEValue *cowrie_new_object(void);
 
 /* v2.1 Extension Constructors */
-SJSONValue *sjson_new_tensor(uint8_t dtype, uint8_t rank, const size_t *dims,
+COWRIEValue *cowrie_new_tensor(uint8_t dtype, uint8_t rank, const size_t *dims,
                               const uint8_t *data, size_t data_len);
-SJSONValue *sjson_new_tensor_ref(uint8_t store_id, const uint8_t *key, size_t key_len);
-SJSONValue *sjson_new_image(uint8_t format, uint16_t width, uint16_t height,
+COWRIEValue *cowrie_new_tensor_ref(uint8_t store_id, const uint8_t *key, size_t key_len);
+COWRIEValue *cowrie_new_image(uint8_t format, uint16_t width, uint16_t height,
                              const uint8_t *data, size_t data_len);
-SJSONValue *sjson_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t channels,
+COWRIEValue *cowrie_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t channels,
                              const uint8_t *data, size_t data_len);
-SJSONValue *sjson_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_count,
+COWRIEValue *cowrie_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_count,
                                const size_t *row_offsets, const void *col_indices);
-SJSONValue *sjson_new_rich_text(const char *text, size_t text_len,
+COWRIEValue *cowrie_new_rich_text(const char *text, size_t text_len,
                                  const int32_t *tokens, size_t token_count,
-                                 const SJSONRichTextSpan *spans, size_t span_count);
-SJSONValue *sjson_new_delta(size_t base_id, const SJSONDeltaOp_t *ops, size_t op_count);
+                                 const COWRIERichTextSpan *spans, size_t span_count);
+COWRIEValue *cowrie_new_delta(size_t base_id, const COWRIEDeltaOp_t *ops, size_t op_count);
 
 /* v2.1 Graph Type Constructors */
-SJSONValue *sjson_new_node(const char *id, size_t id_len,
+COWRIEValue *cowrie_new_node(const char *id, size_t id_len,
                            const char **labels, const size_t *label_lens, size_t label_count,
-                           const SJSONMember *props, size_t prop_count);
-SJSONValue *sjson_new_edge(const char *from_id, size_t from_id_len,
+                           const COWRIEMember *props, size_t prop_count);
+COWRIEValue *cowrie_new_edge(const char *from_id, size_t from_id_len,
                            const char *to_id, size_t to_id_len,
                            const char *edge_type, size_t edge_type_len,
-                           const SJSONMember *props, size_t prop_count);
-SJSONValue *sjson_new_node_batch(const SJSONNode *nodes, size_t node_count);
-SJSONValue *sjson_new_edge_batch(const SJSONEdge *edges, size_t edge_count);
-SJSONValue *sjson_new_graph_shard(const SJSONNode *nodes, size_t node_count,
-                                   const SJSONEdge *edges, size_t edge_count,
-                                   const SJSONMember *metadata, size_t meta_count);
+                           const COWRIEMember *props, size_t prop_count);
+COWRIEValue *cowrie_new_node_batch(const COWRIENode *nodes, size_t node_count);
+COWRIEValue *cowrie_new_edge_batch(const COWRIEEdge *edges, size_t edge_count);
+COWRIEValue *cowrie_new_graph_shard(const COWRIENode *nodes, size_t node_count,
+                                   const COWRIEEdge *edges, size_t edge_count,
+                                   const COWRIEMember *metadata, size_t meta_count);
 
 /* ============================================================
  * Value Manipulation
  * ============================================================ */
 
 /* Array operations */
-int sjson_array_append(SJSONValue *arr, SJSONValue *item);
-SJSONValue *sjson_array_get(const SJSONValue *arr, size_t index);
-size_t sjson_array_len(const SJSONValue *arr);
+int cowrie_array_append(COWRIEValue *arr, COWRIEValue *item);
+COWRIEValue *cowrie_array_get(const COWRIEValue *arr, size_t index);
+size_t cowrie_array_len(const COWRIEValue *arr);
 
 /* Object operations */
-int sjson_object_set(SJSONValue *obj, const char *key, size_t key_len, SJSONValue *value);
-SJSONValue *sjson_object_get(const SJSONValue *obj, const char *key, size_t key_len);
-size_t sjson_object_len(const SJSONValue *obj);
+int cowrie_object_set(COWRIEValue *obj, const char *key, size_t key_len, COWRIEValue *value);
+COWRIEValue *cowrie_object_get(const COWRIEValue *obj, const char *key, size_t key_len);
+size_t cowrie_object_len(const COWRIEValue *obj);
 
 /* Memory management */
-void sjson_free(SJSONValue *v);
+void cowrie_free(COWRIEValue *v);
 
 /* ============================================================
  * Encoding / Decoding
@@ -468,41 +468,41 @@ void sjson_free(SJSONValue *v);
 typedef struct {
     int deterministic;  /* Sort object keys for deterministic output */
     int omit_null;      /* Omit null values from objects */
-} SJSONEncodeOpts;
+} COWRIEEncodeOpts;
 
 /* Initialize encode options with defaults */
-static inline void sjson_encode_opts_init(SJSONEncodeOpts *opts) {
+static inline void cowrie_encode_opts_init(COWRIEEncodeOpts *opts) {
     opts->deterministic = 0;
     opts->omit_null = 0;
 }
 
 /*
- * Encode a value to SJSON v2 binary format.
+ * Encode a value to COWRIE v2 binary format.
  * Returns 0 on success, -1 on error.
  * Caller must free buf->data when done.
  */
-int sjson_encode(const SJSONValue *root, SJSONBuf *buf);
+int cowrie_encode(const COWRIEValue *root, COWRIEBuf *buf);
 
 /*
  * Encode with options (e.g., deterministic mode).
  * Returns 0 on success, -1 on error.
  */
-int sjson_encode_with_opts(const SJSONValue *root, const SJSONEncodeOpts *opts, SJSONBuf *buf);
+int cowrie_encode_with_opts(const COWRIEValue *root, const COWRIEEncodeOpts *opts, COWRIEBuf *buf);
 
 /*
- * Decode SJSON v2 binary format to a value.
+ * Decode COWRIE v2 binary format to a value.
  * Returns 0 on success, -1 on error.
- * Caller must sjson_free(*out) when done.
+ * Caller must cowrie_free(*out) when done.
  */
-int sjson_decode(const uint8_t *data, size_t len, SJSONValue **out);
+int cowrie_decode(const uint8_t *data, size_t len, COWRIEValue **out);
 
 /*
- * Decode SJSON v2 with custom security limits.
- * Use sjson_decode_opts_init() to initialize opts with defaults,
+ * Decode COWRIE v2 with custom security limits.
+ * Use cowrie_decode_opts_init() to initialize opts with defaults,
  * then modify as needed before calling.
  */
-int sjson_decode_with_opts(const uint8_t *data, size_t len, 
-                           const SJSONDecodeOpts *opts, SJSONValue **out);
+int cowrie_decode_with_opts(const uint8_t *data, size_t len, 
+                           const COWRIEDecodeOpts *opts, COWRIEValue **out);
 
 /* ============================================================
  * Compression Layer
@@ -510,34 +510,34 @@ int sjson_decode_with_opts(const uint8_t *data, size_t len,
 
 /*
  * Encode with compression framing.
- * compression: SJSON_COMP_NONE, SJSON_COMP_GZIP, or SJSON_COMP_ZSTD
+ * compression: COWRIE_COMP_NONE, COWRIE_COMP_GZIP, or COWRIE_COMP_ZSTD
  */
-int sjson_encode_framed(const SJSONValue *root, int compression, SJSONBuf *buf);
+int cowrie_encode_framed(const COWRIEValue *root, int compression, COWRIEBuf *buf);
 
 /*
  * Decode with automatic decompression.
  * Detects compression from flags byte.
  */
-int sjson_decode_framed(const uint8_t *data, size_t len, SJSONValue **out);
+int cowrie_decode_framed(const uint8_t *data, size_t len, COWRIEValue **out);
 
 /* ============================================================
  * Utilities
  * ============================================================ */
 
 /* Buffer helpers */
-void sjson_buf_init(SJSONBuf *buf);
-void sjson_buf_free(SJSONBuf *buf);
+void cowrie_buf_init(COWRIEBuf *buf);
+void cowrie_buf_free(COWRIEBuf *buf);
 
 /* Varint encoding/decoding */
-int sjson_put_uvarint(SJSONBuf *buf, uint64_t v);
-int sjson_get_uvarint(const uint8_t *data, size_t len, uint64_t *v, size_t *bytes_read);
+int cowrie_put_uvarint(COWRIEBuf *buf, uint64_t v);
+int cowrie_get_uvarint(const uint8_t *data, size_t len, uint64_t *v, size_t *bytes_read);
 
 /* Zigzag encoding for signed integers */
-static inline uint64_t sjson_zigzag_encode(int64_t n) {
+static inline uint64_t cowrie_zigzag_encode(int64_t n) {
     return ((uint64_t)n << 1) ^ (uint64_t)(n >> 63);
 }
 
-static inline int64_t sjson_zigzag_decode(uint64_t n) {
+static inline int64_t cowrie_zigzag_decode(uint64_t n) {
     return (int64_t)((n >> 1) ^ (-(n & 1)));
 }
 
@@ -546,36 +546,36 @@ static inline int64_t sjson_zigzag_decode(uint64_t n) {
  * ============================================================ */
 
 /* CRC32-IEEE checksum */
-uint32_t sjson_crc32(const uint8_t *data, size_t len);
+uint32_t cowrie_crc32(const uint8_t *data, size_t len);
 
 /* Schema fingerprint (FNV-1a hash of type structure) */
-uint32_t sjson_schema_fingerprint32(const SJSONValue *v);
+uint32_t cowrie_schema_fingerprint32(const COWRIEValue *v);
 
 /* ============================================================
  * Master Stream Protocol
  * ============================================================ */
 
 /* Master stream magic: "SJST" */
-#define SJSON_MASTER_MAGIC_0  'S'
-#define SJSON_MASTER_MAGIC_1  'J'
-#define SJSON_MASTER_MAGIC_2  'S'
-#define SJSON_MASTER_MAGIC_3  'T'
-#define SJSON_MASTER_VERSION  0x02
+#define COWRIE_MASTER_MAGIC_0  'S'
+#define COWRIE_MASTER_MAGIC_1  'J'
+#define COWRIE_MASTER_MAGIC_2  'S'
+#define COWRIE_MASTER_MAGIC_3  'T'
+#define COWRIE_MASTER_VERSION  0x02
 
 /* Master stream frame flags */
-#define SJSON_MFLAG_COMPRESSED    0x01
-#define SJSON_MFLAG_CRC           0x02
-#define SJSON_MFLAG_DETERMINISTIC 0x04
-#define SJSON_MFLAG_META          0x08
-#define SJSON_MFLAG_COMP_GZIP     0x10
-#define SJSON_MFLAG_COMP_ZSTD     0x20
+#define COWRIE_MFLAG_COMPRESSED    0x01
+#define COWRIE_MFLAG_CRC           0x02
+#define COWRIE_MFLAG_DETERMINISTIC 0x04
+#define COWRIE_MFLAG_META          0x08
+#define COWRIE_MFLAG_COMP_GZIP     0x10
+#define COWRIE_MFLAG_COMP_ZSTD     0x20
 
 /* Master stream writer options */
 typedef struct {
     int deterministic;   /* Sort object keys for deterministic output */
     int enable_crc;      /* Append CRC32 checksum */
     int compress;        /* 0=none, 1=gzip, 2=zstd */
-} SJSONMasterWriterOpts;
+} COWRIEMasterWriterOpts;
 
 /* Master stream frame header */
 typedef struct {
@@ -586,18 +586,18 @@ typedef struct {
     uint32_t payload_len;
     uint32_t raw_len;
     uint32_t meta_len;
-} SJSONMasterFrameHeader;
+} COWRIEMasterFrameHeader;
 
 /* Decoded master stream frame */
 typedef struct {
-    SJSONMasterFrameHeader header;
-    SJSONValue *meta;      /* NULL if no metadata */
-    SJSONValue *payload;
+    COWRIEMasterFrameHeader header;
+    COWRIEValue *meta;      /* NULL if no metadata */
+    COWRIEValue *payload;
     uint32_t type_id;
-} SJSONMasterFrame;
+} COWRIEMasterFrame;
 
 /* Initialize master writer options with defaults */
-static inline void sjson_master_writer_opts_init(SJSONMasterWriterOpts *opts) {
+static inline void cowrie_master_writer_opts_init(COWRIEMasterWriterOpts *opts) {
     opts->deterministic = 1;
     opts->enable_crc = 1;
     opts->compress = 0;
@@ -608,26 +608,26 @@ static inline void sjson_master_writer_opts_init(SJSONMasterWriterOpts *opts) {
  * Returns 0 on success, -1 on error.
  * Caller must free buf->data when done.
  */
-int sjson_master_write_frame(const SJSONValue *value, const SJSONValue *meta,
-                              const SJSONMasterWriterOpts *opts, SJSONBuf *buf);
+int cowrie_master_write_frame(const COWRIEValue *value, const COWRIEValue *meta,
+                              const COWRIEMasterWriterOpts *opts, COWRIEBuf *buf);
 
 /*
  * Read a master stream frame.
  * Returns bytes consumed on success, -1 on error.
- * Caller must call sjson_master_frame_free() when done.
+ * Caller must call cowrie_master_frame_free() when done.
  */
-int sjson_master_read_frame(const uint8_t *data, size_t len, SJSONMasterFrame *frame);
+int cowrie_master_read_frame(const uint8_t *data, size_t len, COWRIEMasterFrame *frame);
 
 /* Free a master frame's contents */
-void sjson_master_frame_free(SJSONMasterFrame *frame);
+void cowrie_master_frame_free(COWRIEMasterFrame *frame);
 
 /* Check if data starts with master stream magic "SJST" */
-static inline int sjson_is_master_stream(const uint8_t *data, size_t len) {
+static inline int cowrie_is_master_stream(const uint8_t *data, size_t len) {
     return len >= 4 &&
-           data[0] == SJSON_MASTER_MAGIC_0 &&
-           data[1] == SJSON_MASTER_MAGIC_1 &&
-           data[2] == SJSON_MASTER_MAGIC_2 &&
-           data[3] == SJSON_MASTER_MAGIC_3;
+           data[0] == COWRIE_MASTER_MAGIC_0 &&
+           data[1] == COWRIE_MASTER_MAGIC_1 &&
+           data[2] == COWRIE_MASTER_MAGIC_2 &&
+           data[3] == COWRIE_MASTER_MAGIC_3;
 }
 
 /* ============================================================
@@ -639,7 +639,7 @@ static inline int sjson_is_master_stream(const uint8_t *data, size_t len) {
  * if the view cannot be created safely.
  *
  * IMPORTANT: The returned pointer is only valid while the tensor
- * data remains allocated. Do not use after sjson_free().
+ * data remains allocated. Do not use after cowrie_free().
  */
 
 /*
@@ -652,9 +652,9 @@ static inline int sjson_is_master_stream(const uint8_t *data, size_t len) {
  *
  * On success, *count is set to the number of float32 elements.
  */
-static inline const float* sjson_tensor_view_float32(const SJSONTensor *t, size_t *count) {
+static inline const float* cowrie_tensor_view_float32(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_FLOAT32) return NULL;
+    if (t->dtype != COWRIE_DTYPE_FLOAT32) return NULL;
     if (t->data_len == 0) { *count = 0; return (const float*)t->data; }
     if (t->data_len % 4 != 0) return NULL;
     if (((uintptr_t)t->data) % 4 != 0) return NULL;
@@ -666,9 +666,9 @@ static inline const float* sjson_tensor_view_float32(const SJSONTensor *t, size_
  * Get zero-copy view of tensor as float64 (double) array.
  * Returns NULL if dtype mismatch, alignment issue, or size issue.
  */
-static inline const double* sjson_tensor_view_float64(const SJSONTensor *t, size_t *count) {
+static inline const double* cowrie_tensor_view_float64(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_FLOAT64) return NULL;
+    if (t->dtype != COWRIE_DTYPE_FLOAT64) return NULL;
     if (t->data_len == 0) { *count = 0; return (const double*)t->data; }
     if (t->data_len % 8 != 0) return NULL;
     if (((uintptr_t)t->data) % 8 != 0) return NULL;
@@ -679,9 +679,9 @@ static inline const double* sjson_tensor_view_float64(const SJSONTensor *t, size
 /*
  * Get zero-copy view of tensor as int32 array.
  */
-static inline const int32_t* sjson_tensor_view_int32(const SJSONTensor *t, size_t *count) {
+static inline const int32_t* cowrie_tensor_view_int32(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_INT32) return NULL;
+    if (t->dtype != COWRIE_DTYPE_INT32) return NULL;
     if (t->data_len == 0) { *count = 0; return (const int32_t*)t->data; }
     if (t->data_len % 4 != 0) return NULL;
     if (((uintptr_t)t->data) % 4 != 0) return NULL;
@@ -692,9 +692,9 @@ static inline const int32_t* sjson_tensor_view_int32(const SJSONTensor *t, size_
 /*
  * Get zero-copy view of tensor as int64 array.
  */
-static inline const int64_t* sjson_tensor_view_int64(const SJSONTensor *t, size_t *count) {
+static inline const int64_t* cowrie_tensor_view_int64(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_INT64) return NULL;
+    if (t->dtype != COWRIE_DTYPE_INT64) return NULL;
     if (t->data_len == 0) { *count = 0; return (const int64_t*)t->data; }
     if (t->data_len % 8 != 0) return NULL;
     if (((uintptr_t)t->data) % 8 != 0) return NULL;
@@ -706,9 +706,9 @@ static inline const int64_t* sjson_tensor_view_int64(const SJSONTensor *t, size_
  * Get zero-copy view of tensor as uint8 array.
  * Always succeeds for UINT8 tensors (no alignment requirement).
  */
-static inline const uint8_t* sjson_tensor_view_uint8(const SJSONTensor *t, size_t *count) {
+static inline const uint8_t* cowrie_tensor_view_uint8(const COWRIETensor *t, size_t *count) {
     if (t == NULL || count == NULL) return NULL;
-    if (t->dtype != SJSON_DTYPE_UINT8) return NULL;
+    if (t->dtype != COWRIE_DTYPE_UINT8) return NULL;
     *count = t->data_len;
     return t->data;
 }
@@ -719,25 +719,25 @@ static inline const uint8_t* sjson_tensor_view_uint8(const SJSONTensor *t, size_
  * Caller must free() the returned array.
  * Returns NULL on allocation failure or dtype mismatch.
  */
-float* sjson_tensor_copy_float32(const SJSONTensor *t, size_t *count);
+float* cowrie_tensor_copy_float32(const COWRIETensor *t, size_t *count);
 
 /*
  * Copy tensor data as float64 array.
  */
-double* sjson_tensor_copy_float64(const SJSONTensor *t, size_t *count);
+double* cowrie_tensor_copy_float64(const COWRIETensor *t, size_t *count);
 
 /*
  * Copy tensor data as int32 array.
  */
-int32_t* sjson_tensor_copy_int32(const SJSONTensor *t, size_t *count);
+int32_t* cowrie_tensor_copy_int32(const COWRIETensor *t, size_t *count);
 
 /*
  * Copy tensor data as int64 array.
  */
-int64_t* sjson_tensor_copy_int64(const SJSONTensor *t, size_t *count);
+int64_t* cowrie_tensor_copy_int64(const COWRIETensor *t, size_t *count);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* SJSON_H */
+#endif /* COWRIE_H */

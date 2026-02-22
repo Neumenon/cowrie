@@ -1,6 +1,6 @@
-//! SJSON decoder.
+//! Cowrie decoder.
 
-use super::types::{Value, SjsonError, DType, TensorData, TensorRef, ImageData, AudioData, AdjlistData, RichTextData, RichTextSpan, DeltaData, DeltaOp, DeltaOpCode, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData};
+use super::types::{Value, CowrieError, DType, TensorData, TensorRef, ImageData, AudioData, AdjlistData, RichTextData, RichTextSpan, DeltaData, DeltaOp, DeltaOpCode, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData};
 use crate::{MAGIC, VERSION};
 use std::collections::BTreeMap;
 
@@ -48,8 +48,8 @@ const MAX_HINT_COUNT: u64 = 10_000;
 
 const FLAG_HAS_COLUMN_HINTS: u8 = 0x08;
 
-/// Decode SJSON bytes to a Value.
-pub fn decode(data: &[u8]) -> Result<Value, SjsonError> {
+/// Decode Cowrie bytes to a Value.
+pub fn decode(data: &[u8]) -> Result<Value, CowrieError> {
     let mut reader = Reader::new(data);
     reader.decode()
 }
@@ -71,22 +71,22 @@ impl<'a> Reader<'a> {
         }
     }
 
-    fn decode(&mut self) -> Result<Value, SjsonError> {
+    fn decode(&mut self) -> Result<Value, CowrieError> {
         // Read header
         if self.remaining() < 4 {
-            return Err(SjsonError::Truncated);
+            return Err(CowrieError::Truncated);
         }
 
         // Check magic
         if &self.data[0..2] != MAGIC {
-            return Err(SjsonError::InvalidMagic);
+            return Err(CowrieError::InvalidMagic);
         }
         self.pos = 2;
 
         // Check version
         let version = self.read_byte()?;
         if version != VERSION {
-            return Err(SjsonError::InvalidVersion(version));
+            return Err(CowrieError::InvalidVersion(version));
         }
 
         // Read flags
@@ -98,7 +98,7 @@ impl<'a> Reader<'a> {
         // Read dictionary
         let dict_len = self.read_uvarint()? as usize;
         if dict_len > MAX_SIZE {
-            return Err(SjsonError::TooLarge);
+            return Err(CowrieError::TooLarge);
         }
         self.dict = Vec::with_capacity(dict_len);
         for _ in 0..dict_len {
@@ -110,10 +110,10 @@ impl<'a> Reader<'a> {
         self.decode_value()
     }
 
-    fn decode_value(&mut self) -> Result<Value, SjsonError> {
+    fn decode_value(&mut self) -> Result<Value, CowrieError> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
-            return Err(SjsonError::TooDeep);
+            return Err(CowrieError::TooDeep);
         }
 
         let tag = self.read_byte()?;
@@ -146,7 +146,7 @@ impl<'a> Reader<'a> {
             tags::BYTES => {
                 let len = self.read_uvarint()? as usize;
                 if len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let bytes = self.read_bytes(len)?;
                 Value::Bytes(bytes)
@@ -162,7 +162,7 @@ impl<'a> Reader<'a> {
             tags::BIGINT => {
                 let len = self.read_uvarint()? as usize;
                 if len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(len)?;
                 Value::BigInt(data)
@@ -170,7 +170,7 @@ impl<'a> Reader<'a> {
             tags::ARRAY => {
                 let len = self.read_uvarint()? as usize;
                 if len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let mut arr = Vec::with_capacity(len);
                 for _ in 0..len {
@@ -181,13 +181,13 @@ impl<'a> Reader<'a> {
             tags::OBJECT => {
                 let len = self.read_uvarint()? as usize;
                 if len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let mut obj = BTreeMap::new();
                 for _ in 0..len {
                     let key_idx = self.read_uvarint()? as usize;
                     if key_idx >= self.dict.len() {
-                        return Err(SjsonError::InvalidTag(tag));
+                        return Err(CowrieError::InvalidTag(tag));
                     }
                     let key = self.dict[key_idx].clone();
                     let val = self.decode_value()?;
@@ -199,7 +199,7 @@ impl<'a> Reader<'a> {
                 let type_id = self.read_uvarint()?;
                 let len = self.read_uvarint()? as usize;
                 if len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let payload = self.read_bytes(len)?;
                 Value::Ext(ExtData { type_id, payload })
@@ -213,7 +213,7 @@ impl<'a> Reader<'a> {
                 }
                 let data_len = self.read_uvarint()? as usize;
                 if data_len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
                 Value::Tensor(TensorData::new(dtype, shape, data))
@@ -222,7 +222,7 @@ impl<'a> Reader<'a> {
                 let store_id = self.read_byte()?;
                 let key_len = self.read_uvarint()? as usize;
                 if key_len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let key = self.read_bytes(key_len)?;
                 Value::TensorRef(TensorRef { store_id, key })
@@ -233,7 +233,7 @@ impl<'a> Reader<'a> {
                 let height = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
                 let data_len = self.read_uvarint()? as usize;
                 if data_len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
                 Value::Image(ImageData { format, width, height, data })
@@ -244,7 +244,7 @@ impl<'a> Reader<'a> {
                 let channels = self.read_byte()?;
                 let data_len = self.read_uvarint()? as usize;
                 if data_len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
                 Value::Audio(AudioData { encoding, sample_rate, channels, data })
@@ -264,7 +264,7 @@ impl<'a> Reader<'a> {
                 let col_size = if id_width == 1 { 4 } else { 8 };
                 let col_len = edge_count as usize * col_size;
                 if col_len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let col_indices = self.read_bytes(col_len)?;
 
@@ -279,10 +279,10 @@ impl<'a> Reader<'a> {
             tags::RICHTEXT => {
                 let text_len = self.read_uvarint()? as usize;
                 if text_len > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let text_bytes = self.read_bytes(text_len)?;
-                let text = String::from_utf8(text_bytes).map_err(|_| SjsonError::InvalidUtf8)?;
+                let text = String::from_utf8(text_bytes).map_err(|_| CowrieError::InvalidUtf8)?;
 
                 let flags = self.read_byte()?;
                 let has_tokens = (flags & 0x01) != 0;
@@ -327,7 +327,7 @@ impl<'a> Reader<'a> {
                         0x01 => DeltaOpCode::SetField,
                         0x02 => DeltaOpCode::DeleteField,
                         0x03 => DeltaOpCode::AppendArray,
-                        _ => return Err(SjsonError::InvalidTag(op_byte)),
+                        _ => return Err(CowrieError::InvalidTag(op_byte)),
                     };
                     let field_id = self.read_uvarint()?;
 
@@ -354,7 +354,7 @@ impl<'a> Reader<'a> {
             tags::NODE_BATCH => {
                 let count = self.read_uvarint()? as usize;
                 if count > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let mut nodes = Vec::with_capacity(count);
                 for _ in 0..count {
@@ -365,7 +365,7 @@ impl<'a> Reader<'a> {
             tags::EDGE_BATCH => {
                 let count = self.read_uvarint()? as usize;
                 if count > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let mut edges = Vec::with_capacity(count);
                 for _ in 0..count {
@@ -377,7 +377,7 @@ impl<'a> Reader<'a> {
                 // Decode nodes
                 let node_count = self.read_uvarint()? as usize;
                 if node_count > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let mut nodes = Vec::with_capacity(node_count);
                 for _ in 0..node_count {
@@ -386,7 +386,7 @@ impl<'a> Reader<'a> {
                 // Decode edges
                 let edge_count = self.read_uvarint()? as usize;
                 if edge_count > MAX_SIZE {
-                    return Err(SjsonError::TooLarge);
+                    return Err(CowrieError::TooLarge);
                 }
                 let mut edges = Vec::with_capacity(edge_count);
                 for _ in 0..edge_count {
@@ -396,7 +396,7 @@ impl<'a> Reader<'a> {
                 let metadata = self.decode_props()?;
                 Value::GraphShard(GraphShardData { nodes, edges, metadata })
             }
-            _ => return Err(SjsonError::InvalidTag(tag)),
+            _ => return Err(CowrieError::InvalidTag(tag)),
         };
 
         self.depth -= 1;
@@ -407,27 +407,27 @@ impl<'a> Reader<'a> {
         self.data.len().saturating_sub(self.pos)
     }
 
-    fn read_byte(&mut self) -> Result<u8, SjsonError> {
+    fn read_byte(&mut self) -> Result<u8, CowrieError> {
         if self.pos >= self.data.len() {
-            return Err(SjsonError::Truncated);
+            return Err(CowrieError::Truncated);
         }
         let b = self.data[self.pos];
         self.pos += 1;
         Ok(b)
     }
 
-    fn read_bytes(&mut self, len: usize) -> Result<Vec<u8>, SjsonError> {
+    fn read_bytes(&mut self, len: usize) -> Result<Vec<u8>, CowrieError> {
         if self.pos + len > self.data.len() {
-            return Err(SjsonError::Truncated);
+            return Err(CowrieError::Truncated);
         }
         let bytes = self.data[self.pos..self.pos + len].to_vec();
         self.pos += len;
         Ok(bytes)
     }
 
-    fn read_bytes_fixed<const N: usize>(&mut self) -> Result<[u8; N], SjsonError> {
+    fn read_bytes_fixed<const N: usize>(&mut self) -> Result<[u8; N], CowrieError> {
         if self.pos + N > self.data.len() {
-            return Err(SjsonError::Truncated);
+            return Err(CowrieError::Truncated);
         }
         let mut bytes = [0u8; N];
         bytes.copy_from_slice(&self.data[self.pos..self.pos + N]);
@@ -435,17 +435,17 @@ impl<'a> Reader<'a> {
         Ok(bytes)
     }
 
-    fn read_into(&mut self, buf: &mut [u8]) -> Result<(), SjsonError> {
+    fn read_into(&mut self, buf: &mut [u8]) -> Result<(), CowrieError> {
         let len = buf.len();
         if self.pos + len > self.data.len() {
-            return Err(SjsonError::Truncated);
+            return Err(CowrieError::Truncated);
         }
         buf.copy_from_slice(&self.data[self.pos..self.pos + len]);
         self.pos += len;
         Ok(())
     }
 
-    fn read_uvarint(&mut self) -> Result<u64, SjsonError> {
+    fn read_uvarint(&mut self) -> Result<u64, CowrieError> {
         let mut result: u64 = 0;
         let mut shift: u32 = 0;
         loop {
@@ -456,32 +456,32 @@ impl<'a> Reader<'a> {
             }
             shift += 7;
             if shift >= 64 {
-                return Err(SjsonError::TooLarge);
+                return Err(CowrieError::TooLarge);
             }
         }
         Ok(result)
     }
 
-    fn read_string(&mut self) -> Result<String, SjsonError> {
+    fn read_string(&mut self) -> Result<String, CowrieError> {
         let len = self.read_uvarint()? as usize;
         if len > MAX_SIZE {
-            return Err(SjsonError::TooLarge);
+            return Err(CowrieError::TooLarge);
         }
         let bytes = self.read_bytes(len)?;
-        String::from_utf8(bytes).map_err(|_| SjsonError::InvalidUtf8)
+        String::from_utf8(bytes).map_err(|_| CowrieError::InvalidUtf8)
     }
 
-    fn skip_hints(&mut self) -> Result<(), SjsonError> {
+    fn skip_hints(&mut self) -> Result<(), CowrieError> {
         let count = self.read_uvarint()?;
         if count > MAX_HINT_COUNT {
-            return Err(SjsonError::TooLarge);
+            return Err(CowrieError::TooLarge);
         }
         for _ in 0..count {
             let _field = self.read_string()?;
             let _typ = self.read_byte()?;
             let shape_len = self.read_uvarint()?;
             if shape_len > MAX_RANK {
-                return Err(SjsonError::TooLarge);
+                return Err(CowrieError::TooLarge);
             }
             for _ in 0..shape_len {
                 let _ = self.read_uvarint()?;
@@ -492,13 +492,13 @@ impl<'a> Reader<'a> {
     }
 
     /// Decode a node (without tag byte).
-    fn decode_node_data(&mut self) -> Result<NodeData, SjsonError> {
+    fn decode_node_data(&mut self) -> Result<NodeData, CowrieError> {
         // ID
         let id = self.read_string()?;
         // Labels
         let label_count = self.read_uvarint()? as usize;
         if label_count > MAX_SIZE {
-            return Err(SjsonError::TooLarge);
+            return Err(CowrieError::TooLarge);
         }
         let mut labels = Vec::with_capacity(label_count);
         for _ in 0..label_count {
@@ -510,7 +510,7 @@ impl<'a> Reader<'a> {
     }
 
     /// Decode an edge (without tag byte).
-    fn decode_edge_data(&mut self) -> Result<EdgeData, SjsonError> {
+    fn decode_edge_data(&mut self) -> Result<EdgeData, CowrieError> {
         // From, To, Type
         let from = self.read_string()?;
         let to = self.read_string()?;
@@ -521,16 +521,16 @@ impl<'a> Reader<'a> {
     }
 
     /// Decode dictionary-coded properties.
-    fn decode_props(&mut self) -> Result<BTreeMap<String, Value>, SjsonError> {
+    fn decode_props(&mut self) -> Result<BTreeMap<String, Value>, CowrieError> {
         let prop_count = self.read_uvarint()? as usize;
         if prop_count > MAX_SIZE {
-            return Err(SjsonError::TooLarge);
+            return Err(CowrieError::TooLarge);
         }
         let mut props = BTreeMap::new();
         for _ in 0..prop_count {
             let key_idx = self.read_uvarint()? as usize;
             if key_idx >= self.dict.len() {
-                return Err(SjsonError::InvalidData(format!(
+                return Err(CowrieError::InvalidData(format!(
                     "dictionary index {} out of range (dict size: {})",
                     key_idx, self.dict.len()
                 )));
@@ -608,14 +608,14 @@ mod tests {
     fn test_invalid_magic() {
         let data = b"XX\x02\x00\x00";
         let result = decode(data);
-        assert!(matches!(result, Err(SjsonError::InvalidMagic)));
+        assert!(matches!(result, Err(CowrieError::InvalidMagic)));
     }
 
     #[test]
     fn test_truncated() {
         let data = b"SJ";
         let result = decode(data);
-        assert!(matches!(result, Err(SjsonError::Truncated)));
+        assert!(matches!(result, Err(CowrieError::Truncated)));
     }
 
     #[test]

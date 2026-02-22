@@ -1,6 +1,6 @@
-// Package gen2 implements SJSON v2, a binary "JSON++" codec with extended types.
+// Package gen2 implements Cowrie v2, a binary "JSON++" codec with extended types.
 //
-// SJSON v2 extends JSON with:
+// Cowrie v2 extends JSON with:
 //   - Explicit integer types (int64, uint64)
 //   - Decimal128 for high-precision decimals
 //   - Native binary data (no base64)
@@ -42,5 +42,5 @@
 //
 //	// JSON bridge
 //	jsonVal, err := gen2.FromJSON(jsonBytes)
-//	jsonBytes, err := gen2.ToJSON(sjsonVal)
+//	jsonBytes, err := gen2.ToJSON(cowrieVal)
 package gen2

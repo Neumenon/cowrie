@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SJSON Python Benchmark Suite
+"""Cowrie Python Benchmark Suite
 
 Run: python benchmarks/bench_python.py
 """
@@ -12,8 +12,8 @@ from pathlib import Path
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-from sjson import gen1
-from sjson.gen2 import (
+from cowrie import gen1
+from cowrie.gen2 import (
     encode, decode, Value, NodeData, EdgeData,
     TensorData, DType
 )
@@ -65,7 +65,7 @@ def run_benchmarks():
     results = []
 
     print("=" * 60)
-    print("SJSON Python Benchmarks")
+    print("Cowrie Python Benchmarks")
     print("=" * 60)
 
     # Gen1 Benchmarks

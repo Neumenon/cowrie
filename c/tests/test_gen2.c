@@ -1,9 +1,9 @@
 /*
- * SJSON Gen2 Test Suite
+ * COWRIE Gen2 Test Suite
  */
 
-#include "../include/sjson_gen2.h"
-#include "../include/sjson_json.h"
+#include "../include/cowrie_gen2.h"
+#include "../include/cowrie_json.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,47 +61,47 @@ static int build_repo_root(char *buf, size_t buf_len) {
  * ============================================================ */
 
 static int test_null_roundtrip(void) {
-    SJSONValue *v = sjson_new_null();
+    COWRIEValue *v = cowrie_new_null();
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_NULL);
+    ASSERT(v->type == COWRIE_NULL);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
     ASSERT(buf.len > 4);  /* Header + at least one byte */
 
-    SJSONValue *decoded;
-    ASSERT(sjson_decode(buf.data, buf.len, &decoded) == 0);
-    ASSERT(decoded->type == SJSON_NULL);
+    COWRIEValue *decoded;
+    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
+    ASSERT(decoded->type == COWRIE_NULL);
 
-    sjson_free(v);
-    sjson_free(decoded);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(decoded);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_bool_roundtrip(void) {
-    SJSONValue *t = sjson_new_bool(1);
-    SJSONValue *f = sjson_new_bool(0);
+    COWRIEValue *t = cowrie_new_bool(1);
+    COWRIEValue *f = cowrie_new_bool(0);
     ASSERT(t != NULL && f != NULL);
     ASSERT(t->as.boolean == 1);
     ASSERT(f->as.boolean == 0);
 
-    SJSONBuf buf_t, buf_f;
-    ASSERT(sjson_encode(t, &buf_t) == 0);
-    ASSERT(sjson_encode(f, &buf_f) == 0);
+    COWRIEBuf buf_t, buf_f;
+    ASSERT(cowrie_encode(t, &buf_t) == 0);
+    ASSERT(cowrie_encode(f, &buf_f) == 0);
 
-    SJSONValue *dec_t, *dec_f;
-    ASSERT(sjson_decode(buf_t.data, buf_t.len, &dec_t) == 0);
-    ASSERT(sjson_decode(buf_f.data, buf_f.len, &dec_f) == 0);
-    ASSERT(dec_t->type == SJSON_BOOL && dec_t->as.boolean == 1);
-    ASSERT(dec_f->type == SJSON_BOOL && dec_f->as.boolean == 0);
+    COWRIEValue *dec_t, *dec_f;
+    ASSERT(cowrie_decode(buf_t.data, buf_t.len, &dec_t) == 0);
+    ASSERT(cowrie_decode(buf_f.data, buf_f.len, &dec_f) == 0);
+    ASSERT(dec_t->type == COWRIE_BOOL && dec_t->as.boolean == 1);
+    ASSERT(dec_f->type == COWRIE_BOOL && dec_f->as.boolean == 0);
 
-    sjson_free(t);
-    sjson_free(f);
-    sjson_free(dec_t);
-    sjson_free(dec_f);
-    sjson_buf_free(&buf_t);
-    sjson_buf_free(&buf_f);
+    cowrie_free(t);
+    cowrie_free(f);
+    cowrie_free(dec_t);
+    cowrie_free(dec_f);
+    cowrie_buf_free(&buf_t);
+    cowrie_buf_free(&buf_f);
     return 1;
 }
 
@@ -112,21 +112,21 @@ static int test_int64_roundtrip(void) {
     int n = sizeof(values) / sizeof(values[0]);
 
     for (int i = 0; i < n; i++) {
-        SJSONValue *v = sjson_new_int64(values[i]);
+        COWRIEValue *v = cowrie_new_int64(values[i]);
         ASSERT(v != NULL);
         ASSERT(v->as.i64 == values[i]);
 
-        SJSONBuf buf;
-        ASSERT(sjson_encode(v, &buf) == 0);
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(v, &buf) == 0);
 
-        SJSONValue *dec;
-        ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-        ASSERT(dec->type == SJSON_INT64);
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_INT64);
         ASSERT(dec->as.i64 == values[i]);
 
-        sjson_free(v);
-        sjson_free(dec);
-        sjson_buf_free(&buf);
+        cowrie_free(v);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
     }
     return 1;
 }
@@ -136,21 +136,21 @@ static int test_uint64_roundtrip(void) {
     int n = sizeof(values) / sizeof(values[0]);
 
     for (int i = 0; i < n; i++) {
-        SJSONValue *v = sjson_new_uint64(values[i]);
+        COWRIEValue *v = cowrie_new_uint64(values[i]);
         ASSERT(v != NULL);
         ASSERT(v->as.u64 == values[i]);
 
-        SJSONBuf buf;
-        ASSERT(sjson_encode(v, &buf) == 0);
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(v, &buf) == 0);
 
-        SJSONValue *dec;
-        ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-        ASSERT(dec->type == SJSON_UINT64);
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_UINT64);
         ASSERT(dec->as.u64 == values[i]);
 
-        sjson_free(v);
-        sjson_free(dec);
-        sjson_buf_free(&buf);
+        cowrie_free(v);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
     }
     return 1;
 }
@@ -160,65 +160,65 @@ static int test_float64_roundtrip(void) {
     int n = sizeof(values) / sizeof(values[0]);
 
     for (int i = 0; i < n; i++) {
-        SJSONValue *v = sjson_new_float64(values[i]);
+        COWRIEValue *v = cowrie_new_float64(values[i]);
         ASSERT(v != NULL);
 
-        SJSONBuf buf;
-        ASSERT(sjson_encode(v, &buf) == 0);
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(v, &buf) == 0);
 
-        SJSONValue *dec;
-        ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-        ASSERT(dec->type == SJSON_FLOAT64);
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_FLOAT64);
         ASSERT(dec->as.f64 == values[i]);
 
-        sjson_free(v);
-        sjson_free(dec);
-        sjson_buf_free(&buf);
+        cowrie_free(v);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
     }
     return 1;
 }
 
 static int test_string_roundtrip(void) {
-    const char *test = "Hello, SJSON!";
-    SJSONValue *v = sjson_new_string(test, strlen(test));
+    const char *test = "Hello, COWRIE!";
+    COWRIEValue *v = cowrie_new_string(test, strlen(test));
     ASSERT(v != NULL);
     ASSERT(v->as.str.len == strlen(test));
     ASSERT(strcmp(v->as.str.data, test) == 0);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_STRING);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_STRING);
     ASSERT(dec->as.str.len == strlen(test));
     ASSERT(strcmp(dec->as.str.data, test) == 0);
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_bytes_roundtrip(void) {
     uint8_t data[] = {0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD};
-    SJSONValue *v = sjson_new_bytes(data, sizeof(data));
+    COWRIEValue *v = cowrie_new_bytes(data, sizeof(data));
     ASSERT(v != NULL);
     ASSERT(v->as.bytes.len == sizeof(data));
     ASSERT(memcmp(v->as.bytes.data, data, sizeof(data)) == 0);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_BYTES);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_BYTES);
     ASSERT(dec->as.bytes.len == sizeof(data));
     ASSERT(memcmp(dec->as.bytes.data, data, sizeof(data)) == 0);
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
@@ -227,90 +227,90 @@ static int test_bytes_roundtrip(void) {
  * ============================================================ */
 
 static int test_array_roundtrip(void) {
-    SJSONValue *arr = sjson_new_array();
+    COWRIEValue *arr = cowrie_new_array();
     ASSERT(arr != NULL);
 
-    sjson_array_append(arr, sjson_new_int64(1));
-    sjson_array_append(arr, sjson_new_int64(2));
-    sjson_array_append(arr, sjson_new_string("three", 5));
-    ASSERT(sjson_array_len(arr) == 3);
+    cowrie_array_append(arr, cowrie_new_int64(1));
+    cowrie_array_append(arr, cowrie_new_int64(2));
+    cowrie_array_append(arr, cowrie_new_string("three", 5));
+    ASSERT(cowrie_array_len(arr) == 3);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(arr, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(arr, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_ARRAY);
-    ASSERT(sjson_array_len(dec) == 3);
-    ASSERT(sjson_array_get(dec, 0)->type == SJSON_INT64);
-    ASSERT(sjson_array_get(dec, 0)->as.i64 == 1);
-    ASSERT(sjson_array_get(dec, 2)->type == SJSON_STRING);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_ARRAY);
+    ASSERT(cowrie_array_len(dec) == 3);
+    ASSERT(cowrie_array_get(dec, 0)->type == COWRIE_INT64);
+    ASSERT(cowrie_array_get(dec, 0)->as.i64 == 1);
+    ASSERT(cowrie_array_get(dec, 2)->type == COWRIE_STRING);
 
-    sjson_free(arr);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(arr);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_object_roundtrip(void) {
-    SJSONValue *obj = sjson_new_object();
+    COWRIEValue *obj = cowrie_new_object();
     ASSERT(obj != NULL);
 
-    sjson_object_set(obj, "name", 4, sjson_new_string("Alice", 5));
-    sjson_object_set(obj, "age", 3, sjson_new_int64(30));
-    sjson_object_set(obj, "active", 6, sjson_new_bool(1));
-    ASSERT(sjson_object_len(obj) == 3);
+    cowrie_object_set(obj, "name", 4, cowrie_new_string("Alice", 5));
+    cowrie_object_set(obj, "age", 3, cowrie_new_int64(30));
+    cowrie_object_set(obj, "active", 6, cowrie_new_bool(1));
+    ASSERT(cowrie_object_len(obj) == 3);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(obj, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(obj, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_OBJECT);
-    ASSERT(sjson_object_len(dec) == 3);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    ASSERT(cowrie_object_len(dec) == 3);
 
-    SJSONValue *name = sjson_object_get(dec, "name", 4);
+    COWRIEValue *name = cowrie_object_get(dec, "name", 4);
     ASSERT(name != NULL);
-    ASSERT(name->type == SJSON_STRING);
+    ASSERT(name->type == COWRIE_STRING);
     ASSERT(strcmp(name->as.str.data, "Alice") == 0);
 
-    SJSONValue *age = sjson_object_get(dec, "age", 3);
+    COWRIEValue *age = cowrie_object_get(dec, "age", 3);
     ASSERT(age != NULL);
-    ASSERT(age->type == SJSON_INT64);
+    ASSERT(age->type == COWRIE_INT64);
     ASSERT(age->as.i64 == 30);
 
-    sjson_free(obj);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(obj);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_nested_object(void) {
-    SJSONValue *inner = sjson_new_object();
-    sjson_object_set(inner, "x", 1, sjson_new_int64(10));
-    sjson_object_set(inner, "y", 1, sjson_new_int64(20));
+    COWRIEValue *inner = cowrie_new_object();
+    cowrie_object_set(inner, "x", 1, cowrie_new_int64(10));
+    cowrie_object_set(inner, "y", 1, cowrie_new_int64(20));
 
-    SJSONValue *outer = sjson_new_object();
-    sjson_object_set(outer, "point", 5, inner);
-    sjson_object_set(outer, "label", 5, sjson_new_string("origin", 6));
+    COWRIEValue *outer = cowrie_new_object();
+    cowrie_object_set(outer, "point", 5, inner);
+    cowrie_object_set(outer, "label", 5, cowrie_new_string("origin", 6));
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(outer, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(outer, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
 
-    SJSONValue *point = sjson_object_get(dec, "point", 5);
+    COWRIEValue *point = cowrie_object_get(dec, "point", 5);
     ASSERT(point != NULL);
-    ASSERT(point->type == SJSON_OBJECT);
+    ASSERT(point->type == COWRIE_OBJECT);
 
-    SJSONValue *x = sjson_object_get(point, "x", 1);
+    COWRIEValue *x = cowrie_object_get(point, "x", 1);
     ASSERT(x != NULL);
     ASSERT(x->as.i64 == 10);
 
-    sjson_free(outer);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(outer);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
@@ -323,127 +323,127 @@ static int test_tensor_roundtrip(void) {
     size_t dims[] = {2, 3};
     float data[] = {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f};
 
-    SJSONValue *v = sjson_new_tensor(
-        SJSON_DTYPE_FLOAT32, 2, dims,
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_FLOAT32, 2, dims,
         (const uint8_t *)data, sizeof(data)
     );
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_TENSOR);
-    ASSERT(v->as.tensor.dtype == SJSON_DTYPE_FLOAT32);
+    ASSERT(v->type == COWRIE_TENSOR);
+    ASSERT(v->as.tensor.dtype == COWRIE_DTYPE_FLOAT32);
     ASSERT(v->as.tensor.rank == 2);
     ASSERT(v->as.tensor.dims[0] == 2);
     ASSERT(v->as.tensor.dims[1] == 3);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_TENSOR);
-    ASSERT(dec->as.tensor.dtype == SJSON_DTYPE_FLOAT32);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_TENSOR);
+    ASSERT(dec->as.tensor.dtype == COWRIE_DTYPE_FLOAT32);
     ASSERT(dec->as.tensor.rank == 2);
     ASSERT(dec->as.tensor.dims[0] == 2);
     ASSERT(dec->as.tensor.dims[1] == 3);
     ASSERT(dec->as.tensor.data_len == sizeof(data));
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_tensor_ref_roundtrip(void) {
     uint8_t key[] = {0xDE, 0xAD, 0xBE, 0xEF};
-    SJSONValue *v = sjson_new_tensor_ref(1, key, sizeof(key));
+    COWRIEValue *v = cowrie_new_tensor_ref(1, key, sizeof(key));
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_TENSOR_REF);
+    ASSERT(v->type == COWRIE_TENSOR_REF);
     ASSERT(v->as.tensor_ref.store_id == 1);
     ASSERT(v->as.tensor_ref.key_len == sizeof(key));
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_TENSOR_REF);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_TENSOR_REF);
     ASSERT(dec->as.tensor_ref.store_id == 1);
     ASSERT(memcmp(dec->as.tensor_ref.key, key, sizeof(key)) == 0);
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_image_roundtrip(void) {
     uint8_t data[] = {0xFF, 0xD8, 0xFF, 0xE0};  /* JPEG magic */
-    SJSONValue *v = sjson_new_image(SJSON_IMG_JPEG, 1920, 1080, data, sizeof(data));
+    COWRIEValue *v = cowrie_new_image(COWRIE_IMG_JPEG, 1920, 1080, data, sizeof(data));
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_IMAGE);
-    ASSERT(v->as.image.format == SJSON_IMG_JPEG);
+    ASSERT(v->type == COWRIE_IMAGE);
+    ASSERT(v->as.image.format == COWRIE_IMG_JPEG);
     ASSERT(v->as.image.width == 1920);
     ASSERT(v->as.image.height == 1080);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_IMAGE);
-    ASSERT(dec->as.image.format == SJSON_IMG_JPEG);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_IMAGE);
+    ASSERT(dec->as.image.format == COWRIE_IMG_JPEG);
     ASSERT(dec->as.image.width == 1920);
     ASSERT(dec->as.image.height == 1080);
     ASSERT(dec->as.image.data_len == sizeof(data));
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_audio_roundtrip(void) {
     uint8_t data[] = {0x00, 0x00, 0x00, 0x00};  /* Silent PCM */
-    SJSONValue *v = sjson_new_audio(SJSON_AUD_PCM_INT16, 44100, 2, data, sizeof(data));
+    COWRIEValue *v = cowrie_new_audio(COWRIE_AUD_PCM_INT16, 44100, 2, data, sizeof(data));
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_AUDIO);
-    ASSERT(v->as.audio.encoding == SJSON_AUD_PCM_INT16);
+    ASSERT(v->type == COWRIE_AUDIO);
+    ASSERT(v->as.audio.encoding == COWRIE_AUD_PCM_INT16);
     ASSERT(v->as.audio.sample_rate == 44100);
     ASSERT(v->as.audio.channels == 2);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_AUDIO);
-    ASSERT(dec->as.audio.encoding == SJSON_AUD_PCM_INT16);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_AUDIO);
+    ASSERT(dec->as.audio.encoding == COWRIE_AUD_PCM_INT16);
     ASSERT(dec->as.audio.sample_rate == 44100);
     ASSERT(dec->as.audio.channels == 2);
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_datetime64_roundtrip(void) {
     int64_t nanos = 1704067200000000000LL;  /* 2024-01-01 00:00:00 UTC */
-    SJSONValue *v = sjson_new_datetime64(nanos);
+    COWRIEValue *v = cowrie_new_datetime64(nanos);
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_DATETIME64);
+    ASSERT(v->type == COWRIE_DATETIME64);
     ASSERT(v->as.datetime64 == nanos);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_DATETIME64);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_DATETIME64);
     ASSERT(dec->as.datetime64 == nanos);
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
@@ -452,22 +452,22 @@ static int test_uuid128_roundtrip(void) {
         0x55, 0x0e, 0x84, 0x00, 0xe2, 0x9b, 0x41, 0xd4,
         0xa7, 0x16, 0x44, 0x66, 0x55, 0x44, 0x00, 0x00
     };
-    SJSONValue *v = sjson_new_uuid128(uuid);
+    COWRIEValue *v = cowrie_new_uuid128(uuid);
     ASSERT(v != NULL);
-    ASSERT(v->type == SJSON_UUID128);
+    ASSERT(v->type == COWRIE_UUID128);
     ASSERT(memcmp(v->as.uuid, uuid, 16) == 0);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(v, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
 
-    SJSONValue *dec;
-    ASSERT(sjson_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == SJSON_UUID128);
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_UUID128);
     ASSERT(memcmp(dec->as.uuid, uuid, 16) == 0);
 
-    sjson_free(v);
-    sjson_free(dec);
-    sjson_buf_free(&buf);
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
@@ -477,102 +477,102 @@ static int test_uuid128_roundtrip(void) {
 
 static int test_deterministic_encoding(void) {
     /* Create object with keys in different orders */
-    SJSONValue *obj1 = sjson_new_object();
-    sjson_object_set(obj1, "zebra", 5, sjson_new_int64(1));
-    sjson_object_set(obj1, "alpha", 5, sjson_new_int64(2));
-    sjson_object_set(obj1, "beta", 4, sjson_new_int64(3));
+    COWRIEValue *obj1 = cowrie_new_object();
+    cowrie_object_set(obj1, "zebra", 5, cowrie_new_int64(1));
+    cowrie_object_set(obj1, "alpha", 5, cowrie_new_int64(2));
+    cowrie_object_set(obj1, "beta", 4, cowrie_new_int64(3));
 
-    SJSONValue *obj2 = sjson_new_object();
-    sjson_object_set(obj2, "alpha", 5, sjson_new_int64(2));
-    sjson_object_set(obj2, "beta", 4, sjson_new_int64(3));
-    sjson_object_set(obj2, "zebra", 5, sjson_new_int64(1));
+    COWRIEValue *obj2 = cowrie_new_object();
+    cowrie_object_set(obj2, "alpha", 5, cowrie_new_int64(2));
+    cowrie_object_set(obj2, "beta", 4, cowrie_new_int64(3));
+    cowrie_object_set(obj2, "zebra", 5, cowrie_new_int64(1));
 
-    SJSONEncodeOpts opts;
-    sjson_encode_opts_init(&opts);
+    COWRIEEncodeOpts opts;
+    cowrie_encode_opts_init(&opts);
     opts.deterministic = 1;
 
-    SJSONBuf buf1, buf2;
-    ASSERT(sjson_encode_with_opts(obj1, &opts, &buf1) == 0);
-    ASSERT(sjson_encode_with_opts(obj2, &opts, &buf2) == 0);
+    COWRIEBuf buf1, buf2;
+    ASSERT(cowrie_encode_with_opts(obj1, &opts, &buf1) == 0);
+    ASSERT(cowrie_encode_with_opts(obj2, &opts, &buf2) == 0);
 
     /* Deterministic encoding should produce identical output */
     ASSERT(buf1.len == buf2.len);
     ASSERT(memcmp(buf1.data, buf2.data, buf1.len) == 0);
 
-    sjson_free(obj1);
-    sjson_free(obj2);
-    sjson_buf_free(&buf1);
-    sjson_buf_free(&buf2);
+    cowrie_free(obj1);
+    cowrie_free(obj2);
+    cowrie_buf_free(&buf1);
+    cowrie_buf_free(&buf2);
     return 1;
 }
 
 static int test_schema_fingerprint(void) {
     /* Same structure should produce same fingerprint */
-    SJSONValue *obj1 = sjson_new_object();
-    sjson_object_set(obj1, "x", 1, sjson_new_int64(1));
-    sjson_object_set(obj1, "y", 1, sjson_new_int64(2));
+    COWRIEValue *obj1 = cowrie_new_object();
+    cowrie_object_set(obj1, "x", 1, cowrie_new_int64(1));
+    cowrie_object_set(obj1, "y", 1, cowrie_new_int64(2));
 
-    SJSONValue *obj2 = sjson_new_object();
-    sjson_object_set(obj2, "x", 1, sjson_new_int64(100));
-    sjson_object_set(obj2, "y", 1, sjson_new_int64(200));
+    COWRIEValue *obj2 = cowrie_new_object();
+    cowrie_object_set(obj2, "x", 1, cowrie_new_int64(100));
+    cowrie_object_set(obj2, "y", 1, cowrie_new_int64(200));
 
-    uint32_t fp1 = sjson_schema_fingerprint32(obj1);
-    uint32_t fp2 = sjson_schema_fingerprint32(obj2);
+    uint32_t fp1 = cowrie_schema_fingerprint32(obj1);
+    uint32_t fp2 = cowrie_schema_fingerprint32(obj2);
     ASSERT(fp1 == fp2);  /* Same structure, different values */
 
     /* Different structure should produce different fingerprint */
-    SJSONValue *obj3 = sjson_new_object();
-    sjson_object_set(obj3, "x", 1, sjson_new_string("hello", 5));
+    COWRIEValue *obj3 = cowrie_new_object();
+    cowrie_object_set(obj3, "x", 1, cowrie_new_string("hello", 5));
 
-    uint32_t fp3 = sjson_schema_fingerprint32(obj3);
+    uint32_t fp3 = cowrie_schema_fingerprint32(obj3);
     ASSERT(fp1 != fp3);
 
-    sjson_free(obj1);
-    sjson_free(obj2);
-    sjson_free(obj3);
+    cowrie_free(obj1);
+    cowrie_free(obj2);
+    cowrie_free(obj3);
     return 1;
 }
 
 static int test_crc32(void) {
     const char *test = "Hello, World!";
-    uint32_t crc = sjson_crc32((const uint8_t *)test, strlen(test));
+    uint32_t crc = cowrie_crc32((const uint8_t *)test, strlen(test));
     /* Known CRC32-IEEE value for "Hello, World!" */
     ASSERT(crc == 0xEC4AC3D0);
     return 1;
 }
 
 static int test_master_stream(void) {
-    SJSONValue *value = sjson_new_object();
-    sjson_object_set(value, "message", 7, sjson_new_string("test", 4));
+    COWRIEValue *value = cowrie_new_object();
+    cowrie_object_set(value, "message", 7, cowrie_new_string("test", 4));
 
-    SJSONValue *meta = sjson_new_object();
-    sjson_object_set(meta, "timestamp", 9, sjson_new_int64(1234567890));
+    COWRIEValue *meta = cowrie_new_object();
+    cowrie_object_set(meta, "timestamp", 9, cowrie_new_int64(1234567890));
 
-    SJSONMasterWriterOpts opts;
-    sjson_master_writer_opts_init(&opts);
+    COWRIEMasterWriterOpts opts;
+    cowrie_master_writer_opts_init(&opts);
 
-    SJSONBuf buf;
-    ASSERT(sjson_master_write_frame(value, meta, &opts, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_master_write_frame(value, meta, &opts, &buf) == 0);
     ASSERT(buf.len > 24);  /* Header + data */
 
     /* Check magic */
-    ASSERT(sjson_is_master_stream(buf.data, buf.len));
+    ASSERT(cowrie_is_master_stream(buf.data, buf.len));
 
     /* Read back */
-    SJSONMasterFrame frame;
-    int consumed = sjson_master_read_frame(buf.data, buf.len, &frame);
+    COWRIEMasterFrame frame;
+    int consumed = cowrie_master_read_frame(buf.data, buf.len, &frame);
     ASSERT(consumed > 0);
     ASSERT(frame.payload != NULL);
     ASSERT(frame.meta != NULL);
 
-    SJSONValue *msg = sjson_object_get(frame.payload, "message", 7);
+    COWRIEValue *msg = cowrie_object_get(frame.payload, "message", 7);
     ASSERT(msg != NULL);
     ASSERT(strcmp(msg->as.str.data, "test") == 0);
 
-    sjson_master_frame_free(&frame);
-    sjson_free(value);
-    sjson_free(meta);
-    sjson_buf_free(&buf);
+    cowrie_master_frame_free(&frame);
+    cowrie_free(value);
+    cowrie_free(meta);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
@@ -584,66 +584,66 @@ static int test_node_roundtrip(void) {
     const char *labels[] = {"Person", "Employee"};
     size_t label_lens[] = {6, 8};
 
-    SJSONMember props[2];
+    COWRIEMember props[2];
     props[0].key = "name";
     props[0].key_len = 4;
-    props[0].value = sjson_new_string("Alice", 5);
+    props[0].value = cowrie_new_string("Alice", 5);
     props[1].key = "age";
     props[1].key_len = 3;
-    props[1].value = sjson_new_int64(30);
+    props[1].value = cowrie_new_int64(30);
 
-    SJSONValue *node = sjson_new_node("node_42", 7, labels, label_lens, 2, props, 2);
+    COWRIEValue *node = cowrie_new_node("node_42", 7, labels, label_lens, 2, props, 2);
     ASSERT(node != NULL);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(node, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(node, &buf) == 0);
 
-    SJSONValue *decoded;
-    ASSERT(sjson_decode(buf.data, buf.len, &decoded) == 0);
+    COWRIEValue *decoded;
+    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
 
-    ASSERT(decoded->type == SJSON_NODE);
+    ASSERT(decoded->type == COWRIE_NODE);
     ASSERT(strcmp(decoded->as.node.id, "node_42") == 0);
     ASSERT(decoded->as.node.label_count == 2);
     ASSERT(strcmp(decoded->as.node.labels[0], "Person") == 0);
     ASSERT(strcmp(decoded->as.node.labels[1], "Employee") == 0);
     ASSERT(decoded->as.node.prop_count == 2);
 
-    sjson_free(node);
-    sjson_free(decoded);
-    sjson_buf_free(&buf);
+    cowrie_free(node);
+    cowrie_free(decoded);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_edge_roundtrip(void) {
-    SJSONMember props[1];
+    COWRIEMember props[1];
     props[0].key = "weight";
     props[0].key_len = 6;
-    props[0].value = sjson_new_float64(0.75);
+    props[0].value = cowrie_new_float64(0.75);
 
-    SJSONValue *edge = sjson_new_edge("node_1", 6, "node_2", 6, "KNOWS", 5, props, 1);
+    COWRIEValue *edge = cowrie_new_edge("node_1", 6, "node_2", 6, "KNOWS", 5, props, 1);
     ASSERT(edge != NULL);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(edge, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(edge, &buf) == 0);
 
-    SJSONValue *decoded;
-    ASSERT(sjson_decode(buf.data, buf.len, &decoded) == 0);
+    COWRIEValue *decoded;
+    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
 
-    ASSERT(decoded->type == SJSON_EDGE);
+    ASSERT(decoded->type == COWRIE_EDGE);
     ASSERT(strcmp(decoded->as.edge.from_id, "node_1") == 0);
     ASSERT(strcmp(decoded->as.edge.to_id, "node_2") == 0);
     ASSERT(strcmp(decoded->as.edge.edge_type, "KNOWS") == 0);
     ASSERT(decoded->as.edge.prop_count == 1);
 
-    sjson_free(edge);
-    sjson_free(decoded);
-    sjson_buf_free(&buf);
+    cowrie_free(edge);
+    cowrie_free(decoded);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
 static int test_graph_shard_roundtrip(void) {
     /* Create a simple node */
-    SJSONNode nodes[1];
+    COWRIENode nodes[1];
     nodes[0].id = "n1";
     nodes[0].id_len = 2;
     nodes[0].labels = NULL;
@@ -653,7 +653,7 @@ static int test_graph_shard_roundtrip(void) {
     nodes[0].prop_count = 0;
 
     /* Create a simple edge */
-    SJSONEdge edges[1];
+    COWRIEEdge edges[1];
     edges[0].from_id = "n1";
     edges[0].from_id_len = 2;
     edges[0].to_id = "n1";
@@ -664,28 +664,28 @@ static int test_graph_shard_roundtrip(void) {
     edges[0].prop_count = 0;
 
     /* Create metadata */
-    SJSONMember meta[1];
+    COWRIEMember meta[1];
     meta[0].key = "version";
     meta[0].key_len = 7;
-    meta[0].value = sjson_new_int64(1);
+    meta[0].value = cowrie_new_int64(1);
 
-    SJSONValue *shard = sjson_new_graph_shard(nodes, 1, edges, 1, meta, 1);
+    COWRIEValue *shard = cowrie_new_graph_shard(nodes, 1, edges, 1, meta, 1);
     ASSERT(shard != NULL);
 
-    SJSONBuf buf;
-    ASSERT(sjson_encode(shard, &buf) == 0);
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(shard, &buf) == 0);
 
-    SJSONValue *decoded;
-    ASSERT(sjson_decode(buf.data, buf.len, &decoded) == 0);
+    COWRIEValue *decoded;
+    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
 
-    ASSERT(decoded->type == SJSON_GRAPH_SHARD);
+    ASSERT(decoded->type == COWRIE_GRAPH_SHARD);
     ASSERT(decoded->as.graph_shard.node_count == 1);
     ASSERT(decoded->as.graph_shard.edge_count == 1);
     ASSERT(decoded->as.graph_shard.meta_count == 1);
 
-    sjson_free(shard);
-    sjson_free(decoded);
-    sjson_buf_free(&buf);
+    cowrie_free(shard);
+    cowrie_free(decoded);
+    cowrie_buf_free(&buf);
     return 1;
 }
 
@@ -698,13 +698,13 @@ static int test_fixtures_core(void) {
     if (!build_repo_root(root, sizeof(root))) return 0;
 
     const char *cases[][2] = {
-        {"core/null.sjson", "core/null.json"},
-        {"core/true.sjson", "core/true.json"},
-        {"core/int.sjson", "core/int.json"},
-        {"core/float.sjson", "core/float.json"},
-        {"core/string.sjson", "core/string.json"},
-        {"core/array.sjson", "core/array.json"},
-        {"core/object.sjson", "core/object.json"},
+        {"core/null.cowrie", "core/null.json"},
+        {"core/true.cowrie", "core/true.json"},
+        {"core/int.cowrie", "core/int.json"},
+        {"core/float.cowrie", "core/float.json"},
+        {"core/string.cowrie", "core/string.json"},
+        {"core/array.cowrie", "core/array.json"},
+        {"core/object.cowrie", "core/object.json"},
     };
 
     for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -717,55 +717,55 @@ static int test_fixtures_core(void) {
         size_t input_len = 0;
         if (!read_file(input_path, &input_data, &input_len)) return 0;
 
-        SJSONValue *decoded = NULL;
-        if (sjson_decode((const uint8_t *)input_data, input_len, &decoded) != 0) {
+        COWRIEValue *decoded = NULL;
+        if (cowrie_decode((const uint8_t *)input_data, input_len, &decoded) != 0) {
             free(input_data);
             return 0;
         }
         free(input_data);
 
-        SJSONBuf actual_json;
-        sjson_buf_init(&actual_json);
-        if (sjson_to_json(decoded, &actual_json) != 0) {
-            sjson_free(decoded);
-            sjson_buf_free(&actual_json);
+        COWRIEBuf actual_json;
+        cowrie_buf_init(&actual_json);
+        if (cowrie_to_json(decoded, &actual_json) != 0) {
+            cowrie_free(decoded);
+            cowrie_buf_free(&actual_json);
             return 0;
         }
 
         char *expected_json = NULL;
         size_t expected_len = 0;
         if (!read_file(json_path, &expected_json, &expected_len)) {
-            sjson_free(decoded);
-            sjson_buf_free(&actual_json);
+            cowrie_free(decoded);
+            cowrie_buf_free(&actual_json);
             return 0;
         }
 
-        SJSONValue *expected_val = NULL;
-        if (sjson_from_json(expected_json, expected_len, &expected_val) != 0) {
+        COWRIEValue *expected_val = NULL;
+        if (cowrie_from_json(expected_json, expected_len, &expected_val) != 0) {
             free(expected_json);
-            sjson_free(decoded);
-            sjson_buf_free(&actual_json);
+            cowrie_free(decoded);
+            cowrie_buf_free(&actual_json);
             return 0;
         }
         free(expected_json);
 
-        SJSONBuf expected_canon;
-        sjson_buf_init(&expected_canon);
-        if (sjson_to_json(expected_val, &expected_canon) != 0) {
-            sjson_free(expected_val);
-            sjson_free(decoded);
-            sjson_buf_free(&actual_json);
-            sjson_buf_free(&expected_canon);
+        COWRIEBuf expected_canon;
+        cowrie_buf_init(&expected_canon);
+        if (cowrie_to_json(expected_val, &expected_canon) != 0) {
+            cowrie_free(expected_val);
+            cowrie_free(decoded);
+            cowrie_buf_free(&actual_json);
+            cowrie_buf_free(&expected_canon);
             return 0;
         }
 
         int ok = (actual_json.len == expected_canon.len) &&
                  (memcmp(actual_json.data, expected_canon.data, actual_json.len) == 0);
 
-        sjson_free(expected_val);
-        sjson_free(decoded);
-        sjson_buf_free(&actual_json);
-        sjson_buf_free(&expected_canon);
+        cowrie_free(expected_val);
+        cowrie_free(decoded);
+        cowrie_buf_free(&actual_json);
+        cowrie_buf_free(&expected_canon);
 
         if (!ok) return 0;
     }
@@ -778,7 +778,7 @@ static int test_fixtures_core(void) {
  * ============================================================ */
 
 int main(void) {
-    printf("SJSON Gen2 Test Suite\n");
+    printf("COWRIE Gen2 Test Suite\n");
     printf("=====================\n\n");
 
     printf("Basic Types:\n");

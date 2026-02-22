@@ -1,4 +1,4 @@
-//! Schema fingerprinting for SJSON values.
+//! Schema fingerprinting for Cowrie values.
 //!
 //! Provides FNV-1a based fingerprints for type routing and schema equality checks.
 

@@ -4,161 +4,161 @@
       "id": "gen2_core_null",
       "gen": 2,
       "kind": "decode",
-      "input": "core/null.sjson",
+      "input": "core/null.cowrie",
       "expect": {"ok": true, "json": "core/null.json"}
     },
     {
       "id": "gen2_core_true",
       "gen": 2,
       "kind": "decode",
-      "input": "core/true.sjson",
+      "input": "core/true.cowrie",
       "expect": {"ok": true, "json": "core/true.json"}
     },
     {
       "id": "gen2_core_int",
       "gen": 2,
       "kind": "decode",
-      "input": "core/int.sjson",
+      "input": "core/int.cowrie",
       "expect": {"ok": true, "json": "core/int.json"}
     },
     {
       "id": "gen2_core_float",
       "gen": 2,
       "kind": "decode",
-      "input": "core/float.sjson",
+      "input": "core/float.cowrie",
       "expect": {"ok": true, "json": "core/float.json"}
     },
     {
       "id": "gen2_core_string",
       "gen": 2,
       "kind": "decode",
-      "input": "core/string.sjson",
+      "input": "core/string.cowrie",
       "expect": {"ok": true, "json": "core/string.json"}
     },
     {
       "id": "gen2_core_array",
       "gen": 2,
       "kind": "decode",
-      "input": "core/array.sjson",
+      "input": "core/array.cowrie",
       "expect": {"ok": true, "json": "core/array.json"}
     },
     {
       "id": "gen2_core_object",
       "gen": 2,
       "kind": "decode",
-      "input": "core/object.sjson",
+      "input": "core/object.cowrie",
       "expect": {"ok": true, "json": "core/object.json"}
     },
     {
       "id": "gen2_ml_tensor",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/tensor.sjson",
+      "input": "ml/tensor.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_ml_tensor_ref",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/tensor_ref.sjson",
+      "input": "ml/tensor_ref.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_ml_image",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/image.sjson",
+      "input": "ml/image.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_ml_audio",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/audio.sjson",
+      "input": "ml/audio.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_ml_adjlist",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/adjlist.sjson",
+      "input": "ml/adjlist.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_ml_richtext",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/richtext.sjson",
+      "input": "ml/richtext.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_ml_delta",
       "gen": 2,
       "kind": "decode",
-      "input": "ml/delta.sjson",
+      "input": "ml/delta.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_graph_node",
       "gen": 2,
       "kind": "decode",
-      "input": "graph/node.sjson",
+      "input": "graph/node.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_graph_edge",
       "gen": 2,
       "kind": "decode",
-      "input": "graph/edge.sjson",
+      "input": "graph/edge.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_graph_node_batch",
       "gen": 2,
       "kind": "decode",
-      "input": "graph/node_batch.sjson",
+      "input": "graph/node_batch.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_graph_edge_batch",
       "gen": 2,
       "kind": "decode",
-      "input": "graph/edge_batch.sjson",
+      "input": "graph/edge_batch.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_graph_graph_shard",
       "gen": 2,
       "kind": "decode",
-      "input": "graph/graph_shard.sjson",
+      "input": "graph/graph_shard.cowrie",
       "expect": {"ok": true}
     },
     {
       "id": "gen2_neg_bad_magic",
       "gen": 2,
       "kind": "decode",
-      "input": "neg/bad_magic.sjson",
+      "input": "neg/bad_magic.cowrie",
       "expect": {"ok": false, "error": "ERR_INVALID_MAGIC"}
     },
     {
       "id": "gen2_neg_bad_version",
       "gen": 2,
       "kind": "decode",
-      "input": "neg/bad_version.sjson",
+      "input": "neg/bad_version.cowrie",
       "expect": {"ok": false, "error": "ERR_INVALID_VERSION"}
     },
     {
       "id": "gen2_neg_truncated",
       "gen": 2,
       "kind": "decode",
-      "input": "neg/truncated.sjson",
+      "input": "neg/truncated.cowrie",
       "expect": {"ok": false, "error": "ERR_TRUNCATED"}
     },
     {
       "id": "gen2_neg_invalid_tag",
       "gen": 2,
       "kind": "decode",
-      "input": "neg/invalid_tag.sjson",
+      "input": "neg/invalid_tag.cowrie",
       "expect": {"ok": false, "error": "ERR_INVALID_TAG"}
     }
   ]

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sjson import gen2
+from cowrie import gen2
 
 
 def _repo_root() -> Path:

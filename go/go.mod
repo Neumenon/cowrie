@@ -1,4 +1,4 @@
-module github.com/phenomenon0/sjson-final/go
+module github.com/Neumenon/cowrie
 
 go 1.21
 
