@@ -1,0 +1,34 @@
+{
+  "name": "sjson",
+  "version": "0.1.0",
+  "description": "SJSON - Structured JSON binary codec for TypeScript",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --import tsx --test src/**/*.test.ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "json",
+    "binary",
+    "serialization",
+    "codec",
+    "tensor",
+    "ml"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/phenomenon0/sjson-final"
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@types/node": "^25.0.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

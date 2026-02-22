@@ -1,0 +1,26 @@
+[package]
+name = "sjson"
+version = "0.1.0"
+edition = "2021"
+description = "SJSON - Structured JSON binary format with Gen1 and Gen2 codecs"
+license = "MIT"
+repository = "https://github.com/phenomenon0/sjson-final"
+keywords = ["json", "binary", "serialization", "codec", "tensor"]
+categories = ["encoding", "data-structures"]
+
+[dependencies]
+# Compression
+flate2 = "1.0"
+zstd = { version = "0.13", optional = true }
+
+# JSON bridge
+serde_json = "1.0"
+base64 = "0.22"
+
+[dev-dependencies]
+
+[features]
+default = []
+gen1 = []  # Enable Gen1 codec
+gen2 = []  # Enable Gen2 codec
+zstd = ["dep:zstd"]  # Optional zstd compression

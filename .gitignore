@@ -1,0 +1,21 @@
+# Build artifacts
+c/build/
+rust/target/
+typescript/dist/
+typescript/node_modules/
+python/__pycache__/
+python/*.egg-info/
+python/.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.log

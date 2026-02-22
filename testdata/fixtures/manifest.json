@@ -1,0 +1,165 @@
+{
+  "cases": [
+    {
+      "id": "gen2_core_null",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/null.sjson",
+      "expect": {"ok": true, "json": "core/null.json"}
+    },
+    {
+      "id": "gen2_core_true",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/true.sjson",
+      "expect": {"ok": true, "json": "core/true.json"}
+    },
+    {
+      "id": "gen2_core_int",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/int.sjson",
+      "expect": {"ok": true, "json": "core/int.json"}
+    },
+    {
+      "id": "gen2_core_float",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/float.sjson",
+      "expect": {"ok": true, "json": "core/float.json"}
+    },
+    {
+      "id": "gen2_core_string",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/string.sjson",
+      "expect": {"ok": true, "json": "core/string.json"}
+    },
+    {
+      "id": "gen2_core_array",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/array.sjson",
+      "expect": {"ok": true, "json": "core/array.json"}
+    },
+    {
+      "id": "gen2_core_object",
+      "gen": 2,
+      "kind": "decode",
+      "input": "core/object.sjson",
+      "expect": {"ok": true, "json": "core/object.json"}
+    },
+    {
+      "id": "gen2_ml_tensor",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/tensor.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_ml_tensor_ref",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/tensor_ref.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_ml_image",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/image.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_ml_audio",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/audio.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_ml_adjlist",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/adjlist.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_ml_richtext",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/richtext.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_ml_delta",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/delta.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_graph_node",
+      "gen": 2,
+      "kind": "decode",
+      "input": "graph/node.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_graph_edge",
+      "gen": 2,
+      "kind": "decode",
+      "input": "graph/edge.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_graph_node_batch",
+      "gen": 2,
+      "kind": "decode",
+      "input": "graph/node_batch.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_graph_edge_batch",
+      "gen": 2,
+      "kind": "decode",
+      "input": "graph/edge_batch.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_graph_graph_shard",
+      "gen": 2,
+      "kind": "decode",
+      "input": "graph/graph_shard.sjson",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_neg_bad_magic",
+      "gen": 2,
+      "kind": "decode",
+      "input": "neg/bad_magic.sjson",
+      "expect": {"ok": false, "error": "ERR_INVALID_MAGIC"}
+    },
+    {
+      "id": "gen2_neg_bad_version",
+      "gen": 2,
+      "kind": "decode",
+      "input": "neg/bad_version.sjson",
+      "expect": {"ok": false, "error": "ERR_INVALID_VERSION"}
+    },
+    {
+      "id": "gen2_neg_truncated",
+      "gen": 2,
+      "kind": "decode",
+      "input": "neg/truncated.sjson",
+      "expect": {"ok": false, "error": "ERR_TRUNCATED"}
+    },
+    {
+      "id": "gen2_neg_invalid_tag",
+      "gen": 2,
+      "kind": "decode",
+      "input": "neg/invalid_tag.sjson",
+      "expect": {"ok": false, "error": "ERR_INVALID_TAG"}
+    }
+  ]
+}

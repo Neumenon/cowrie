@@ -1,0 +1,12 @@
+{
+  "id": "img-001",
+  "width": 1920,
+  "height": 1080,
+  "format": "jpeg",
+  "metadata": {
+    "camera": "Canon EOS R5",
+    "iso": 400,
+    "aperture": 2.8
+  },
+  "tags": ["landscape", "sunset", "mountains"]
+}

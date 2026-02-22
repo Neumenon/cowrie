@@ -1,0 +1,10 @@
+{
+  "id": "model-output",
+  "scores": [0.95, 0.03, 0.02],
+  "embedding": {
+    "_type": "tensor",
+    "dtype": "float32",
+    "dims": [4],
+    "data": "AAAAPwAAAD8AAAA/AAAAPw=="
+  }
+}
