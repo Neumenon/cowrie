@@ -1,4 +1,4 @@
-package gen2
+package cowrie
 
 import (
 	"encoding/base64"

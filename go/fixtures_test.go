@@ -1,4 +1,4 @@
-package gen2
+package cowrie
 
 import (
 	"encoding/json"
@@ -28,7 +28,7 @@ type fixtureExpect struct {
 }
 
 func TestFixturesCore(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", ".."))
+	repoRoot := filepath.Clean(filepath.Join(".."))
 	manifestPath := filepath.Join(repoRoot, "testdata", "fixtures", "manifest.json")
 	manifestBytes, err := os.ReadFile(manifestPath)
 	if err != nil {

@@ -1,4 +1,4 @@
-// Package gen2 implements Cowrie v2, a binary "JSON++" codec with extended types.
+// Package cowrie implements Cowrie v2, a binary "JSON++" codec with extended types.
 //
 // Cowrie v2 extends JSON with:
 //   - Explicit integer types (int64, uint64)
@@ -17,7 +17,7 @@
 //	DictLen: uvarint
 //	Dict:    DictLen × [len:uvarint][utf8 bytes]
 //	RootVal: encoded value
-package gen2
+package cowrie
 
 import "unsafe"
 

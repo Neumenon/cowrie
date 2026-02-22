@@ -1,4 +1,4 @@
-// Package gen2 implements Cowrie v2, a binary "JSON++" codec with extended types.
+// Package cowrie implements Cowrie v2, a binary "JSON++" codec with extended types.
 //
 // Cowrie v2 extends JSON with:
 //   - Explicit integer types (int64, uint64)
@@ -29,18 +29,18 @@
 // Example usage:
 //
 //	// Create values
-//	v := gen2.Object(
-//	    gen2.Member{Key: "name", Value: gen2.String("Alice")},
-//	    gen2.Member{Key: "embedding", Value: gen2.Tensor(gen2.DTypeFloat32, []uint64{384}, data)},
+//	v := cowrie.Object(
+//	    cowrie.Member{Key: "name", Value: cowrie.String("Alice")},
+//	    cowrie.Member{Key: "embedding", Value: cowrie.Tensor(cowrie.DTypeFloat32, []uint64{384}, data)},
 //	)
 //
 //	// Encode
-//	data, err := gen2.Encode(v)
+//	data, err := cowrie.Encode(v)
 //
 //	// Decode
-//	result, err := gen2.Decode(data)
+//	result, err := cowrie.Decode(data)
 //
 //	// JSON bridge
-//	jsonVal, err := gen2.FromJSON(jsonBytes)
-//	jsonBytes, err := gen2.ToJSON(cowrieVal)
-package gen2
+//	jsonVal, err := cowrie.FromJSON(jsonBytes)
+//	jsonBytes, err := cowrie.ToJSON(cowrieVal)
+package cowrie

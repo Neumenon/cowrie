@@ -29,7 +29,7 @@ import (
 	"os"
 
 	"github.com/Neumenon/cowrie/gen1"
-	"github.com/Neumenon/cowrie/gen2"
+	cowrie "github.com/Neumenon/cowrie"
 )
 
 func main() {
@@ -110,7 +110,7 @@ func encodeCmd(args []string) {
 	} else {
 		// Gen2 encoding (default)
 		_ = useGen2 // Silence unused warning
-		val, err := gen2.FromJSON(input)
+		val, err := cowrie.FromJSON(input)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
 			os.Exit(1)
@@ -119,11 +119,11 @@ func encodeCmd(args []string) {
 		// Apply compression if requested
 		switch *compress {
 		case "none":
-			output, err = gen2.Encode(val)
+			output, err = cowrie.Encode(val)
 		case "gzip":
-			output, err = gen2.EncodeFramed(val, gen2.CompressionGzip)
+			output, err = cowrie.EncodeFramed(val, cowrie.CompressionGzip)
 		case "zstd":
-			output, err = gen2.EncodeFramed(val, gen2.CompressionZstd)
+			output, err = cowrie.EncodeFramed(val, cowrie.CompressionZstd)
 		default:
 			fmt.Fprintf(os.Stderr, "Unknown compression: %s\n", *compress)
 			os.Exit(1)
@@ -174,16 +174,16 @@ func decodeCmd(args []string) {
 		_ = useGen2 // Silence unused warning
 
 		// Try framed decode first (handles compression)
-		val, err := gen2.DecodeFramed(input)
+		val, err := cowrie.DecodeFramed(input)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
 			os.Exit(1)
 		}
 
 		if *pretty {
-			output, err = gen2.ToJSONIndent(val, "  ")
+			output, err = cowrie.ToJSONIndent(val, "  ")
 		} else {
-			output, err = gen2.ToJSON(val)
+			output, err = cowrie.ToJSON(val)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error converting to JSON: %v\n", err)
@@ -233,11 +233,11 @@ func infoCmd(args []string) {
 		}
 
 		// Try to decode and get schema info
-		val, err := gen2.DecodeFramed(input)
+		val, err := cowrie.DecodeFramed(input)
 		if err == nil {
 			fmt.Printf("Root type: %s\n", val.Type())
-			fmt.Printf("Schema fingerprint: 0x%016x\n", gen2.SchemaFingerprint64(val))
-			fmt.Printf("Schema descriptor: %s\n", gen2.SchemaDescriptor(val))
+			fmt.Printf("Schema fingerprint: 0x%016x\n", cowrie.SchemaFingerprint64(val))
+			fmt.Printf("Schema descriptor: %s\n", cowrie.SchemaDescriptor(val))
 		}
 	} else if input[0] == 0x00 || input[0] <= 0x15 {
 		// Likely Gen1 format (starts with type tag)
