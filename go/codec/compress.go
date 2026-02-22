@@ -5,8 +5,14 @@ import (
 	"compress/gzip"
 	"io"
 
+	"github.com/Neumenon/cowrie"
 	"github.com/klauspost/compress/zstd"
 )
+
+// MaxDecompressedSize is the maximum allowed decompressed payload size (256 MB).
+// This prevents decompression bombs where a small compressed payload expands
+// into gigabytes of RAM.
+const MaxDecompressedSize = 256 * 1024 * 1024
 
 // zstd encoder/decoder (reusable for performance)
 var (
@@ -39,14 +45,23 @@ func compressGzip(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// decompressGzip decompresses gzip data.
+// decompressGzip decompresses gzip data with a size limit to prevent decompression bombs.
 func decompressGzip(data []byte) ([]byte, error) {
 	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
-	return io.ReadAll(r)
+
+	limited := io.LimitReader(r, MaxDecompressedSize+1)
+	out, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(out)) > MaxDecompressedSize {
+		return nil, cowrie.ErrDecompressedTooLarge
+	}
+	return out, nil
 }
 
 // compressZstd compresses data using zstd.
@@ -54,7 +69,23 @@ func compressZstd(data []byte) ([]byte, error) {
 	return zstdEnc.EncodeAll(data, nil), nil
 }
 
-// decompressZstd decompresses zstd data.
+// decompressZstd decompresses zstd data with a size limit to prevent decompression bombs.
 func decompressZstd(data []byte) ([]byte, error) {
-	return zstdDec.DecodeAll(data, nil)
+	// Use a streaming reader with LimitReader instead of DecodeAll
+	// to enforce the decompression size limit.
+	dec, err := zstd.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer dec.Close()
+
+	limited := io.LimitReader(dec, MaxDecompressedSize+1)
+	out, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(out)) > MaxDecompressedSize {
+		return nil, cowrie.ErrDecompressedTooLarge
+	}
+	return out, nil
 }

@@ -384,6 +384,12 @@ func (mr *MasterReader) readMasterFrame() (*MasterFrame, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Post-decompress check: validate ACTUAL decompressed size, not just claimed rawLen.
+		// A crafted payload could claim a small rawLen but decompress to a much larger size.
+		if mr.opts.MaxDecompressedSize > 0 && int64(len(payloadData)) > int64(mr.opts.MaxDecompressedSize) {
+			return nil, cowrie.ErrDecompressedTooLarge
+		}
 	}
 
 	// Decode payload

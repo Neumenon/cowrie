@@ -222,7 +222,7 @@ func EncodeWithHints(v *Value, hints []ColumnHint) ([]byte, error) {
 
 // DecodeWithHints decodes Cowrie data and returns both the value and any hints.
 func DecodeWithHints(data []byte) (*HintResult, error) {
-	r := &reader{data: data}
+	r := &reader{data: data, opts: DefaultDecodeOptions()}
 
 	// Read header
 	magic0, err := r.readByte()

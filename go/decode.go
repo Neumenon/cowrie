@@ -805,6 +805,10 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Guard against nodeCount+1 overflow (MaxUint64 + 1 wraps to 0)
+		if nodeCount == math.MaxUint64 {
+			return nil, ErrMalformedLength
+		}
 		// Sanity check: nodeCount+1 offsets, each at least 1 byte
 		if nodeCount+1 > uint64(r.remaining()) {
 			return nil, ErrMalformedLength
@@ -817,13 +821,18 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			}
 			rowOffsets[i] = offset
 		}
-		// Calculate colIndices byte length
-		var colBytesLen int
+		// Calculate colIndices byte length with overflow-safe arithmetic
+		var adjIDWidth int
 		if IDWidth(idWidth) == IDWidthInt32 {
-			colBytesLen = int(edgeCount) * 4
+			adjIDWidth = 4
 		} else {
-			colBytesLen = int(edgeCount) * 8
+			adjIDWidth = 8
 		}
+		bytesPerID := uint64(adjIDWidth)
+		if edgeCount > 0 && bytesPerID > 0 && edgeCount > uint64(r.remaining())/bytesPerID {
+			return nil, ErrMalformedLength
+		}
+		colBytesLen := int(edgeCount * bytesPerID)
 		// Sanity check: colBytesLen can't exceed remaining data
 		if colBytesLen > r.remaining() {
 			return nil, ErrMalformedLength
@@ -835,7 +844,7 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		return Adjlist(IDWidth(idWidth), nodeCount, edgeCount, rowOffsets, colIndices), nil
 
 	case TagRichText:
-		text, err := r.readString()
+		text, err := r.readStringWithLimit(r.opts.MaxStringLen)
 		if err != nil {
 			return nil, err
 		}
