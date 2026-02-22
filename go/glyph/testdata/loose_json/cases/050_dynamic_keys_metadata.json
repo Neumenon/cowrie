@@ -1,0 +1,28 @@
+{
+  "id": "resource_123",
+  "type": "container",
+  "labels": {
+    "app": "frontend",
+    "env": "production",
+    "team": "platform",
+    "version": "v2.3.1"
+  },
+  "annotations": {
+    "kubernetes.io/created-by": "helm",
+    "prometheus.io/scrape": "true",
+    "custom.example.com/owner": "alice@example.com"
+  },
+  "attributes": {
+    "cpu_limit": 2000,
+    "memory_limit": 4096,
+    "replicas": 3
+  },
+  "tags": ["critical", "monitored", "auto-scaled"],
+  "extra": {
+    "nested_dynamic": {
+      "key1": "value1",
+      "key2": 42,
+      "key3": true
+    }
+  }
+}

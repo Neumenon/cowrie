@@ -1,0 +1,6 @@
+{
+  "id":"evt_123",
+  "type":"user.created",
+  "data":{"user":{"id":"u_1","name":"Ada","roles":["admin","dev"]}},
+  "ok":true
+}

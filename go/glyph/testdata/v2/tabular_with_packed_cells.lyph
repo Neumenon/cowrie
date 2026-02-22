@@ -1,0 +1,29 @@
+# Tabular mode with packed sub-struct cells
+# Format: @tab Type [columns]\n row1\n row2\n ... @end
+# Nested structs in cells use packed format
+
+# -----------------------------------------------------
+# Match table: 3+ rows triggers tabular mode
+# Columns are ordered by FID, wire keys used
+# -----------------------------------------------------
+@tab Match [m k H A O P fh fa]
+^m:ARS-LIV 2025-12-19T20:00:00Z Team@(^t:ARS Arsenal EPL) Team@(^t:LIV Liverpool EPL) Odds@(2.1 3.4 3.25) Pred@(0.45 0.27 0.28 1.72 1.31) 2 1
+^m:MCI-CHE 2025-12-20T15:00:00Z Team@(^t:MCI "Manchester City" EPL) Team@(^t:CHE Chelsea EPL) Odds@(1.8 3.6 4.2) Pred@(0.52 0.24 0.24 1.85 1.15) ∅ ∅
+^m:TOT-MUN 2025-12-21T17:30:00Z Team@(^t:TOT Tottenham EPL) Team@(^t:MUN "Manchester United" EPL) Odds@(2.5 3.3 2.8) Pred@(0.38 0.27 0.35 1.45 1.55) 1 1
+@end
+
+# -----------------------------------------------------
+# Simpler table: Hike examples from v2_test.go
+# Shows tabular with primitives + refs
+# -----------------------------------------------------
+@tab Hike [i n d e c s]
+1 "Blue Lake Trail" 7.5 320 ^p:ana t
+2 "Ridge Overlook" 9.2 540 ^p:luis f
+3 "Wildflower Loop" 5.1 180 ^p:sam t
+@end
+
+# -----------------------------------------------------
+# Inline tabular (for nested list<struct> in packed parent)
+# Uses | separator for rows within a single line
+# -----------------------------------------------------
+@tab Team [t n l] ^t:ARS Arsenal EPL | ^t:LIV Liverpool EPL | ^t:CHE Chelsea EPL @end

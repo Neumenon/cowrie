@@ -1,0 +1,32 @@
+# Mixed modes golden file - demonstrates auto mode selection
+# Mode priority: Tabular > Packed > Struct
+
+# -----------------------------------------------------
+# SECTION 1: Single struct -> Packed mode (dense)
+# -----------------------------------------------------
+# All required fields present, no optionals -> dense packed
+Team@(^t:MCI "Manchester City" EPL)
+
+# -----------------------------------------------------
+# SECTION 2: Packed with bitmap (sparse optionals)
+# -----------------------------------------------------
+# Some optionals missing -> bitmap form
+Match@{bm=0b11}(^m:MCI-CHE 2025-12-20T15:00:00Z Team@(^t:MCI "Manchester City" EPL) Team@(^t:CHE Chelsea EPL) Odds@(1.8 3.6 4.2) Pred@(0.52 0.24 0.24 1.85 1.15))
+
+# -----------------------------------------------------
+# SECTION 3: Packed dense (all optionals present)
+# -----------------------------------------------------
+# Note: 2.0 canonicalizes to 2
+Match@(^m:ARS-TOT 2025-12-21T17:30:00Z Team@(^t:ARS Arsenal EPL) Team@(^t:TOT Tottenham EPL) Odds@(2 3.3 3.5) Pred@(0.47 0.26 0.27 1.68 1.42) 3 1)
+
+# -----------------------------------------------------
+# SECTION 4: Struct mode for non-packable types
+# -----------------------------------------------------
+# Types without FIDs or marked non-packable use struct mode
+Config{env=production debug=f timeout=30000 features=[streaming batching]}
+
+# -----------------------------------------------------
+# SECTION 5: Nested mixed modes
+# -----------------------------------------------------
+# Outer packed, inner packed
+Fixture@(^f:2025-12-22:ARS-LIV 2025-12-22 Match@{bm=0b11}(^m:ARS-LIV 2025-12-22T20:00:00Z Team@(^t:ARS Arsenal EPL) Team@(^t:LIV Liverpool EPL) Odds@(2.15 3.35 3.2) Pred@(0.44 0.27 0.29 1.7 1.35)))

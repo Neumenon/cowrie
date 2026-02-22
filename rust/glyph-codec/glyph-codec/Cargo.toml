@@ -1,0 +1,21 @@
+[package]
+name = "glyph-codec"
+version = "0.1.0"
+edition = "2021"
+description = "GLYPH codec - token-efficient serialization for AI agents"
+license = "MIT"
+repository = "https://github.com/Neumenon/glyph"
+keywords = ["serialization", "codec", "llm", "ai", "json"]
+categories = ["encoding", "parser-implementations"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+base64 = "0.21"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+regex = "1.10"
+
+[dev-dependencies]
+pretty_assertions = "1.4"

@@ -1,0 +1,8 @@
+# Struct mode with wire keys (@k annotations)
+# Uses TypeName{key=value ...} format with abbreviated wire keys
+
+# Simple team in struct mode with wire keys
+Team{t=^t:ARS n=Arsenal l=EPL}
+
+# Match in struct mode with wire keys (when not using packed)
+Match{m=^m:ARS-LIV k=2025-12-19T20:00:00Z H=Team{t=^t:ARS n=Arsenal l=EPL} A=Team{t=^t:LIV n=Liverpool l=EPL} O=Odds{h=2.1 d=3.4 a=3.25} P=Pred{ph=0.45 pd=0.27 pa=0.28 xh=1.72 xa=1.31} fh=2 fa=1}
