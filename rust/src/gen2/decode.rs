@@ -36,25 +36,59 @@ mod tags {
     pub const GRAPH_SHARD: u8 = 0x39;
 }
 
-/// Maximum nesting depth.
-const MAX_DEPTH: usize = 1000;
-
-/// Maximum array/object size.
-const MAX_SIZE: usize = 10_000_000;
-/// Maximum extension payload length (100MB) - prevents DoS from huge ext payloads.
-const MAX_EXT_LEN: usize = 100_000_000;
-/// Maximum dictionary entry count (10M) - same as Go DefaultMaxDictLen.
-const MAX_DICT_LEN: usize = 10_000_000;
-/// Maximum tensor rank (dimensions).
-const MAX_RANK: usize = 32;
-/// Maximum column hints.
-const MAX_HINT_COUNT: u64 = 10_000;
-
 const FLAG_HAS_COLUMN_HINTS: u8 = 0x08;
 
-/// Decode Cowrie bytes to a Value.
+/// Configurable limits for the Cowrie decoder.
+///
+/// All limits have safe defaults that match the Go reference implementation.
+/// Use `DecodeOptions::default()` for standard limits, or construct custom
+/// options to restrict (or relax) individual bounds.
+#[derive(Debug, Clone)]
+pub struct DecodeOptions {
+    /// Maximum nesting depth for recursive values (arrays, objects, deltas).
+    pub max_depth: usize,
+    /// Maximum number of elements in an array.
+    pub max_array_len: usize,
+    /// Maximum number of entries in an object / property map.
+    pub max_object_len: usize,
+    /// Maximum byte length of a decoded string.
+    pub max_string_len: usize,
+    /// Maximum byte length of a decoded bytes blob.
+    pub max_bytes_len: usize,
+    /// Maximum byte length of an extension payload.
+    pub max_ext_len: usize,
+    /// Maximum number of entries in the dictionary.
+    pub max_dict_len: usize,
+    /// Maximum tensor rank (number of dimensions).
+    pub max_rank: usize,
+    /// Maximum number of column hints.
+    pub max_hint_count: usize,
+}
+
+impl Default for DecodeOptions {
+    fn default() -> Self {
+        Self {
+            max_depth: 1_000,
+            max_array_len: 100_000_000,
+            max_object_len: 10_000_000,
+            max_string_len: 500_000_000,
+            max_bytes_len: 1_000_000_000,
+            max_ext_len: 100_000_000,
+            max_dict_len: 10_000_000,
+            max_rank: 32,
+            max_hint_count: 10_000,
+        }
+    }
+}
+
+/// Decode Cowrie bytes to a Value using default options.
 pub fn decode(data: &[u8]) -> Result<Value, CowrieError> {
-    let mut reader = Reader::new(data);
+    decode_with_options(data, &DecodeOptions::default())
+}
+
+/// Decode Cowrie bytes to a Value with configurable limits.
+pub fn decode_with_options(data: &[u8], opts: &DecodeOptions) -> Result<Value, CowrieError> {
+    let mut reader = Reader::new(data, opts);
     reader.decode()
 }
 
@@ -63,15 +97,17 @@ struct Reader<'a> {
     pos: usize,
     dict: Vec<String>,
     depth: usize,
+    opts: &'a DecodeOptions,
 }
 
 impl<'a> Reader<'a> {
-    fn new(data: &'a [u8]) -> Self {
+    fn new(data: &'a [u8], opts: &'a DecodeOptions) -> Self {
         Reader {
             data,
             pos: 0,
             dict: Vec::new(),
             depth: 0,
+            opts,
         }
     }
 
@@ -101,7 +137,7 @@ impl<'a> Reader<'a> {
 
         // Read dictionary
         let dict_len = self.read_uvarint()? as usize;
-        if dict_len > MAX_DICT_LEN {
+        if dict_len > self.opts.max_dict_len {
             return Err(CowrieError::TooLarge);
         }
         self.dict = Vec::with_capacity(dict_len);
@@ -116,7 +152,7 @@ impl<'a> Reader<'a> {
 
     fn decode_value(&mut self) -> Result<Value, CowrieError> {
         self.depth += 1;
-        if self.depth > MAX_DEPTH {
+        if self.depth > self.opts.max_depth {
             return Err(CowrieError::TooDeep);
         }
 
@@ -149,7 +185,7 @@ impl<'a> Reader<'a> {
             }
             tags::BYTES => {
                 let len = self.read_uvarint()? as usize;
-                if len > MAX_SIZE {
+                if len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let bytes = self.read_bytes(len)?;
@@ -165,7 +201,7 @@ impl<'a> Reader<'a> {
             }
             tags::BIGINT => {
                 let len = self.read_uvarint()? as usize;
-                if len > MAX_SIZE {
+                if len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(len)?;
@@ -173,7 +209,7 @@ impl<'a> Reader<'a> {
             }
             tags::ARRAY => {
                 let len = self.read_uvarint()? as usize;
-                if len > MAX_SIZE {
+                if len > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut arr = Vec::with_capacity(len);
@@ -184,7 +220,7 @@ impl<'a> Reader<'a> {
             }
             tags::OBJECT => {
                 let len = self.read_uvarint()? as usize;
-                if len > MAX_SIZE {
+                if len > self.opts.max_object_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut obj = BTreeMap::new();
@@ -202,7 +238,7 @@ impl<'a> Reader<'a> {
             tags::EXT => {
                 let type_id = self.read_uvarint()?;
                 let len = self.read_uvarint()? as usize;
-                if len > MAX_EXT_LEN {
+                if len > self.opts.max_ext_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let payload = self.read_bytes(len)?;
@@ -211,10 +247,10 @@ impl<'a> Reader<'a> {
             tags::TENSOR => {
                 let dtype = DType::try_from(self.read_byte()?)?;
                 let rank = self.read_byte()? as usize;
-                if rank > MAX_RANK {
+                if rank > self.opts.max_rank {
                     return Err(CowrieError::InvalidData(format!(
                         "tensor rank {} exceeds maximum {}",
-                        rank, MAX_RANK
+                        rank, self.opts.max_rank
                     )));
                 }
                 let mut shape = Vec::with_capacity(rank);
@@ -222,7 +258,7 @@ impl<'a> Reader<'a> {
                     shape.push(self.read_uvarint()?);
                 }
                 let data_len = self.read_uvarint()? as usize;
-                if data_len > MAX_SIZE {
+                if data_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
@@ -231,7 +267,7 @@ impl<'a> Reader<'a> {
             tags::TENSOR_REF => {
                 let store_id = self.read_byte()?;
                 let key_len = self.read_uvarint()? as usize;
-                if key_len > MAX_SIZE {
+                if key_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let key = self.read_bytes(key_len)?;
@@ -243,7 +279,7 @@ impl<'a> Reader<'a> {
                 let width = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
                 let height = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
                 let data_len = self.read_uvarint()? as usize;
-                if data_len > MAX_SIZE {
+                if data_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
@@ -255,7 +291,7 @@ impl<'a> Reader<'a> {
                 let sample_rate = u32::from_le_bytes(self.read_bytes_fixed::<4>()?);
                 let channels = self.read_byte()?;
                 let data_len = self.read_uvarint()? as usize;
-                if data_len > MAX_SIZE {
+                if data_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
@@ -275,7 +311,7 @@ impl<'a> Reader<'a> {
                 // Col indices size depends on id_width and edge_count
                 let col_size = if id_width == 1 { 4 } else { 8 };
                 let col_len = edge_count as usize * col_size;
-                if col_len > MAX_SIZE {
+                if col_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let col_indices = self.read_bytes(col_len)?;
@@ -290,7 +326,7 @@ impl<'a> Reader<'a> {
             }
             tags::RICHTEXT => {
                 let text_len = self.read_uvarint()? as usize;
-                if text_len > MAX_SIZE {
+                if text_len > self.opts.max_string_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let text_bytes = self.read_bytes(text_len)?;
@@ -365,7 +401,7 @@ impl<'a> Reader<'a> {
             }
             tags::NODE_BATCH => {
                 let count = self.read_uvarint()? as usize;
-                if count > MAX_SIZE {
+                if count > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut nodes = Vec::with_capacity(count);
@@ -376,7 +412,7 @@ impl<'a> Reader<'a> {
             }
             tags::EDGE_BATCH => {
                 let count = self.read_uvarint()? as usize;
-                if count > MAX_SIZE {
+                if count > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut edges = Vec::with_capacity(count);
@@ -388,7 +424,7 @@ impl<'a> Reader<'a> {
             tags::GRAPH_SHARD => {
                 // Decode nodes
                 let node_count = self.read_uvarint()? as usize;
-                if node_count > MAX_SIZE {
+                if node_count > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut nodes = Vec::with_capacity(node_count);
@@ -397,7 +433,7 @@ impl<'a> Reader<'a> {
                 }
                 // Decode edges
                 let edge_count = self.read_uvarint()? as usize;
-                if edge_count > MAX_SIZE {
+                if edge_count > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut edges = Vec::with_capacity(edge_count);
@@ -476,7 +512,7 @@ impl<'a> Reader<'a> {
 
     fn read_string(&mut self) -> Result<String, CowrieError> {
         let len = self.read_uvarint()? as usize;
-        if len > MAX_SIZE {
+        if len > self.opts.max_string_len {
             return Err(CowrieError::TooLarge);
         }
         let bytes = self.read_bytes(len)?;
@@ -484,15 +520,15 @@ impl<'a> Reader<'a> {
     }
 
     fn skip_hints(&mut self) -> Result<(), CowrieError> {
-        let count = self.read_uvarint()?;
-        if count > MAX_HINT_COUNT {
+        let count = self.read_uvarint()? as usize;
+        if count > self.opts.max_hint_count {
             return Err(CowrieError::TooLarge);
         }
         for _ in 0..count {
             let _field = self.read_string()?;
             let _typ = self.read_byte()?;
             let shape_len = self.read_uvarint()?;
-            if shape_len > MAX_RANK as u64 {
+            if shape_len > self.opts.max_rank as u64 {
                 return Err(CowrieError::TooLarge);
             }
             for _ in 0..shape_len {
@@ -509,7 +545,7 @@ impl<'a> Reader<'a> {
         let id = self.read_string()?;
         // Labels
         let label_count = self.read_uvarint()? as usize;
-        if label_count > MAX_SIZE {
+        if label_count > self.opts.max_array_len {
             return Err(CowrieError::TooLarge);
         }
         let mut labels = Vec::with_capacity(label_count);
@@ -535,7 +571,7 @@ impl<'a> Reader<'a> {
     /// Decode dictionary-coded properties.
     fn decode_props(&mut self) -> Result<BTreeMap<String, Value>, CowrieError> {
         let prop_count = self.read_uvarint()? as usize;
-        if prop_count > MAX_SIZE {
+        if prop_count > self.opts.max_object_len {
             return Err(CowrieError::TooLarge);
         }
         let mut props = BTreeMap::new();
@@ -964,5 +1000,163 @@ mod tests {
             }
             _ => panic!("Expected GraphShard, got {:?}", decoded),
         }
+    }
+
+    // ============================================================
+    // DecodeOptions tests
+    // ============================================================
+
+    #[test]
+    fn test_decode_with_default_options() {
+        let val = Value::object(vec![
+            ("name", Value::String("test".into())),
+            ("count", Value::Int(42)),
+        ]);
+        let encoded = encode(&val).expect("encode");
+        let decoded = decode_with_options(&encoded, &DecodeOptions::default()).expect("decode");
+        assert_eq!(val, decoded);
+    }
+
+    #[test]
+    fn test_decode_with_options_max_depth() {
+        // Build a deeply nested array: [[[[...]]]]
+        fn nested_array(depth: usize) -> Value {
+            let mut v = Value::Int(1);
+            for _ in 0..depth {
+                v = Value::Array(vec![v]);
+            }
+            v
+        }
+
+        // depth=5 should work with max_depth=10
+        let val = nested_array(5);
+        let encoded = encode(&val).expect("encode");
+        let opts = DecodeOptions { max_depth: 10, ..DecodeOptions::default() };
+        let decoded = decode_with_options(&encoded, &opts);
+        assert!(decoded.is_ok(), "depth 5 should pass with max_depth=10");
+
+        // depth=5 should fail with max_depth=3
+        let opts_tight = DecodeOptions { max_depth: 3, ..DecodeOptions::default() };
+        let result = decode_with_options(&encoded, &opts_tight);
+        assert!(matches!(result, Err(CowrieError::TooDeep)),
+            "depth 5 should fail with max_depth=3");
+    }
+
+    #[test]
+    fn test_decode_with_options_max_array_len() {
+        let val = Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let encoded = encode(&val).expect("encode");
+
+        // max_array_len=3: should pass
+        let opts = DecodeOptions { max_array_len: 3, ..DecodeOptions::default() };
+        assert!(decode_with_options(&encoded, &opts).is_ok());
+
+        // max_array_len=2: should fail
+        let opts_tight = DecodeOptions { max_array_len: 2, ..DecodeOptions::default() };
+        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+    }
+
+    #[test]
+    fn test_decode_with_options_max_object_len() {
+        let val = Value::object(vec![
+            ("a", Value::Int(1)),
+            ("b", Value::Int(2)),
+            ("c", Value::Int(3)),
+        ]);
+        let encoded = encode(&val).expect("encode");
+
+        // max_object_len=3: should pass
+        let opts = DecodeOptions { max_object_len: 3, ..DecodeOptions::default() };
+        assert!(decode_with_options(&encoded, &opts).is_ok());
+
+        // max_object_len=2: should fail
+        let opts_tight = DecodeOptions { max_object_len: 2, ..DecodeOptions::default() };
+        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+    }
+
+    #[test]
+    fn test_decode_with_options_max_string_len() {
+        let val = Value::String("hello".into()); // 5 bytes
+        let encoded = encode(&val).expect("encode");
+
+        // max_string_len=10: should pass
+        let opts = DecodeOptions { max_string_len: 10, ..DecodeOptions::default() };
+        assert!(decode_with_options(&encoded, &opts).is_ok());
+
+        // max_string_len=3: should fail
+        let opts_tight = DecodeOptions { max_string_len: 3, ..DecodeOptions::default() };
+        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+    }
+
+    #[test]
+    fn test_decode_with_options_max_bytes_len() {
+        let val = Value::Bytes(vec![1, 2, 3, 4, 5]); // 5 bytes
+        let encoded = encode(&val).expect("encode");
+
+        // max_bytes_len=10: should pass
+        let opts = DecodeOptions { max_bytes_len: 10, ..DecodeOptions::default() };
+        assert!(decode_with_options(&encoded, &opts).is_ok());
+
+        // max_bytes_len=3: should fail
+        let opts_tight = DecodeOptions { max_bytes_len: 3, ..DecodeOptions::default() };
+        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+    }
+
+    #[test]
+    fn test_decode_with_options_max_rank() {
+        use crate::{MAGIC, VERSION};
+
+        // Craft a tensor with rank=5
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC);
+        buf.push(VERSION);
+        buf.push(0); // flags
+        buf.push(0); // dict len = 0
+        buf.push(0x20); // TENSOR tag
+        buf.push(0x01); // dtype = Float32
+        buf.push(5);    // rank = 5
+        for _ in 0..5 {
+            buf.push(1); // uvarint 1 per dimension
+        }
+        buf.push(4); // data_len = 4
+        buf.extend_from_slice(&1.0f32.to_le_bytes());
+
+        // max_rank=5: should pass
+        let opts = DecodeOptions { max_rank: 5, ..DecodeOptions::default() };
+        assert!(decode_with_options(&buf, &opts).is_ok());
+
+        // max_rank=3: should fail
+        let opts_tight = DecodeOptions { max_rank: 3, ..DecodeOptions::default() };
+        let result = decode_with_options(&buf, &opts_tight);
+        assert!(result.is_err(), "rank 5 should fail with max_rank=3");
+    }
+
+    #[test]
+    fn test_decode_with_options_max_ext_len() {
+        let val = Value::Ext(ExtData { type_id: 42, payload: vec![0xAB; 100] });
+        let encoded = encode(&val).expect("encode");
+
+        // max_ext_len=200: should pass
+        let opts = DecodeOptions { max_ext_len: 200, ..DecodeOptions::default() };
+        assert!(decode_with_options(&encoded, &opts).is_ok());
+
+        // max_ext_len=50: should fail
+        let opts_tight = DecodeOptions { max_ext_len: 50, ..DecodeOptions::default() };
+        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+    }
+
+    #[test]
+    fn test_decode_with_options_roundtrip_unchanged() {
+        // Verify decode_with_options(default) matches decode() exactly
+        let val = Value::object(vec![
+            ("data", Value::Bytes(vec![1, 2, 3])),
+            ("items", Value::Array(vec![Value::Int(1), Value::Int(2)])),
+            ("label", Value::String("test".into())),
+        ]);
+        let encoded = encode(&val).expect("encode");
+
+        let d1 = decode(&encoded).expect("decode");
+        let d2 = decode_with_options(&encoded, &DecodeOptions::default()).expect("decode_with_options");
+        assert_eq!(d1, d2);
     }
 }

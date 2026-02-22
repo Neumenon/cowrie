@@ -19,7 +19,7 @@ pub mod json;
 // Re-export main types
 pub use types::{Value, DType, TensorData, ImageFormat, AudioEncoding, CowrieError};
 pub use encode::{encode, encode_with_options, EncodeOptions};
-pub use decode::decode;
+pub use decode::{decode, decode_with_options, DecodeOptions};
 pub use schema::{schema_fingerprint32, schema_fingerprint64, schema_equals};
 pub use master_stream::{write_frame, read_frame, MasterWriterOptions, MasterFrame};
 pub use compress::{encode_framed, decode_framed, Compression};

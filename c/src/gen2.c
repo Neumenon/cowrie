@@ -1686,25 +1686,34 @@ static int decode_string_raw(Reader *r, char **out, size_t *out_len);
 static int skip_hints(Reader *r) {
     uint64_t count;
     if (rd_get_uvarint(r, &count) != 0) return -1;
-    if (r->opts.max_array_len > 0 && count > r->opts.max_array_len) return -1;
+
+    /* Enforce hint count limit to prevent CPU spin attacks */
+    if (r->opts.max_hint_count > 0 && count > r->opts.max_hint_count) return -1;
+
+    /* Sanity check: each hint is at least 3 bytes (1 field name len + 1 type + 1 flags) */
+    if (count > 0 && count * 3 > rd_remaining(r)) return -1;
 
     for (uint64_t i = 0; i < count; i++) {
+        /* Skip field name */
         char *field = NULL;
         size_t field_len = 0;
         if (decode_string_raw(r, &field, &field_len) != 0) return -1;
         free(field);
 
+        /* Skip type (1 byte) */
         uint8_t typ;
         if (rd_get_byte(r, &typ) != 0) return -1;
 
+        /* Skip shape */
         uint64_t shape_len;
         if (rd_get_uvarint(r, &shape_len) != 0) return -1;
-        if (r->opts.max_array_len > 0 && shape_len > r->opts.max_array_len) return -1;
+        if (r->opts.max_rank > 0 && shape_len > (uint64_t)r->opts.max_rank) return -1;
         for (uint64_t j = 0; j < shape_len; j++) {
             uint64_t dim;
             if (rd_get_uvarint(r, &dim) != 0) return -1;
         }
 
+        /* Skip flags (1 byte) */
         uint8_t flags;
         if (rd_get_byte(r, &flags) != 0) return -1;
     }
@@ -2602,6 +2611,7 @@ int cowrie_decode_with_opts(const uint8_t *data, size_t len,
     if (r.opts.max_bytes_len == 0) r.opts.max_bytes_len = COWRIE_DEFAULT_MAX_BYTES_LEN;
     if (r.opts.max_ext_len == 0) r.opts.max_ext_len = COWRIE_DEFAULT_MAX_EXT_LEN;
     if (r.opts.max_dict_len == 0) r.opts.max_dict_len = COWRIE_DEFAULT_MAX_DICT_LEN;
+    if (r.opts.max_hint_count == 0) r.opts.max_hint_count = COWRIE_DEFAULT_MAX_HINT_COUNT;
     if (r.opts.max_rank == 0) r.opts.max_rank = COWRIE_DEFAULT_MAX_RANK;
 
     /* Read header */

@@ -382,6 +382,7 @@ typedef struct {
 #define COWRIE_DEFAULT_MAX_EXT_LEN    100000000   /* 100MB */
 #define COWRIE_DEFAULT_MAX_RANK       32
 #define COWRIE_DEFAULT_MAX_DICT_LEN   10000000    /* 10M */
+#define COWRIE_DEFAULT_MAX_HINT_COUNT 10000       /* 10K column hints */
 
 /* Decode options for configurable security limits */
 typedef struct {
@@ -392,6 +393,7 @@ typedef struct {
     size_t max_bytes_len;   /* Maximum bytes length */
     size_t max_ext_len;     /* Maximum ext payload length */
     size_t max_dict_len;    /* Maximum dictionary entry count */
+    size_t max_hint_count;  /* Maximum column hint count */
     int    max_rank;        /* Maximum tensor rank (dimensions) */
     int unknown_ext;        /* Unknown ext behavior (0=keep,1=skip,2=error) */
 } COWRIEDecodeOpts;
@@ -410,6 +412,7 @@ static inline void cowrie_decode_opts_init(COWRIEDecodeOpts *opts) {
     opts->max_bytes_len = COWRIE_DEFAULT_MAX_BYTES_LEN;
     opts->max_ext_len = COWRIE_DEFAULT_MAX_EXT_LEN;
     opts->max_dict_len = COWRIE_DEFAULT_MAX_DICT_LEN;
+    opts->max_hint_count = COWRIE_DEFAULT_MAX_HINT_COUNT;
     opts->max_rank = COWRIE_DEFAULT_MAX_RANK;
     opts->unknown_ext = COWRIE_UNKNOWN_EXT_KEEP;
 }
