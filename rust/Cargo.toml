@@ -1,6 +1,6 @@
 [package]
 name = "cowrie-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Cowrie - Structured JSON binary format with Gen1 and Gen2 codecs"
 license = "MIT"
