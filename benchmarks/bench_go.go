@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/phenomenon0/cowrie-final/go/gen1"
-	"github.com/phenomenon0/cowrie-final/go/gen2"
+	"github.com/Neumenon/cowrie/gen1"
+	"github.com/Neumenon/cowrie/gen2"
 )
 
 // Test payloads

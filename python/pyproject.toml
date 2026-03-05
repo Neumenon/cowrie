@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cowrie"
+name = "cowrie-py"
 version = "0.1.0"
 description = "Cowrie - Structured JSON binary codec for Python"
 readme = "README.md"
@@ -29,8 +29,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/phenomenon0/cowrie-final"
-Repository = "https://github.com/phenomenon0/cowrie-final"
+Homepage = "https://github.com/Neumenon/cowrie"
+Repository = "https://github.com/Neumenon/cowrie"
 
 [tool.setuptools.packages.find]
 where = ["."]

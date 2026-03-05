@@ -1,6 +1,6 @@
 //! Golden test vectors - verify Rust decodes Go-generated binaries correctly.
 
-use cowrie_codec::gen2::{decode, encode, Value};
+use cowrie_rs::gen2::{decode, encode, Value};
 use std::fs;
 use std::path::PathBuf;
 

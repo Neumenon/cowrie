@@ -2558,6 +2558,29 @@ export function encodeFramed(v: Value, compression: Compression = Compression.NO
   return result;
 }
 
+function decompressZstd(compressed: Uint8Array): Uint8Array {
+  // Prefer Node built-in zlib (Node 21.7+), fall back to fzstd
+  try {
+    const zlib = require("zlib");
+    if (typeof zlib.zstdDecompressSync === "function") {
+      return new Uint8Array(zlib.zstdDecompressSync(Buffer.from(compressed)));
+    }
+  } catch {
+    // Node zlib failed, fall through to fzstd
+  }
+  try {
+    const fzstd = require('fzstd');
+    return fzstd.decompress(compressed);
+  } catch (e: any) {
+    if (e.code === 'MODULE_NOT_FOUND') {
+      throw new Error(
+        'zstd decompression requires Node.js >= 21.7 or the fzstd package: npm install fzstd'
+      );
+    }
+    throw e;
+  }
+}
+
 /**
  * Decode a framed Cowrie value, automatically decompressing if needed.
  */
@@ -2618,29 +2641,7 @@ export function decodeFramed(
     }
   } else if (compType === 2) {
     // ZSTD - prefer Node built-in zlib (Node 21.7+), fall back to fzstd
-    let decompressedZstd = false;
-    try {
-      const zlib = require("zlib");
-      if (typeof zlib.zstdDecompressSync === "function") {
-        decompressed = new Uint8Array(zlib.zstdDecompressSync(Buffer.from(compressed)));
-        decompressedZstd = true;
-      }
-    } catch {
-      // Node zlib failed, fall through to fzstd
-    }
-    if (!decompressedZstd) {
-      try {
-        const fzstd = require('fzstd');
-        decompressed = fzstd.decompress(compressed);
-      } catch (e: any) {
-        if (e.code === 'MODULE_NOT_FOUND') {
-          throw new Error(
-            'zstd decompression requires Node.js >= 21.7 or the fzstd package: npm install fzstd'
-          );
-        }
-        throw e;
-      }
-    }
+    decompressed = decompressZstd(compressed);
   } else {
     throw new Error(`Unknown compression type: ${compType}`);
   }

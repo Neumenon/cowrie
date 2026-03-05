@@ -9,7 +9,7 @@
 //!
 //! ## Gen1 (Lightweight)
 //! ```
-//! use cowrie_codec::gen1::{encode, decode, Value};
+//! use cowrie_rs::gen1::{encode, decode, Value};
 //!
 //! let val = Value::Object(vec![
 //!     ("name".to_string(), Value::String("Alice".to_string())),
@@ -22,7 +22,7 @@
 //!
 //! ## Gen2 (Full)
 //! ```
-//! use cowrie_codec::gen2::{encode, decode, Value, DType, TensorData};
+//! use cowrie_rs::gen2::{encode, decode, Value, DType, TensorData};
 //!
 //! let val = Value::object(vec![
 //!     ("name", Value::String("Alice".into())),

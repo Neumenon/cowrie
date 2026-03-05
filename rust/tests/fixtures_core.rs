@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use cowrie_codec::gen2::{decode, json::to_json, CowrieError};
+use cowrie_rs::gen2::{decode, json::to_json, CowrieError};
 
 #[test]
 fn fixtures_core_decode() {

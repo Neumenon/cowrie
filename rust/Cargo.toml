@@ -1,10 +1,10 @@
 [package]
-name = "cowrie-codec"
+name = "cowrie-rs"
 version = "0.1.0"
 edition = "2021"
 description = "Cowrie - Structured JSON binary format with Gen1 and Gen2 codecs"
 license = "MIT"
-repository = "https://github.com/phenomenon0/cowrie-final"
+repository = "https://github.com/Neumenon/cowrie"
 keywords = ["json", "binary", "serialization", "codec", "tensor"]
 categories = ["encoding", "data-structures"]
 

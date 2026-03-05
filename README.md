@@ -32,8 +32,8 @@ A multi-language binary JSON codec with two variants:
 
 ```go
 import (
-    "github.com/phenomenon0/cowrie-final/go/gen1"
-    "github.com/phenomenon0/cowrie-final/go/gen2"
+    "github.com/Neumenon/cowrie/gen1"
+    "github.com/Neumenon/cowrie/gen2"
 )
 
 // Gen1
@@ -101,7 +101,7 @@ cowrie_g1_decode(buf.data, buf.len, &decoded);
 ### TypeScript
 
 ```typescript
-import { gen1, gen2 } from 'cowrie';
+import { gen1, gen2 } from 'cowrie-codec';
 
 // Gen1
 const data = gen1.encode({ name: 'Alice', scores: [1.0, 2.0, 3.0] });
