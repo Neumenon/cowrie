@@ -112,12 +112,10 @@ impl<'a> Reader<'a> {
     }
 
     fn decode(&mut self) -> Result<Value, CowrieError> {
-        // Read header
-        if self.remaining() < 4 {
+        // Check magic first (even if truncated, bad magic takes priority)
+        if self.remaining() < 2 {
             return Err(CowrieError::Truncated);
         }
-
-        // Check magic
         if &self.data[0..2] != MAGIC {
             return Err(CowrieError::InvalidMagic);
         }

@@ -51,6 +51,12 @@ func runNode(t *testing.T, args ...string) NodeResult {
 	// Find the script path relative to the test file
 	scriptPath := filepath.Join("test", "js", "canon.mjs")
 
+	// Check if glyph-js dist is built
+	glyphJSDist := filepath.Join("..", "glyph-js", "dist", "index.js")
+	if _, err := os.Stat(glyphJSDist); os.IsNotExist(err) {
+		t.Skip("glyph-js not built (missing glyph-js/dist/index.js), skipping cross-impl test")
+	}
+
 	// Check if Node is available
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Node.js not available, skipping cross-impl test")

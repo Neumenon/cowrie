@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - run: cd go && go build ./...
+      - run: cd go && go vet ./...
+      - run: cd go && go test ./...
+
+  python:
+    name: Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: cd python && pip install -e ".[dev]"
+      - run: cd python && pytest tests/
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cd rust && cargo test
+
+  c:
+    name: C
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          cd c
+          mkdir -p build && cd build
+          cmake ..
+          make
+          ctest --output-on-failure
+
+  typescript:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: cd typescript && npm ci
+      - run: cd typescript && npm test
+
+  publish-gate:
+    name: Publish Gate
+    needs: [go, python, rust, c, typescript]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all language tests passed
+        run: |
+          if [[ "${{ needs.go.result }}" != "success" || \
+                "${{ needs.python.result }}" != "success" || \
+                "${{ needs.rust.result }}" != "success" || \
+                "${{ needs.c.result }}" != "success" || \
+                "${{ needs.typescript.result }}" != "success" ]]; then
+            echo "One or more language test suites failed:"
+            echo "  Go:         ${{ needs.go.result }}"
+            echo "  Python:     ${{ needs.python.result }}"
+            echo "  Rust:       ${{ needs.rust.result }}"
+            echo "  C:          ${{ needs.c.result }}"
+            echo "  TypeScript: ${{ needs.typescript.result }}"
+            exit 1
+          fi
+          echo "All 5 language test suites passed. Safe to publish."

@@ -1,6 +1,8 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert';
 import fs from "fs";
 import path from "path";
-import { decode, toAny } from "./index";
+import { decode, toAny } from "./index.ts";
 
 function mapErrorCode(err: unknown): string {
   if (!(err instanceof Error)) return "";
@@ -13,7 +15,7 @@ function mapErrorCode(err: unknown): string {
 }
 
 describe("gen2 core fixtures", () => {
-  const repoRoot = path.resolve(__dirname, "../../../..");
+  const repoRoot = path.resolve(__dirname, "../../..");
   const manifestPath = path.join(repoRoot, "testdata", "fixtures", "manifest.json");
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 
@@ -30,17 +32,17 @@ describe("gen2 core fixtures", () => {
         if (c.expect.json) {
           const expectedPath = path.join(repoRoot, "testdata", "fixtures", c.expect.json);
           const expected = JSON.parse(fs.readFileSync(expectedPath, "utf8"));
-          expect(actual).toEqual(expected);
+          assert.deepStrictEqual(actual, expected);
         }
       } else {
         try {
           decode(new Uint8Array(data));
         } catch (err) {
           const code = mapErrorCode(err);
-          expect(code).toEqual(c.expect.error);
+          assert.strictEqual(code, c.expect.error);
           return;
         }
-        throw new Error(`${c.id}: expected error but decode succeeded`);
+        assert.fail(`${c.id}: expected error but decode succeeded`);
       }
     });
   }
