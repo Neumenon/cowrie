@@ -281,7 +281,7 @@ glyph fmt-loose --auto-pool --min-occurs=2 --min-length=20
 
 ```bash
 # Quick mode (2 datasets)
-cd sjson/benchmark/comparison/js
+cd cowrie/benchmark/comparison/js
 node codec_substrate_bench.mjs --quick
 
 # Full mode (all datasets)
@@ -295,7 +295,7 @@ node codec_substrate_bench.mjs --dataset=agent_trace_100
 
 - Node.js 18+
 - npm packages: `@toon-format/toon`, `zon-format`, `gpt-tokenizer`
-- GLYPH binary at `sjson/glyph/cmd/glyph/glyph`
+- GLYPH binary at `go/glyph/cmd/glyph/glyph`
 
 ---
 

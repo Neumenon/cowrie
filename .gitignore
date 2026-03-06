@@ -3,9 +3,11 @@ c/build/
 rust/target/
 typescript/dist/
 typescript/node_modules/
-python/__pycache__/
-python/*.egg-info/
-python/.pytest_cache/
+**/__pycache__/
+*.pyc
+**/*.egg-info/
+.pytest_cache/
+**/.pytest_cache/
 
 # IDE
 .vscode/
