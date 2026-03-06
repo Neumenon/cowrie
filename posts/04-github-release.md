@@ -1,4 +1,4 @@
-# Cowrie v2.0.0
+# Cowrie v0.1.1
 
 Initial public release of Cowrie — a multi-language binary codec for structured data with ML extensions.
 
@@ -6,7 +6,7 @@ Initial public release of Cowrie — a multi-language binary codec for structure
 
 ### Two Wire Formats
 
-- **Gen1**: Simple binary JSON encoding — 11 core types + graph types. No header, single-pass encode/decode. A 46-byte JSON object encodes to 35 bytes (76%).
+- **Gen1**: Simple binary JSON encoding — 12 core types + graph types. No header, single-pass encode/decode. A 46-byte JSON object encodes to 35 bytes (76%).
 - **Gen2**: Dictionary-coded keys, gzip/zstd compression, ML extensions, graph types. 1,000 repeated-schema objects go from 48KB JSON to 23KB (47%).
 
 ### 5 Language Implementations

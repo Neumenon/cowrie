@@ -22,7 +22,7 @@
 | 12 | Grafana Labs | Observability | Protobuf+Snappy | Dict coding | $1M-5M | 5 | 3 | A |
 | 13 | Chronosphere | Observability | Protobuf/M3 | Dict coding | $500K-2M | 4 | 3 | B |
 | 14 | Cribl | Observability | JSON internal | Dict coding | $1M-4M | 5 | 5 | A |
-| 15 | Redpanda | Data Pipeline | Kafka protocol | Dict coding | $300K-1M | 3 | 2 | C |
+| 15 | Redpanda | Data Pipeline | Kafka protocol | Dict coding | $300K-1M | 3 | 2 | B |
 | 16 | WarpStream | Data Pipeline | Custom + Kafka | Dict coding | $200K-800K | 4 | 3 | B |
 | 17 | Neo4j | Graph | PackStream/Bolt | Graph types, dict coding | $300K-1M | 5 | 2 | B |
 | 18 | TigerGraph | Graph | JSON/REST | Graph types, dict coding | $400K-1.5M | 5 | 2 | B |

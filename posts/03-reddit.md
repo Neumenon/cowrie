@@ -153,9 +153,9 @@ I was building a system where Python ML services produce embeddings and Go API s
 
 Cowrie has two variants:
 
-**Gen1** is a simple binary JSON encoding. 11 types: null, bool, int64, float64, string, bytes, array, object, plus proto-tensors (Int64Array, Float64Array) and graph types. A 46-byte JSON object becomes 35 bytes.
+**Gen1** is a simple binary JSON encoding. 12 core types: null, bool, int64, float64, string, bytes, array, object, plus proto-tensors (Int64Array, Float64Array, StringArray) and graph types. A 46-byte JSON object becomes 35 bytes.
 
-**Gen2** adds three things:
+**Gen2** adds four things:
 1. **Dictionary-coded keys** — object keys are deduplicated into a shared dictionary. 1,000 objects with the same schema: 48KB JSON becomes 23KB (47%).
 2. **Compression** — gzip or zstd on the payload, compounds with dictionary coding.
 3. **ML types** — Tensor (12 dtypes including float16 and bfloat16, with shape), Image (format + dimensions + bytes), Audio (encoding + sample rate + channels + bytes).
