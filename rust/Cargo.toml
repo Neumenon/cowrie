@@ -24,3 +24,7 @@ default = []
 gen1 = []  # Enable Gen1 codec
 gen2 = []  # Enable Gen2 codec
 zstd = ["dep:zstd"]  # Optional zstd compression
+
+[[bench]]
+name = "decode_bench"
+harness = false
