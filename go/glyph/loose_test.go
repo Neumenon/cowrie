@@ -13,6 +13,15 @@ import (
 
 var updateGolden = flag.Bool("update-golden", false, "update golden files with current output")
 
+// skipIfNoGlyphJS skips the test if the glyph-js dist bundle is not built.
+func skipIfNoGlyphJS(t *testing.T) {
+	t.Helper()
+	glyphJSDist := filepath.Join("..", "glyph-js", "dist", "index.js")
+	if _, err := os.Stat(glyphJSDist); os.IsNotExist(err) {
+		t.Skip("glyph-js not built (missing glyph-js/dist/index.js), skipping cross-impl test")
+	}
+}
+
 // normalizeNullForComparison replaces Go's _ null representation with ∅ for JS comparison.
 // Only replaces standalone _ (null values), not _ as part of key names or @tab _ marker.
 func normalizeNullForComparison(s string) string {
@@ -976,6 +985,7 @@ func TestCrossImpl_CanonicalizeLoose(t *testing.T) {
 		t.Skip("Skipping cross-impl tests: node not found")
 		return
 	}
+	skipIfNoGlyphJS(t)
 
 	canonScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(canonScript); err != nil {
@@ -1224,6 +1234,7 @@ func TestCrossImpl_LLMMode(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Skipping: node not found")
 	}
+	skipIfNoGlyphJS(t)
 
 	canonScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(canonScript); err != nil {
@@ -1282,6 +1293,7 @@ func TestCrossImpl_BuildKeyDict(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Skipping: node not found")
 	}
+	skipIfNoGlyphJS(t)
 
 	canonScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(canonScript); err != nil {
@@ -1349,6 +1361,7 @@ func TestCrossImpl_SchemaHeader(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Skipping: node not found")
 	}
+	skipIfNoGlyphJS(t)
 
 	canonScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(canonScript); err != nil {
@@ -1421,6 +1434,7 @@ func TestCrossImpl_TabularHeaderMeta(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Skipping: node not found")
 	}
+	skipIfNoGlyphJS(t)
 
 	canonScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(canonScript); err != nil {
@@ -1498,6 +1512,7 @@ func TestCrossImpl_CompactKeysRoundtrip(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("Skipping: node not found")
 	}
+	skipIfNoGlyphJS(t)
 
 	canonScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(canonScript); err != nil {
@@ -1607,6 +1622,9 @@ func runPythonCanon(t *testing.T, command string, args ...string) (string, bool)
 
 // runJSCanon calls the JS canon.mjs script and returns the result.
 func runJSCanon(t *testing.T, command string, args ...string) (string, bool) {
+	t.Helper()
+	skipIfNoGlyphJS(t)
+
 	jsScript := filepath.Join("test", "js", "canon.mjs")
 	if _, err := os.Stat(jsScript); err != nil {
 		t.Skipf("Skipping JS tests: %v", err)
