@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Neumenon/cowrie/codec"
+	"github.com/Neumenon/cowrie/go/codec"
 )
 
 // Realistic query response sizes for benchmarking

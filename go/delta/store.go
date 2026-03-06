@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // BaseEntry represents a stored base object for delta computation.

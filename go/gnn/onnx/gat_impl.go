@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Neumenon/cowrie/gnn/algo"
+	"github.com/Neumenon/cowrie/go/gnn/algo"
 	ort "github.com/yalue/onnxruntime_go"
 )
 

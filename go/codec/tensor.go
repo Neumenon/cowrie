@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // EncodeFloat32Tensor converts a float32 slice to an Cowrie Tensor value.

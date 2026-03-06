@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // Value is an alias for cowrie.Value

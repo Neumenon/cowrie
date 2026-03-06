@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"strconv"
 
-	"github.com/Neumenon/cowrie/graph"
+	"github.com/Neumenon/cowrie/go/graph"
 )
 
 // EdgeTableWriter writes edge records as a GraphCowrie-Stream section.

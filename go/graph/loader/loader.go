@@ -16,7 +16,7 @@
 package loader
 
 import (
-	"github.com/Neumenon/cowrie/graph"
+	"github.com/Neumenon/cowrie/go/graph"
 )
 
 // GraphWriter is the interface for writing graph events to a backend.

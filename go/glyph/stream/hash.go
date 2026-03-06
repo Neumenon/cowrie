@@ -3,7 +3,7 @@ package stream
 import (
 	"crypto/sha256"
 
-	"github.com/Neumenon/cowrie/glyph"
+	"github.com/Neumenon/cowrie/go/glyph"
 )
 
 // StateHashLoose computes the state hash using CanonicalizeLoose.

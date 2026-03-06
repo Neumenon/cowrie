@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Neumenon/cowrie/graph"
+	"github.com/Neumenon/cowrie/go/graph"
 )
 
 // Neo4jConfig holds configuration for Neo4j connection.

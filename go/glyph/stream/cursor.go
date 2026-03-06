@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/Neumenon/cowrie/glyph"
+	"github.com/Neumenon/cowrie/go/glyph"
 )
 
 // StreamCursor tracks per-SID state for stream processing.

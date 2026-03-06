@@ -1,4 +1,4 @@
-module github.com/Neumenon/cowrie
+module github.com/Neumenon/cowrie/go
 
 go 1.21
 

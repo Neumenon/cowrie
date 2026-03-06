@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Neumenon/cowrie/glyph"
+	"github.com/Neumenon/cowrie/go/glyph"
 )
 
 // ============================================================

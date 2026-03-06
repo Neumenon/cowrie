@@ -3,7 +3,7 @@ package ld
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 func TestRoundTripBasic(t *testing.T) {

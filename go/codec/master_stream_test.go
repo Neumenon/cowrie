@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 func TestMasterStreamRoundTrip(t *testing.T) {

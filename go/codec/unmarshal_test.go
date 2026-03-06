@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Neumenon/cowrie/codec"
+	"github.com/Neumenon/cowrie/go/codec"
 )
 
 // Test structs for edge cases

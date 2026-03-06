@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 var (

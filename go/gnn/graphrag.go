@@ -18,8 +18,8 @@ import (
 	"math"
 	"sort"
 
-	"github.com/Neumenon/cowrie"
-	"github.com/Neumenon/cowrie/gnn/algo"
+	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/gnn/algo"
 	"github.com/phenomenon0/Agent-GO/vectordb/client"
 	"github.com/phenomenon0/Agent-GO/vectordb/hybrid"
 )

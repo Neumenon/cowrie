@@ -6,7 +6,7 @@ import (
 	"io"
 	"math"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // Errors

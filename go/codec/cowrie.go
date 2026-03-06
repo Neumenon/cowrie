@@ -8,7 +8,7 @@ import (
 	"math"
 	"reflect"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // CowrieCodec implements Codec using the Cowrie binary format.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // =============================================================================

@@ -3,7 +3,7 @@ package glyph
 import (
 	"time"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // ToCowrie converts a GValue to an cowrie.Value.

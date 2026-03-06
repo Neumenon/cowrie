@@ -1,8 +1,8 @@
 package graph
 
 import (
-	"github.com/Neumenon/cowrie"
-	"github.com/Neumenon/cowrie/ld"
+	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/ld"
 )
 
 // Frame field names (stored in FieldDict)

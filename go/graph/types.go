@@ -16,7 +16,7 @@
 package graph
 
 import (
-	"github.com/Neumenon/cowrie/ld"
+	"github.com/Neumenon/cowrie/go/ld"
 )
 
 // Wire format constants

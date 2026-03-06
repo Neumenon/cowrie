@@ -6,7 +6,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/Neumenon/cowrie/gnn/algo"
+	"github.com/Neumenon/cowrie/go/gnn/algo"
 )
 
 func TestGraphRAG_NewGraphRAG(t *testing.T) {

@@ -3,7 +3,7 @@ package onnx
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie/gnn/algo"
+	"github.com/Neumenon/cowrie/go/gnn/algo"
 )
 
 func TestDefaultGATConfig(t *testing.T) {

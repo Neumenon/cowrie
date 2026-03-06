@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Neumenon/cowrie/graph"
-	"github.com/Neumenon/cowrie/ld"
+	"github.com/Neumenon/cowrie/go/graph"
+	"github.com/Neumenon/cowrie/go/ld"
 )
 
 func createTestStream(t *testing.T) []byte {

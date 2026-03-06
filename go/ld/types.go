@@ -19,7 +19,7 @@
 package ld
 
 import (
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 )
 
 // Wire format constants

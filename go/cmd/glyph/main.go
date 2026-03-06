@@ -25,8 +25,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Neumenon/cowrie/glyph"
-	"github.com/Neumenon/cowrie/glyph/stream"
+	"github.com/Neumenon/cowrie/go/glyph"
+	"github.com/Neumenon/cowrie/go/glyph/stream"
 )
 
 const (

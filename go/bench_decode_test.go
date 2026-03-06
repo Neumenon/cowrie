@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	cowrie "github.com/Neumenon/cowrie"
-	"github.com/Neumenon/cowrie/gen1"
+	cowrie "github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/gen1"
 )
 
 var (

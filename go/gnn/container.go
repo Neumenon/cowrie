@@ -8,7 +8,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/Neumenon/cowrie"
+	"github.com/Neumenon/cowrie/go"
 	"github.com/klauspost/compress/zstd"
 )
 

@@ -3,7 +3,7 @@ package loader
 import (
 	"sync"
 
-	"github.com/Neumenon/cowrie/graph"
+	"github.com/Neumenon/cowrie/go/graph"
 )
 
 // MemoryNode represents a node in the in-memory graph.

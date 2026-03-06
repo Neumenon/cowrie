@@ -5,7 +5,7 @@ package onnx
 import (
 	"fmt"
 
-	"github.com/Neumenon/cowrie/gnn/algo"
+	"github.com/Neumenon/cowrie/go/gnn/algo"
 )
 
 // GCN is a placeholder when built without the "onnx" tag.

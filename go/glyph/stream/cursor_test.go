@@ -3,7 +3,7 @@ package stream
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie/glyph"
+	"github.com/Neumenon/cowrie/go/glyph"
 )
 
 func TestStreamCursor_Basic(t *testing.T) {
