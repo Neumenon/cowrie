@@ -70,13 +70,27 @@ func ParseWithOptions(input string, opts ParseOptions) (*ParseResult, error) {
 	}
 
 	value := p.parseValue()
-
-	return &ParseResult{
+	result := &ParseResult{
 		Value:    value,
 		Errors:   p.errors,
 		Warnings: p.warnings,
 		Schema:   p.schema,
-	}, nil
+	}
+
+	if next := p.stream.Peek(); next.Type != TokenEOF {
+		msg := fmt.Sprintf("unexpected trailing token %s", next.Type)
+		if p.tolerant {
+			p.addWarning(next.Pos, "%s", msg)
+		} else {
+			p.addError(next.Pos, "%s", msg)
+		}
+		result.Value = nil
+		result.Errors = p.errors
+		result.Warnings = p.warnings
+		return result, &ParseError{Message: msg, Pos: next.Pos}
+	}
+
+	return result, nil
 }
 
 // parseValue parses any value.
@@ -144,6 +158,7 @@ func (p *Parser) parseValue() *GValue {
 			return Null()
 		}
 		p.addError(tok.Pos, "unexpected token %s", tok.Type)
+		p.advanceAfterError()
 		return nil
 	}
 }
@@ -277,6 +292,7 @@ func (p *Parser) parseMapEntry() *MapEntry {
 			return nil
 		}
 		p.addError(keyTok.Pos, "expected key, got %s", keyTok.Type)
+		p.advanceAfterError()
 		return nil
 	}
 
@@ -287,6 +303,7 @@ func (p *Parser) parseMapEntry() *MapEntry {
 			p.addWarning(p.stream.Peek().Pos, "expected = or :, continuing")
 		} else {
 			p.addError(p.stream.Peek().Pos, "expected = or :")
+			p.advanceAfterError()
 			return nil
 		}
 	}
@@ -379,6 +396,7 @@ func (p *Parser) parseStructField(typeName string) *MapEntry {
 			return nil
 		}
 		p.addError(keyTok.Pos, "expected field name, got %s", keyTok.Type)
+		p.advanceAfterError()
 		return nil
 	}
 
@@ -396,6 +414,7 @@ func (p *Parser) parseStructField(typeName string) *MapEntry {
 			p.addWarning(p.stream.Peek().Pos, "expected = or :, continuing")
 		} else {
 			p.addError(p.stream.Peek().Pos, "expected = or :")
+			p.advanceAfterError()
 			return nil
 		}
 	}
@@ -424,6 +443,7 @@ func (p *Parser) parseSum(tag string) *GValue {
 				p.addWarning(p.stream.Peek().Pos, "expected ), auto-closing sum")
 			} else {
 				p.addError(p.stream.Peek().Pos, "expected )")
+				p.advanceAfterError()
 			}
 		}
 	}
@@ -492,6 +512,12 @@ func (p *Parser) addWarning(pos Position, format string, args ...interface{}) {
 		Message: fmt.Sprintf(format, args...),
 		Pos:     pos,
 	})
+}
+
+func (p *Parser) advanceAfterError() {
+	if !p.stream.AtEnd() {
+		p.stream.Advance()
+	}
 }
 
 // ============================================================

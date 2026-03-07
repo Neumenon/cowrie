@@ -192,7 +192,14 @@ func parsePatchOp(line string, keyMode KeyMode, schema *Schema) (*PatchOp, error
 			// Check for @idx= suffix (insert at index)
 			if idx := strings.Index(valueStr, " @idx="); idx >= 0 {
 				idxStr := valueStr[idx+6:]
-				op.Index, _ = strconv.Atoi(idxStr)
+				parsedIdx, err := strconv.Atoi(idxStr)
+				if err != nil {
+					return nil, &ParseError{Message: fmt.Sprintf("invalid @idx value: %s", idxStr)}
+				}
+				if parsedIdx < -1 {
+					return nil, &ParseError{Message: fmt.Sprintf("invalid @idx value: %s", idxStr)}
+				}
+				op.Index = parsedIdx
 				valueStr = valueStr[:idx]
 			}
 

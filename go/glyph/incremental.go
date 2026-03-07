@@ -13,6 +13,9 @@ package glyph
 
 import (
 	"errors"
+	"fmt"
+	"math"
+	"strconv"
 	"sync"
 )
 
@@ -20,17 +23,17 @@ import (
 type ParseEventType uint8
 
 const (
-	EventNone ParseEventType = iota
-	EventStartObject         // Beginning of { or Type{
-	EventEndObject           // End of }
-	EventStartList           // Beginning of [
-	EventEndList             // End of ]
-	EventKey                 // Field key parsed
-	EventValue               // Scalar value parsed
-	EventStartSum            // Beginning of Tag( or Tag{
-	EventEndSum              // End of ) or }
-	EventError               // Parse error
-	EventNeedMore            // Need more input
+	EventNone        ParseEventType = iota
+	EventStartObject                // Beginning of { or Type{
+	EventEndObject                  // End of }
+	EventStartList                  // Beginning of [
+	EventEndList                    // End of ]
+	EventKey                        // Field key parsed
+	EventValue                      // Scalar value parsed
+	EventStartSum                   // Beginning of Tag( or Tag{
+	EventEndSum                     // End of ) or }
+	EventError                      // Parse error
+	EventNeedMore                   // Need more input
 )
 
 // String returns the event type name.
@@ -100,6 +103,8 @@ type IncrementalParser struct {
 	maxDepth    int
 	maxKeyLen   int
 	maxValueLen int
+
+	handlingErrorEvent bool
 }
 
 type parseState int
@@ -234,6 +239,7 @@ func (p *IncrementalParser) Reset() {
 	p.state = stateStart
 	p.stack = p.stack[:0]
 	p.err = nil
+	p.handlingErrorEvent = false
 }
 
 // Path returns the current parse path.
@@ -391,7 +397,9 @@ func (p *IncrementalParser) parseValue() int {
 	// List
 	if ch == '[' {
 		p.pos++
-		p.pushStack(stateInList, "", "")
+		if !p.pushStack(stateInList, "", "") {
+			return 0
+		}
 		p.emitEvent(ParseEvent{Type: EventStartList, Path: p.copyPath()})
 		p.state = stateInList
 		return 1
@@ -400,7 +408,9 @@ func (p *IncrementalParser) parseValue() int {
 	// Object or struct
 	if ch == '{' {
 		p.pos++
-		p.pushStack(stateInObject, "", "")
+		if !p.pushStack(stateInObject, "", "") {
+			return 0
+		}
 		p.emitEvent(ParseEvent{Type: EventStartObject, Path: p.copyPath()})
 		p.state = stateExpectKey
 		return 1
@@ -434,6 +444,10 @@ func (p *IncrementalParser) parseKey() int {
 		if consumed == 0 {
 			return 0 // Need more data
 		}
+		if len(key) > p.maxKeyLen {
+			p.setError(fmt.Errorf("key too long: %d > %d", len(key), p.maxKeyLen))
+			return 0
+		}
 		p.path = append(p.path, PathElement{Key: key})
 		p.emitEvent(ParseEvent{Type: EventKey, Key: key, Path: p.copyPath()})
 		p.state = stateExpectColon
@@ -447,6 +461,10 @@ func (p *IncrementalParser) parseKey() int {
 			p.pos++
 		}
 		key := string(p.buffer[start:p.pos])
+		if len(key) > p.maxKeyLen {
+			p.setError(fmt.Errorf("key too long: %d > %d", len(key), p.maxKeyLen))
+			return 0
+		}
 		p.path = append(p.path, PathElement{Key: key})
 		p.emitEvent(ParseEvent{Type: EventKey, Key: key, Path: p.copyPath()})
 		p.state = stateExpectColon
@@ -497,13 +515,25 @@ func (p *IncrementalParser) parseNumber() int {
 	}
 
 	numStr := string(p.buffer[start:p.pos])
+	if len(numStr) > p.maxValueLen {
+		p.setError(fmt.Errorf("value too long: %d > %d", len(numStr), p.maxValueLen))
+		return 0
+	}
 	var value *GValue
 
 	if isFloat {
-		f := parseFloat(numStr)
+		f, err := strconv.ParseFloat(numStr, 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			p.setError(fmt.Errorf("invalid number: %s", numStr))
+			return 0
+		}
 		value = Float(f)
 	} else {
-		i := parseInt(numStr)
+		i, err := strconv.ParseInt(numStr, 10, 64)
+		if err != nil {
+			p.setError(fmt.Errorf("invalid number: %s", numStr))
+			return 0
+		}
 		value = Int(i)
 	}
 
@@ -563,6 +593,10 @@ func (p *IncrementalParser) scanString() (string, int) {
 			sb = append(sb, ch)
 			p.pos++
 		}
+		if len(sb) > p.maxValueLen {
+			p.setError(fmt.Errorf("value too long: %d > %d", len(sb), p.maxValueLen))
+			return "", 0
+		}
 	}
 
 	// Unterminated string - need more data
@@ -578,6 +612,10 @@ func (p *IncrementalParser) parseRef() int {
 	for p.pos < len(p.buffer) && isRefChar(p.buffer[p.pos]) {
 		refStr = append(refStr, p.buffer[p.pos])
 		p.pos++
+		if len(refStr) > p.maxValueLen {
+			p.setError(fmt.Errorf("value too long: %d > %d", len(refStr), p.maxValueLen))
+			return 0
+		}
 	}
 
 	// Parse prefix:value
@@ -602,6 +640,10 @@ func (p *IncrementalParser) parseIdentifier() int {
 	}
 
 	ident := string(p.buffer[start:p.pos])
+	if len(ident) > p.maxValueLen {
+		p.setError(fmt.Errorf("value too long: %d > %d", len(ident), p.maxValueLen))
+		return 0
+	}
 
 	// Check what follows
 	if p.pos < len(p.buffer) {
@@ -610,7 +652,9 @@ func (p *IncrementalParser) parseIdentifier() int {
 		// Struct: Type{...}
 		if ch == '{' {
 			p.pos++
-			p.pushStack(stateInObject, ident, "")
+			if !p.pushStack(stateInObject, ident, "") {
+				return 0
+			}
 			p.emitEvent(ParseEvent{Type: EventStartObject, TypeName: ident, Path: p.copyPath()})
 			p.state = stateExpectKey
 			return p.pos - start
@@ -619,7 +663,9 @@ func (p *IncrementalParser) parseIdentifier() int {
 		// Sum: Tag(...) or Tag{...}
 		if ch == '(' {
 			p.pos++
-			p.pushStack(stateExpectValue, "", ident)
+			if !p.pushStack(stateExpectValue, "", ident) {
+				return 0
+			}
 			p.emitEvent(ParseEvent{Type: EventStartSum, Tag: ident, Path: p.copyPath()})
 			p.state = stateExpectValue
 			return p.pos - start
@@ -649,13 +695,18 @@ func (p *IncrementalParser) matchKeyword(keyword string) bool {
 	return true
 }
 
-func (p *IncrementalParser) pushStack(state parseState, typeName, tag string) {
+func (p *IncrementalParser) pushStack(state parseState, typeName, tag string) bool {
+	if len(p.stack)+1 > p.maxDepth {
+		p.setError(fmt.Errorf("max depth exceeded: %d", p.maxDepth))
+		return false
+	}
 	p.stack = append(p.stack, parseStackFrame{
 		state:    state,
 		typeName: typeName,
 		tag:      tag,
 		count:    0,
 	})
+	return true
 }
 
 func (p *IncrementalParser) popStack() {
@@ -688,13 +739,35 @@ func (p *IncrementalParser) copyPath() []PathElement {
 
 func (p *IncrementalParser) emitEvent(event ParseEvent) {
 	if p.handler != nil {
+		if event.Type == EventError {
+			if p.handlingErrorEvent {
+				return
+			}
+			p.handlingErrorEvent = true
+			defer func() {
+				p.handlingErrorEvent = false
+			}()
+		}
 		if err := p.handler(event); err != nil {
+			if event.Type == EventError || p.handlingErrorEvent {
+				if p.err == nil {
+					p.err = err
+				}
+				p.state = stateError
+				return
+			}
 			p.setError(err)
 		}
 	}
 }
 
 func (p *IncrementalParser) setError(err error) {
+	if err == nil {
+		return
+	}
+	if p.state == stateError && p.err != nil {
+		return
+	}
 	p.err = err
 	p.state = stateError
 	p.emitEvent(ParseEvent{Type: EventError, Error: err})
@@ -702,32 +775,4 @@ func (p *IncrementalParser) setError(err error) {
 
 func isWhitespace(ch byte) bool {
 	return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
-}
-
-func parseFloat(s string) float64 {
-	var f float64
-	for i := 0; i < len(s); i++ {
-		if s[i] == '.' || s[i] == 'e' || s[i] == 'E' || s[i] == '-' || s[i] == '+' {
-			continue
-		}
-		f = f*10 + float64(s[i]-'0')
-	}
-	return f // Simplified - real impl would handle decimals/exponents
-}
-
-func parseInt(s string) int64 {
-	var n int64
-	neg := false
-	i := 0
-	if len(s) > 0 && s[0] == '-' {
-		neg = true
-		i = 1
-	}
-	for ; i < len(s); i++ {
-		n = n*10 + int64(s[i]-'0')
-	}
-	if neg {
-		return -n
-	}
-	return n
 }

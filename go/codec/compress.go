@@ -47,18 +47,24 @@ func compressGzip(data []byte) ([]byte, error) {
 
 // decompressGzip decompresses gzip data with a size limit to prevent decompression bombs.
 func decompressGzip(data []byte) ([]byte, error) {
+	return decompressGzipWithLimit(data, int64(MaxDecompressedSize))
+}
+
+func decompressGzipWithLimit(data []byte, limit int64) ([]byte, error) {
+	limit = boundedDecompressionLimit(limit)
+
 	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer r.Close()
 
-	limited := io.LimitReader(r, MaxDecompressedSize+1)
+	limited := io.LimitReader(r, limit+1)
 	out, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(out)) > MaxDecompressedSize {
+	if int64(len(out)) > limit {
 		return nil, cowrie.ErrDecompressedTooLarge
 	}
 	return out, nil
@@ -71,6 +77,12 @@ func compressZstd(data []byte) ([]byte, error) {
 
 // decompressZstd decompresses zstd data with a size limit to prevent decompression bombs.
 func decompressZstd(data []byte) ([]byte, error) {
+	return decompressZstdWithLimit(data, int64(MaxDecompressedSize))
+}
+
+func decompressZstdWithLimit(data []byte, limit int64) ([]byte, error) {
+	limit = boundedDecompressionLimit(limit)
+
 	// Use a streaming reader with LimitReader instead of DecodeAll
 	// to enforce the decompression size limit.
 	dec, err := zstd.NewReader(bytes.NewReader(data))
@@ -79,13 +91,25 @@ func decompressZstd(data []byte) ([]byte, error) {
 	}
 	defer dec.Close()
 
-	limited := io.LimitReader(dec, MaxDecompressedSize+1)
+	limited := io.LimitReader(dec, limit+1)
 	out, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(out)) > MaxDecompressedSize {
+	if int64(len(out)) > limit {
 		return nil, cowrie.ErrDecompressedTooLarge
 	}
 	return out, nil
+}
+
+func effectiveDecompressedLimit(limit int) int64 {
+	return boundedDecompressionLimit(int64(limit))
+}
+
+func boundedDecompressionLimit(limit int64) int64 {
+	max := int64(MaxDecompressedSize)
+	if limit <= 0 || limit > max {
+		return max
+	}
+	return limit
 }

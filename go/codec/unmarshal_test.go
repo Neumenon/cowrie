@@ -3,6 +3,7 @@ package codec_test
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/Neumenon/cowrie/go/codec"
@@ -67,6 +68,71 @@ func TestDirectUnmarshalSimpleStruct(t *testing.T) {
 	if result.Count != 42 {
 		t.Errorf("Count mismatch: got %d, want %d", result.Count, 42)
 	}
+}
+
+func TestDecodeTypedNonStructTargets(t *testing.T) {
+	t.Run("slice", func(t *testing.T) {
+		encoded, err := codec.EncodeBytes([]any{"alpha", "beta"})
+		if err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+
+		var decoded []string
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("DecodeBytes panicked for []string target: %v", r)
+			}
+		}()
+
+		if err := codec.DecodeBytes(encoded, &decoded); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		if !reflect.DeepEqual(decoded, []string{"alpha", "beta"}) {
+			t.Fatalf("decoded slice mismatch: got %#v", decoded)
+		}
+	})
+
+	t.Run("map", func(t *testing.T) {
+		encoded, err := codec.EncodeBytes(map[string]any{"one": "1", "two": "2"})
+		if err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+
+		var decoded map[string]string
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("DecodeBytes panicked for map[string]string target: %v", r)
+			}
+		}()
+
+		if err := codec.DecodeBytes(encoded, &decoded); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		if !reflect.DeepEqual(decoded, map[string]string{"one": "1", "two": "2"}) {
+			t.Fatalf("decoded map mismatch: got %#v", decoded)
+		}
+	})
+
+	t.Run("pointer", func(t *testing.T) {
+		encoded, err := codec.EncodeBytes(int64(42))
+		if err != nil {
+			t.Fatalf("encode error: %v", err)
+		}
+
+		var decoded *int64
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("DecodeBytes panicked for *int64 target: %v", r)
+			}
+		}()
+
+		if err := codec.DecodeBytes(encoded, &decoded); err != nil {
+			t.Fatalf("decode error: %v", err)
+		}
+		if decoded == nil || *decoded != 42 {
+			t.Fatalf("decoded pointer mismatch: got %#v", decoded)
+		}
+	})
 }
 
 func TestDirectUnmarshalNestedStruct(t *testing.T) {
