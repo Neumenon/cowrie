@@ -1288,24 +1288,21 @@ func unquoteString(s string) (string, error) {
 func tryParseNumber(s string) (*GValue, bool) {
 	// Check for integer
 	if isIntString(s) {
-		var n int64
-		_, err := fmt.Sscanf(s, "%d", &n)
+		n, err := strconv.ParseInt(s, 10, 64)
 		if err == nil {
 			return Int(n), true
 		}
 	}
 
 	// Check for float
-	var f float64
-	_, err := fmt.Sscanf(s, "%f", &f)
+	f, err := strconv.ParseFloat(s, 64)
 	if err == nil {
 		// Only treat as float if it has decimal point or exponent
 		if strings.Contains(s, ".") || strings.ContainsAny(s, "eE") {
 			return Float(f), true
 		}
 		// Otherwise try as int first
-		var n int64
-		_, err := fmt.Sscanf(s, "%d", &n)
+		n, err := strconv.ParseInt(s, 10, 64)
 		if err == nil {
 			return Int(n), true
 		}

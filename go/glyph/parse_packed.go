@@ -84,6 +84,11 @@ func (p *packedParser) parse() (*GValue, error) {
 		return nil, fmt.Errorf("expected ')' at pos %d, got %q", p.pos, string(p.peek()))
 	}
 
+	p.skipWhitespace()
+	if p.pos != len(p.input) {
+		return nil, fmt.Errorf("unexpected trailing data at pos %d", p.pos)
+	}
+
 	return value, nil
 }
 
@@ -140,6 +145,9 @@ func (p *packedParser) parseBitmapHeader(td *TypeDef) ([]bool, error) {
 
 	if p.pos == start {
 		return nil, fmt.Errorf("empty bitmap")
+	}
+	if p.pos-start > maxBitmapBits {
+		return nil, fmt.Errorf("bitmap too large")
 	}
 
 	bits := p.input[start:p.pos]
@@ -247,24 +255,22 @@ func (p *packedParser) parseValue(fd *FieldDef) (*GValue, error) {
 	switch c {
 	case 't':
 		// true or bare string starting with t
-		if p.tryLiteral("true") || (p.pos < len(p.input) && p.input[p.pos] == 't' && (p.pos+1 >= len(p.input) || !isTypeNameCont(p.input[p.pos+1]))) {
-			if p.input[p.pos:p.pos+1] == "t" && (p.pos+1 >= len(p.input) || !isTypeNameCont(p.input[p.pos+1])) {
-				p.pos++
-				return Bool(true), nil
-			}
-			if p.tryLiteral("true") {
-				return Bool(true), nil
-			}
+		if p.tryLiteral("true") {
+			return Bool(true), nil
+		}
+		if p.pos < len(p.input) && p.input[p.pos] == 't' && (p.pos+1 >= len(p.input) || !isTypeNameCont(p.input[p.pos+1])) {
+			p.pos++
+			return Bool(true), nil
 		}
 		return p.parseBareOrQuotedString()
 
 	case 'f':
 		// false or bare string starting with f
-		if p.pos+1 < len(p.input) && !isTypeNameCont(p.input[p.pos+1]) {
-			p.pos++
+		if p.tryLiteral("false") {
 			return Bool(false), nil
 		}
-		if p.tryLiteral("false") {
+		if p.pos < len(p.input) && p.input[p.pos] == 'f' && (p.pos+1 >= len(p.input) || !isTypeNameCont(p.input[p.pos+1])) {
+			p.pos++
 			return Bool(false), nil
 		}
 		return p.parseBareOrQuotedString()

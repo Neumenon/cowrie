@@ -261,6 +261,8 @@ func maskToBinary(mask []bool) string {
 	return b.String()
 }
 
+const maxBitmapBits = 1 << 20
+
 // binaryToMask parses a "0bXXX" string back to a boolean mask.
 func binaryToMask(s string) ([]bool, error) {
 	if !strings.HasPrefix(s, "0b") {
@@ -270,6 +272,9 @@ func binaryToMask(s string) ([]bool, error) {
 	bits := s[2:]
 	if len(bits) == 0 {
 		return nil, &ParseError{Message: "empty bitmap"}
+	}
+	if len(bits) > maxBitmapBits {
+		return nil, &ParseError{Message: "bitmap too large"}
 	}
 
 	// Bits are written MSB first, so reverse to get LSB-first mask

@@ -46,12 +46,8 @@ func TestSecurity_GzipDecompressionBomb(t *testing.T) {
 	})
 
 	_, err := mr.Next()
-	if err == nil {
-		t.Fatal("expected decompression error for oversized gzip payload, got nil")
-	}
 	if !errors.Is(err, cowrie.ErrDecompressedTooLarge) {
-		// Accept any error (the point is it must NOT succeed silently)
-		t.Logf("got error (acceptable, not ErrDecompressedTooLarge): %v", err)
+		t.Fatalf("expected ErrDecompressedTooLarge for oversized gzip payload, got %v", err)
 	}
 }
 
@@ -84,11 +80,43 @@ func TestSecurity_ZstdDecompressionBomb(t *testing.T) {
 	})
 
 	_, err := mr.Next()
-	if err == nil {
-		t.Fatal("expected decompression error for oversized zstd payload, got nil")
-	}
 	if !errors.Is(err, cowrie.ErrDecompressedTooLarge) {
-		t.Logf("got error (acceptable, not ErrDecompressedTooLarge): %v", err)
+		t.Fatalf("expected ErrDecompressedTooLarge for oversized zstd payload, got %v", err)
+	}
+}
+
+func TestSecurity_PerReaderDecompressionLimitAppliedDuringDecompression(t *testing.T) {
+	payload := []byte(strings.Repeat("COMPRESS_ME_", 200))
+
+	tests := []struct {
+		name        string
+		compression cowrie.Compression
+		compress    func([]byte) ([]byte, error)
+	}{
+		{
+			name:        "gzip",
+			compression: cowrie.CompressionGzip,
+			compress:    compressGzip,
+		},
+		{
+			name:        "zstd",
+			compression: cowrie.CompressionZstd,
+			compress:    compressZstd,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			compressed, err := tt.compress(payload)
+			if err != nil {
+				t.Fatalf("compress failed: %v", err)
+			}
+
+			_, err = decompressPayload(compressed, tt.compression, 1024)
+			if !errors.Is(err, cowrie.ErrDecompressedTooLarge) {
+				t.Fatalf("expected ErrDecompressedTooLarge, got %v", err)
+			}
+		})
 	}
 }
 

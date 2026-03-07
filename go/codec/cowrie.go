@@ -41,8 +41,8 @@ func (c CowrieCodec) Encode(w io.Writer, v any) error {
 // Decode decodes Cowrie from r into v.
 // Uses a tiered approach for maximum performance:
 //  1. Type registry (fastest) - pre-compiled unmarshalers for hot types
-//  2. Direct reflection (fast) - struct fields mapped directly from Cowrie
-//  3. Generic conversion (fallback) - for map[string]any and interface{}
+//  2. Exact natural-type assignment - direct set when the decoded Go type matches
+//  3. Typed reflection unmarshal - for structs, typed maps/slices, pointers, etc.
 func (c CowrieCodec) Decode(r io.Reader, v any) error {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -59,26 +59,27 @@ func (c CowrieCodec) Decode(r io.Reader, v any) error {
 		return fmt.Errorf("cowrie: decode requires non-nil pointer, got %T", v)
 	}
 
-	targetType := rv.Elem().Type()
+	target := rv.Elem()
+	targetType := target.Type()
 
 	// Priority 1: Check type registry for pre-compiled fast unmarshaler
 	if fast := getFastUnmarshaler(targetType); fast != nil {
 		return fast(cowrieVal, v)
 	}
 
-	// Priority 2: Direct reflection unmarshaler for structs
-	target := rv.Elem()
-	if target.Kind() == reflect.Struct {
-		return unmarshalValue(cowrieVal, target)
+	// Priority 2: Fast path when the decoded Go value already matches the target type.
+	// This preserves exact tensor/native slice handling without risking reflect.Set panics
+	// on typed non-struct targets such as *[]int64, []string, or map[string]string.
+	if goVal := fromCowrieValue(cowrieVal); goVal != nil {
+		goTarget := reflect.ValueOf(goVal)
+		if goTarget.Type().AssignableTo(targetType) {
+			target.Set(goTarget)
+			return nil
+		}
 	}
 
-	// Priority 3: Generic map/interface (original path, handles map[string]any)
-	goVal := fromCowrieValue(cowrieVal)
-	if goVal == nil {
-		return nil
-	}
-	target.Set(reflect.ValueOf(goVal))
-	return nil
+	// Priority 3: Typed reflection unmarshal for non-exact matches.
+	return unmarshalValue(cowrieVal, target)
 }
 
 // toCowrieValue converts a Go value to Cowrie, with special handling for float32 slices.

@@ -374,20 +374,22 @@ func (mr *MasterReader) readMasterFrame() (*MasterFrame, error) {
 
 	// Decompress if needed
 	if flags&FlagMasterCompressed != 0 {
+		limit := effectiveDecompressedLimit(mr.opts.MaxDecompressedSize)
+
 		// Validate decompressed size
-		if mr.opts.MaxDecompressedSize > 0 && rawLen > uint32(mr.opts.MaxDecompressedSize) {
+		if uint64(rawLen) > uint64(limit) {
 			return nil, cowrie.ErrDecompressedTooLarge
 		}
 
 		var err error
-		payloadData, err = decompressPayload(payloadData, compression)
+		payloadData, err = decompressPayload(payloadData, compression, limit)
 		if err != nil {
 			return nil, err
 		}
 
 		// Post-decompress check: validate ACTUAL decompressed size, not just claimed rawLen.
 		// A crafted payload could claim a small rawLen but decompress to a much larger size.
-		if mr.opts.MaxDecompressedSize > 0 && int64(len(payloadData)) > int64(mr.opts.MaxDecompressedSize) {
+		if int64(len(payloadData)) > limit {
 			return nil, cowrie.ErrDecompressedTooLarge
 		}
 	}
@@ -467,12 +469,12 @@ func (mr *MasterReader) readLegacyStream() (*MasterFrame, error) {
 }
 
 // decompressPayload decompresses data using the specified algorithm.
-func decompressPayload(data []byte, comp cowrie.Compression) ([]byte, error) {
+func decompressPayload(data []byte, comp cowrie.Compression, limit int64) ([]byte, error) {
 	switch comp {
 	case cowrie.CompressionGzip:
-		return decompressGzip(data)
+		return decompressGzipWithLimit(data, limit)
 	case cowrie.CompressionZstd:
-		return decompressZstd(data)
+		return decompressZstdWithLimit(data, limit)
 	default:
 		return data, nil
 	}

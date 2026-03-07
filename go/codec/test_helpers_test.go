@@ -70,6 +70,15 @@ func buildLegacyStreamFrame(payload []byte) []byte {
 
 // buildMasterFrame builds a master stream frame with given parameters.
 func buildMasterFrame(typeID uint32, flags uint8, meta, payload []byte, compress Compression, enableCRC bool) []byte {
+	rawLen := uint32(0)
+	if compress != CompressionNone {
+		rawLen = uint32(len(payload))
+	}
+	return buildMasterFrameWithRawLen(typeID, flags, meta, payload, rawLen, compress, enableCRC)
+}
+
+// buildMasterFrameWithRawLen builds a master stream frame with an explicit raw length.
+func buildMasterFrameWithRawLen(typeID uint32, flags uint8, meta, payload []byte, rawLen uint32, compress Compression, enableCRC bool) []byte {
 	var buf bytes.Buffer
 
 	// Magic "SJST"
@@ -80,9 +89,7 @@ func buildMasterFrame(typeID uint32, flags uint8, meta, payload []byte, compress
 
 	// Flags
 	var frameFlags uint8 = flags
-	if compress != CompressionNone {
-		frameFlags |= FlagMasterCompressed
-	}
+	frameFlags |= compressionFlags(compress)
 	if enableCRC {
 		frameFlags |= FlagMasterCRC
 	}
@@ -97,19 +104,12 @@ func buildMasterFrame(typeID uint32, flags uint8, meta, payload []byte, compress
 	// TypeID
 	binary.Write(&buf, binary.LittleEndian, typeID)
 
-	// Compression type
-	buf.WriteByte(byte(compress))
-
-	// Reserved
-	buf.WriteByte(0)
-
 	// Payload length
 	binary.Write(&buf, binary.LittleEndian, uint32(len(payload)))
 
 	// Raw length (0 if not compressed)
-	var rawLen uint32
-	if compress != CompressionNone {
-		rawLen = uint32(len(payload)) // In real usage this would be decompressed size
+	if compress == CompressionNone {
+		rawLen = 0
 	}
 	binary.Write(&buf, binary.LittleEndian, rawLen)
 
@@ -130,6 +130,17 @@ func buildMasterFrame(typeID uint32, flags uint8, meta, payload []byte, compress
 	}
 
 	return buf.Bytes()
+}
+
+func compressionFlags(comp Compression) uint8 {
+	switch comp {
+	case CompressionGzip:
+		return FlagMasterCompressed | FlagMasterCompGzip
+	case CompressionZstd:
+		return FlagMasterCompressed | FlagMasterCompZstd
+	default:
+		return 0
+	}
 }
 
 // crc32IEEE computes CRC32-IEEE checksum.

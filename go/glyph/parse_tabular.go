@@ -472,6 +472,9 @@ func (p *tabularRowParser) parseBitmapHeader(td *TypeDef) ([]bool, error) {
 	if p.pos == start {
 		return nil, fmt.Errorf("empty bitmap")
 	}
+	if p.pos-start > maxBitmapBits {
+		return nil, fmt.Errorf("bitmap too large")
+	}
 
 	bits := p.input[start:p.pos]
 	mask, err := binaryToMask("0b" + bits)

@@ -3,60 +3,66 @@ package codec
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
+	"strings"
 	"testing"
+
+	"github.com/Neumenon/cowrie/go"
 )
 
 // TestSafety_DecompressionBomb tests protection against decompression bombs.
 func TestSafety_DecompressionBomb(t *testing.T) {
 	t.Run("huge_raw_length_in_header", func(t *testing.T) {
-		// Create a frame that claims huge decompressed size
-		var buf bytes.Buffer
+		frame := buildMasterFrameWithRawLen(
+			123,
+			0,
+			nil,
+			[]byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+			0x80000000,
+			CompressionGzip,
+			false,
+		)
 
-		// Magic
-		buf.WriteString("SJST")
-		// Version
-		buf.WriteByte(0x02)
-		// Flags (compressed with gzip)
-		buf.WriteByte(FlagMasterCompressed)
-		// Header length
-		binary.Write(&buf, binary.LittleEndian, uint16(24))
-		// TypeID
-		binary.Write(&buf, binary.LittleEndian, uint32(123))
-		// Compression type (gzip)
-		buf.WriteByte(byte(CompressionGzip))
-		// Reserved
-		buf.WriteByte(0)
-		// Payload length (small)
-		binary.Write(&buf, binary.LittleEndian, uint32(10))
-		// Raw length (HUGE - 2GB)
-		binary.Write(&buf, binary.LittleEndian, uint32(0x80000000))
-		// Meta length
-		binary.Write(&buf, binary.LittleEndian, uint32(0))
-		// Tiny payload (not valid gzip, but that's fine)
-		buf.Write([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
-
-		mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{
+		mr := NewMasterReader(frame, MasterReaderOptions{
 			MaxDecompressedSize: 1 << 20, // 1MB limit
 		})
 
 		_, err := mr.Next()
-		if err == nil {
-			t.Error("expected error for huge raw length, got nil")
+		if !errors.Is(err, cowrie.ErrDecompressedTooLarge) {
+			t.Fatalf("expected ErrDecompressedTooLarge for huge raw length, got %v", err)
 		}
 	})
 
 	t.Run("gzip_bomb", func(t *testing.T) {
-		// Create a gzip bomb: small compressed data that expands massively
-		// For this test, we just verify the size limit is enforced
+		rawPayload, err := EncodeBytes(map[string]any{
+			"data": strings.Repeat("COMPRESS_ME_", 10000),
+		})
+		if err != nil {
+			t.Fatalf("EncodeBytes failed: %v", err)
+		}
 
-		// This would require actually creating compressed data that expands
-		// For now, just verify the option is respected
-		mr := NewMasterReader([]byte{}, MasterReaderOptions{
+		compressed, err := compressGzip(rawPayload)
+		if err != nil {
+			t.Fatalf("compressGzip failed: %v", err)
+		}
+
+		frame := buildMasterFrameWithRawLen(
+			123,
+			0,
+			nil,
+			compressed,
+			uint32(len(rawPayload)),
+			CompressionGzip,
+			false,
+		)
+
+		mr := NewMasterReader(frame, MasterReaderOptions{
 			MaxDecompressedSize: 1024, // Very small limit
 		})
 
-		if mr.opts.MaxDecompressedSize != 1024 {
-			t.Errorf("MaxDecompressedSize not set: got %d", mr.opts.MaxDecompressedSize)
+		_, err = mr.Next()
+		if !errors.Is(err, cowrie.ErrDecompressedTooLarge) {
+			t.Fatalf("expected ErrDecompressedTooLarge for oversized gzip payload, got %v", err)
 		}
 	})
 }
@@ -128,37 +134,31 @@ func TestSafety_BadCRC(t *testing.T) {
 	}
 }
 
-// TestSafety_UnknownCompressionType tests handling of unknown compression.
-func TestSafety_UnknownCompressionType(t *testing.T) {
-	var buf bytes.Buffer
+// TestSafety_CompressedFlagWithoutAlgorithmBits tests malformed compressed headers.
+func TestSafety_CompressedFlagWithoutAlgorithmBits(t *testing.T) {
+	rawPayload, err := EncodeBytes(map[string]any{"test": int64(1)})
+	if err != nil {
+		t.Fatalf("EncodeBytes failed: %v", err)
+	}
+	compressed, err := compressGzip(rawPayload)
+	if err != nil {
+		t.Fatalf("compressGzip failed: %v", err)
+	}
 
-	// Magic
-	buf.WriteString("SJST")
-	// Version
-	buf.WriteByte(0x02)
-	// Flags (compressed)
-	buf.WriteByte(FlagMasterCompressed)
-	// Header length
-	binary.Write(&buf, binary.LittleEndian, uint16(24))
-	// TypeID
-	binary.Write(&buf, binary.LittleEndian, uint32(123))
-	// Compression type (INVALID - 0xFF)
-	buf.WriteByte(0xFF)
-	// Reserved
-	buf.WriteByte(0)
-	// Payload length
-	binary.Write(&buf, binary.LittleEndian, uint32(10))
-	// Raw length
-	binary.Write(&buf, binary.LittleEndian, uint32(10))
-	// Meta length
-	binary.Write(&buf, binary.LittleEndian, uint32(0))
-	// Dummy payload
-	buf.Write(make([]byte, 10))
+	frame := buildMasterFrameWithRawLen(
+		123,
+		FlagMasterCompressed,
+		nil,
+		compressed,
+		uint32(len(rawPayload)),
+		CompressionNone,
+		false,
+	)
 
-	mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{})
-	_, err := mr.Next()
+	mr := NewMasterReader(frame, MasterReaderOptions{})
+	_, err = mr.Next()
 	if err == nil {
-		t.Error("expected error for unknown compression type")
+		t.Error("expected error for compressed frame without algorithm bits")
 	}
 }
 
@@ -216,25 +216,18 @@ func TestSafety_InvalidVersion(t *testing.T) {
 
 // TestSafety_CorruptedGzip tests handling of corrupted gzip data.
 func TestSafety_CorruptedGzip(t *testing.T) {
-	var buf bytes.Buffer
+	frame := buildMasterFrameWithRawLen(
+		123,
+		0,
+		nil,
+		[]byte{0x1f, 0x8b, 0x08, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+		100,
+		CompressionGzip,
+		false,
+	)
 
-	// Build header claiming gzip compression
-	buf.WriteString("SJST")
-	buf.WriteByte(0x02)
-	buf.WriteByte(FlagMasterCompressed)
-	binary.Write(&buf, binary.LittleEndian, uint16(24))
-	binary.Write(&buf, binary.LittleEndian, uint32(123))
-	buf.WriteByte(byte(CompressionGzip))
-	buf.WriteByte(0)
-	binary.Write(&buf, binary.LittleEndian, uint32(20)) // payload len
-	binary.Write(&buf, binary.LittleEndian, uint32(100)) // raw len
-	binary.Write(&buf, binary.LittleEndian, uint32(0))  // meta len
-
-	// Invalid gzip data (starts with gzip magic but is garbage)
-	buf.Write([]byte{0x1f, 0x8b, 0x08, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
-
-	mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{
+	mr := NewMasterReader(frame, MasterReaderOptions{
 		MaxDecompressedSize: 1 << 20,
 	})
 	_, err := mr.Next()
@@ -245,25 +238,18 @@ func TestSafety_CorruptedGzip(t *testing.T) {
 
 // TestSafety_CorruptedZstd tests handling of corrupted zstd data.
 func TestSafety_CorruptedZstd(t *testing.T) {
-	var buf bytes.Buffer
+	frame := buildMasterFrameWithRawLen(
+		123,
+		0,
+		nil,
+		[]byte{0x28, 0xB5, 0x2F, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+		100,
+		CompressionZstd,
+		false,
+	)
 
-	// Build header claiming zstd compression
-	buf.WriteString("SJST")
-	buf.WriteByte(0x02)
-	buf.WriteByte(FlagMasterCompressed)
-	binary.Write(&buf, binary.LittleEndian, uint16(24))
-	binary.Write(&buf, binary.LittleEndian, uint32(123))
-	buf.WriteByte(byte(CompressionZstd))
-	buf.WriteByte(0)
-	binary.Write(&buf, binary.LittleEndian, uint32(20)) // payload len
-	binary.Write(&buf, binary.LittleEndian, uint32(100)) // raw len
-	binary.Write(&buf, binary.LittleEndian, uint32(0))  // meta len
-
-	// Invalid zstd data (random bytes)
-	buf.Write([]byte{0x28, 0xB5, 0x2F, 0xFD, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
-
-	mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{
+	mr := NewMasterReader(frame, MasterReaderOptions{
 		MaxDecompressedSize: 1 << 20,
 	})
 	_, err := mr.Next()
@@ -283,8 +269,8 @@ func TestSafety_HugeMetaLength(t *testing.T) {
 	binary.Write(&buf, binary.LittleEndian, uint32(123))
 	buf.WriteByte(0)
 	buf.WriteByte(0)
-	binary.Write(&buf, binary.LittleEndian, uint32(0))        // payload len
-	binary.Write(&buf, binary.LittleEndian, uint32(0))        // raw len
+	binary.Write(&buf, binary.LittleEndian, uint32(0))          // payload len
+	binary.Write(&buf, binary.LittleEndian, uint32(0))          // raw len
 	binary.Write(&buf, binary.LittleEndian, uint32(0x80000000)) // meta len (2GB!)
 
 	mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{
@@ -308,8 +294,8 @@ func TestSafety_HugePayloadLength(t *testing.T) {
 	buf.WriteByte(0)
 	buf.WriteByte(0)
 	binary.Write(&buf, binary.LittleEndian, uint32(0x80000000)) // payload len (2GB!)
-	binary.Write(&buf, binary.LittleEndian, uint32(0))         // raw len
-	binary.Write(&buf, binary.LittleEndian, uint32(0))         // meta len
+	binary.Write(&buf, binary.LittleEndian, uint32(0))          // raw len
+	binary.Write(&buf, binary.LittleEndian, uint32(0))          // meta len
 
 	mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{
 		MaxDecompressedSize: 1 << 20,
@@ -341,7 +327,7 @@ func TestSafety_CowrieArraySizeLimit(t *testing.T) {
 
 	var buf bytes.Buffer
 	buf.Write([]byte{'S', 'J', 0x02, 0x00}) // Header
-	buf.WriteByte(0x00) // Empty dict
+	buf.WriteByte(0x00)                     // Empty dict
 
 	// Array tag
 	buf.WriteByte(0x06)
@@ -359,7 +345,7 @@ func TestSafety_CowrieArraySizeLimit(t *testing.T) {
 func TestSafety_CowrieStringSizeLimit(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte{'S', 'J', 0x02, 0x00}) // Header
-	buf.WriteByte(0x00) // Empty dict
+	buf.WriteByte(0x00)                     // Empty dict
 
 	// String tag
 	buf.WriteByte(0x05)
