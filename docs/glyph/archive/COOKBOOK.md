@@ -1843,7 +1843,7 @@ if __name__ == "__main__":
 
 ## Next Steps
 
-- **[SPEC.md](./SPEC.md)** - Formal grammar specification
+- **[SPECIFICATIONS.md](../SPECIFICATIONS.md)** - Formal grammar specification
 - **[GitHub Issues](https://github.com/Neumenon/glyph/issues)** - Report bugs, request features
 
 ---

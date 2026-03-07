@@ -4,6 +4,7 @@
  */
 
 #include "../include/cowrie_gen1.h"
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -325,6 +326,315 @@ void cowrie_g1_value_free(cowrie_g1_value_t *val) {
  * ============================================================ */
 
 static int encode_value(const cowrie_g1_value_t *val, cowrie_g1_buf_t *buf);
+static int encode_object_entries(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+static int encode_node_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+static int encode_edge_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+static int encode_adjlist_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+static int encode_node_batch_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+static int encode_edge_batch_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+static int encode_graph_shard_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf);
+
+static int encode_raw_string(cowrie_g1_buf_t *buf, const char *data, size_t len) {
+    int err = cowrie_g1_buf_write_uvarint(buf, len);
+    if (err) return err;
+    return cowrie_g1_buf_write(buf, data, len);
+}
+
+static const cowrie_g1_value_t *object_get_member(const cowrie_g1_value_t *obj, const char *key) {
+    if (!obj || obj->type != COWRIE_G1_TYPE_OBJECT) return NULL;
+    for (size_t i = 0; i < obj->object_val.len; i++) {
+        if (strcmp(obj->object_val.members[i].key, key) == 0) {
+            return obj->object_val.members[i].value;
+        }
+    }
+    return NULL;
+}
+
+static bool object_has_exact_keys(const cowrie_g1_value_t *obj, const char **keys, size_t key_count) {
+    if (!obj || obj->type != COWRIE_G1_TYPE_OBJECT) return false;
+    if (obj->object_val.len != key_count) return false;
+    for (size_t i = 0; i < key_count; i++) {
+        if (!object_get_member(obj, keys[i])) return false;
+    }
+    return true;
+}
+
+static bool is_int_sequence(const cowrie_g1_value_t *v) {
+    if (!v) return false;
+    if (v->type == COWRIE_G1_TYPE_INT64_ARRAY) return true;
+    if (v->type != COWRIE_G1_TYPE_ARRAY) return false;
+    for (size_t i = 0; i < v->array_val.len; i++) {
+        if (!v->array_val.items[i] || v->array_val.items[i]->type != COWRIE_G1_TYPE_INT64) return false;
+    }
+    return true;
+}
+
+static size_t int_sequence_len(const cowrie_g1_value_t *v) {
+    if (v->type == COWRIE_G1_TYPE_INT64_ARRAY) return v->int64_array_val.len;
+    return v->array_val.len;
+}
+
+static bool int_sequence_get(const cowrie_g1_value_t *v, size_t idx, int64_t *out) {
+    if (!v || !out) return false;
+    if (v->type == COWRIE_G1_TYPE_INT64_ARRAY) {
+        if (idx >= v->int64_array_val.len) return false;
+        *out = v->int64_array_val.data[idx];
+        return true;
+    }
+    if (v->type == COWRIE_G1_TYPE_ARRAY) {
+        if (idx >= v->array_val.len) return false;
+        if (!v->array_val.items[idx] || v->array_val.items[idx]->type != COWRIE_G1_TYPE_INT64) return false;
+        *out = v->array_val.items[idx]->int64_val;
+        return true;
+    }
+    return false;
+}
+
+static bool is_byte_sequence(const cowrie_g1_value_t *v) {
+    if (!v) return false;
+    if (v->type == COWRIE_G1_TYPE_BYTES) return true;
+    if (v->type != COWRIE_G1_TYPE_ARRAY) return false;
+    for (size_t i = 0; i < v->array_val.len; i++) {
+        if (!v->array_val.items[i] || v->array_val.items[i]->type != COWRIE_G1_TYPE_INT64) return false;
+        int64_t b = v->array_val.items[i]->int64_val;
+        if (b < 0 || b > 255) return false;
+    }
+    return true;
+}
+
+static size_t byte_sequence_len(const cowrie_g1_value_t *v) {
+    if (v->type == COWRIE_G1_TYPE_BYTES) return v->bytes_val.len;
+    return v->array_val.len;
+}
+
+static int byte_sequence_write(const cowrie_g1_value_t *v, cowrie_g1_buf_t *buf) {
+    if (v->type == COWRIE_G1_TYPE_BYTES) {
+        return cowrie_g1_buf_write(buf, v->bytes_val.data, v->bytes_val.len);
+    }
+    for (size_t i = 0; i < v->array_val.len; i++) {
+        uint8_t b = (uint8_t)v->array_val.items[i]->int64_val;
+        int err = cowrie_g1_buf_write_byte(buf, b);
+        if (err) return err;
+    }
+    return COWRIE_G1_OK;
+}
+
+static bool is_node_object(const cowrie_g1_value_t *obj) {
+    static const char *keys[] = {"id", "label", "properties"};
+    if (!object_has_exact_keys(obj, keys, 3)) return false;
+    const cowrie_g1_value_t *id = object_get_member(obj, "id");
+    const cowrie_g1_value_t *label = object_get_member(obj, "label");
+    const cowrie_g1_value_t *properties = object_get_member(obj, "properties");
+    return id && id->type == COWRIE_G1_TYPE_INT64 &&
+           label && label->type == COWRIE_G1_TYPE_STRING &&
+           properties && properties->type == COWRIE_G1_TYPE_OBJECT;
+}
+
+static bool is_edge_object(const cowrie_g1_value_t *obj) {
+    static const char *keys[] = {"src", "dst", "label", "properties"};
+    if (!object_has_exact_keys(obj, keys, 4)) return false;
+    const cowrie_g1_value_t *src = object_get_member(obj, "src");
+    const cowrie_g1_value_t *dst = object_get_member(obj, "dst");
+    const cowrie_g1_value_t *label = object_get_member(obj, "label");
+    const cowrie_g1_value_t *properties = object_get_member(obj, "properties");
+    return src && src->type == COWRIE_G1_TYPE_INT64 &&
+           dst && dst->type == COWRIE_G1_TYPE_INT64 &&
+           label && label->type == COWRIE_G1_TYPE_STRING &&
+           properties && properties->type == COWRIE_G1_TYPE_OBJECT;
+}
+
+static bool is_adjlist_object(const cowrie_g1_value_t *obj) {
+    static const char *keys[] = {"id_width", "node_count", "edge_count", "row_offsets", "col_indices"};
+    if (!object_has_exact_keys(obj, keys, 5)) return false;
+    const cowrie_g1_value_t *id_width = object_get_member(obj, "id_width");
+    const cowrie_g1_value_t *node_count = object_get_member(obj, "node_count");
+    const cowrie_g1_value_t *edge_count = object_get_member(obj, "edge_count");
+    const cowrie_g1_value_t *row_offsets = object_get_member(obj, "row_offsets");
+    const cowrie_g1_value_t *col_indices = object_get_member(obj, "col_indices");
+    return id_width && id_width->type == COWRIE_G1_TYPE_INT64 &&
+           node_count && node_count->type == COWRIE_G1_TYPE_INT64 &&
+           edge_count && edge_count->type == COWRIE_G1_TYPE_INT64 &&
+           row_offsets && is_int_sequence(row_offsets) &&
+           col_indices && is_byte_sequence(col_indices);
+}
+
+static bool is_node_batch_object(const cowrie_g1_value_t *obj) {
+    static const char *keys[] = {"nodes"};
+    if (!object_has_exact_keys(obj, keys, 1)) return false;
+    const cowrie_g1_value_t *nodes = object_get_member(obj, "nodes");
+    if (!nodes || nodes->type != COWRIE_G1_TYPE_ARRAY) return false;
+    for (size_t i = 0; i < nodes->array_val.len; i++) {
+        if (!is_node_object(nodes->array_val.items[i])) return false;
+    }
+    return true;
+}
+
+static bool is_edge_batch_object(const cowrie_g1_value_t *obj) {
+    static const char *keys[] = {"edges"};
+    if (!object_has_exact_keys(obj, keys, 1)) return false;
+    const cowrie_g1_value_t *edges = object_get_member(obj, "edges");
+    if (!edges || edges->type != COWRIE_G1_TYPE_ARRAY) return false;
+    for (size_t i = 0; i < edges->array_val.len; i++) {
+        if (!is_edge_object(edges->array_val.items[i])) return false;
+    }
+    return true;
+}
+
+static bool is_graph_shard_object(const cowrie_g1_value_t *obj) {
+    static const char *keys[] = {"nodes", "edges", "meta"};
+    if (!object_has_exact_keys(obj, keys, 3)) return false;
+    const cowrie_g1_value_t *nodes = object_get_member(obj, "nodes");
+    const cowrie_g1_value_t *edges = object_get_member(obj, "edges");
+    const cowrie_g1_value_t *meta = object_get_member(obj, "meta");
+    if (!nodes || nodes->type != COWRIE_G1_TYPE_ARRAY) return false;
+    if (!edges || edges->type != COWRIE_G1_TYPE_ARRAY) return false;
+    if (!meta || meta->type != COWRIE_G1_TYPE_OBJECT) return false;
+    for (size_t i = 0; i < nodes->array_val.len; i++) {
+        if (!is_node_object(nodes->array_val.items[i])) return false;
+    }
+    for (size_t i = 0; i < edges->array_val.len; i++) {
+        if (!is_edge_object(edges->array_val.items[i])) return false;
+    }
+    return true;
+}
+
+static int encode_object_entries(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    int err = cowrie_g1_buf_write_uvarint(buf, obj->object_val.len);
+    if (err) return err;
+    for (size_t i = 0; i < obj->object_val.len; i++) {
+        size_t key_len = strlen(obj->object_val.members[i].key);
+        err = encode_raw_string(buf, obj->object_val.members[i].key, key_len);
+        if (err) return err;
+        err = encode_value(obj->object_val.members[i].value, buf);
+        if (err) return err;
+    }
+    return COWRIE_G1_OK;
+}
+
+static int encode_object_default(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_OBJECT);
+    if (err) return err;
+    return encode_object_entries(obj, buf);
+}
+
+static int encode_node_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    const cowrie_g1_value_t *id = object_get_member(obj, "id");
+    const cowrie_g1_value_t *label = object_get_member(obj, "label");
+    const cowrie_g1_value_t *properties = object_get_member(obj, "properties");
+
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_NODE);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, cowrie_g1_zigzag_encode(id->int64_val));
+    if (err) return err;
+    err = encode_raw_string(buf, label->string_val.data, label->string_val.len);
+    if (err) return err;
+    return encode_object_entries(properties, buf);
+}
+
+static int encode_edge_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    const cowrie_g1_value_t *src = object_get_member(obj, "src");
+    const cowrie_g1_value_t *dst = object_get_member(obj, "dst");
+    const cowrie_g1_value_t *label = object_get_member(obj, "label");
+    const cowrie_g1_value_t *properties = object_get_member(obj, "properties");
+
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_EDGE);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, cowrie_g1_zigzag_encode(src->int64_val));
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, cowrie_g1_zigzag_encode(dst->int64_val));
+    if (err) return err;
+    err = encode_raw_string(buf, label->string_val.data, label->string_val.len);
+    if (err) return err;
+    return encode_object_entries(properties, buf);
+}
+
+static int encode_adjlist_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    const cowrie_g1_value_t *id_width_val = object_get_member(obj, "id_width");
+    const cowrie_g1_value_t *node_count_val = object_get_member(obj, "node_count");
+    const cowrie_g1_value_t *edge_count_val = object_get_member(obj, "edge_count");
+    const cowrie_g1_value_t *row_offsets = object_get_member(obj, "row_offsets");
+    const cowrie_g1_value_t *col_indices = object_get_member(obj, "col_indices");
+
+    if (id_width_val->int64_val < 0 || id_width_val->int64_val > 255) return COWRIE_G1_ERR_INVALID;
+    if (node_count_val->int64_val < 0 || edge_count_val->int64_val < 0) return COWRIE_G1_ERR_INVALID;
+
+    uint64_t node_count = (uint64_t)node_count_val->int64_val;
+    uint64_t edge_count = (uint64_t)edge_count_val->int64_val;
+    if (node_count > SIZE_MAX - 1) return COWRIE_G1_ERR_OVERFLOW;
+    size_t expected_row_offsets = (size_t)(node_count + 1);
+    if (int_sequence_len(row_offsets) != expected_row_offsets) return COWRIE_G1_ERR_INVALID;
+
+    size_t id_size = ((uint8_t)id_width_val->int64_val == 1) ? 4 : 8;
+    if (edge_count > SIZE_MAX / id_size) return COWRIE_G1_ERR_OVERFLOW;
+    size_t expected_col_len = (size_t)edge_count * id_size;
+    if (byte_sequence_len(col_indices) != expected_col_len) return COWRIE_G1_ERR_INVALID;
+
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_ADJLIST);
+    if (err) return err;
+    err = cowrie_g1_buf_write_byte(buf, (uint8_t)id_width_val->int64_val);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, node_count);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, edge_count);
+    if (err) return err;
+
+    for (size_t i = 0; i < expected_row_offsets; i++) {
+        int64_t offset;
+        if (!int_sequence_get(row_offsets, i, &offset) || offset < 0) return COWRIE_G1_ERR_INVALID;
+        err = cowrie_g1_buf_write_uvarint(buf, (uint64_t)offset);
+        if (err) return err;
+    }
+
+    return byte_sequence_write(col_indices, buf);
+}
+
+static int encode_node_batch_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    const cowrie_g1_value_t *nodes = object_get_member(obj, "nodes");
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_NODE_BATCH);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, nodes->array_val.len);
+    if (err) return err;
+    for (size_t i = 0; i < nodes->array_val.len; i++) {
+        err = encode_node_object(nodes->array_val.items[i], buf);
+        if (err) return err;
+    }
+    return COWRIE_G1_OK;
+}
+
+static int encode_edge_batch_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    const cowrie_g1_value_t *edges = object_get_member(obj, "edges");
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_EDGE_BATCH);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, edges->array_val.len);
+    if (err) return err;
+    for (size_t i = 0; i < edges->array_val.len; i++) {
+        err = encode_edge_object(edges->array_val.items[i], buf);
+        if (err) return err;
+    }
+    return COWRIE_G1_OK;
+}
+
+static int encode_graph_shard_object(const cowrie_g1_value_t *obj, cowrie_g1_buf_t *buf) {
+    const cowrie_g1_value_t *nodes = object_get_member(obj, "nodes");
+    const cowrie_g1_value_t *edges = object_get_member(obj, "edges");
+    const cowrie_g1_value_t *meta = object_get_member(obj, "meta");
+
+    int err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_GRAPH_SHARD);
+    if (err) return err;
+    err = cowrie_g1_buf_write_uvarint(buf, nodes->array_val.len);
+    if (err) return err;
+    for (size_t i = 0; i < nodes->array_val.len; i++) {
+        err = encode_node_object(nodes->array_val.items[i], buf);
+        if (err) return err;
+    }
+    err = cowrie_g1_buf_write_uvarint(buf, edges->array_val.len);
+    if (err) return err;
+    for (size_t i = 0; i < edges->array_val.len; i++) {
+        err = encode_edge_object(edges->array_val.items[i], buf);
+        if (err) return err;
+    }
+    return encode_object_entries(meta, buf);
+}
 
 static int encode_value(const cowrie_g1_value_t *val, cowrie_g1_buf_t *buf) {
     int err;
@@ -376,20 +686,13 @@ static int encode_value(const cowrie_g1_value_t *val, cowrie_g1_buf_t *buf) {
         return COWRIE_G1_OK;
 
     case COWRIE_G1_TYPE_OBJECT:
-        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_OBJECT);
-        if (err) return err;
-        err = cowrie_g1_buf_write_uvarint(buf, val->object_val.len);
-        if (err) return err;
-        for (size_t i = 0; i < val->object_val.len; i++) {
-            size_t key_len = strlen(val->object_val.members[i].key);
-            err = cowrie_g1_buf_write_uvarint(buf, key_len);
-            if (err) return err;
-            err = cowrie_g1_buf_write(buf, val->object_val.members[i].key, key_len);
-            if (err) return err;
-            err = encode_value(val->object_val.members[i].value, buf);
-            if (err) return err;
-        }
-        return COWRIE_G1_OK;
+        if (is_graph_shard_object(val)) return encode_graph_shard_object(val, buf);
+        if (is_node_batch_object(val)) return encode_node_batch_object(val, buf);
+        if (is_edge_batch_object(val)) return encode_edge_batch_object(val, buf);
+        if (is_node_object(val)) return encode_node_object(val, buf);
+        if (is_edge_object(val)) return encode_edge_object(val, buf);
+        if (is_adjlist_object(val)) return encode_adjlist_object(val, buf);
+        return encode_object_default(val, buf);
 
     case COWRIE_G1_TYPE_INT64_ARRAY:
         err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_INT64_ARRAY);
@@ -471,6 +774,60 @@ static int read_uvarint(reader_t *r, uint64_t *out) {
 }
 
 static int decode_value_depth(reader_t *r, cowrie_g1_value_t **out, int depth);
+
+static int object_set_owned(cowrie_g1_value_t *obj, const char *key, cowrie_g1_value_t *val) {
+    if (!val) return COWRIE_G1_ERR_NOMEM;
+    int err = cowrie_g1_object_set(obj, key, val);
+    if (err) cowrie_g1_value_free(val);
+    return err;
+}
+
+static int decode_object_members(reader_t *r, cowrie_g1_value_t *obj, uint64_t count, int depth) {
+    int err;
+    for (uint64_t i = 0; i < count; i++) {
+        uint64_t key_len;
+        err = read_uvarint(r, &key_len);
+        if (err) return err;
+        if (key_len > COWRIE_G1_MAX_STRING_LEN) return COWRIE_G1_ERR_STRING_LEN;
+        if (r->pos + key_len > r->len) return COWRIE_G1_ERR_EOF;
+
+        char *key = malloc((size_t)key_len + 1);
+        if (!key) return COWRIE_G1_ERR_NOMEM;
+        memcpy(key, r->data + r->pos, (size_t)key_len);
+        key[key_len] = '\0';
+        r->pos += (size_t)key_len;
+
+        cowrie_g1_value_t *val;
+        err = decode_value_depth(r, &val, depth + 1);
+        if (err) {
+            free(key);
+            return err;
+        }
+
+        err = cowrie_g1_object_set(obj, key, val);
+        free(key);
+        if (err) {
+            cowrie_g1_value_free(val);
+            return err;
+        }
+    }
+    return COWRIE_G1_OK;
+}
+
+static int decode_object_counted(reader_t *r, uint64_t count, int depth, cowrie_g1_value_t **out) {
+    if (count > COWRIE_G1_MAX_OBJECT_LEN) return COWRIE_G1_ERR_OBJECT_LEN;
+    cowrie_g1_value_t *obj = cowrie_g1_object((size_t)count);
+    if (!obj) return COWRIE_G1_ERR_NOMEM;
+
+    int err = decode_object_members(r, obj, count, depth);
+    if (err) {
+        cowrie_g1_value_free(obj);
+        return err;
+    }
+
+    *out = obj;
+    return COWRIE_G1_OK;
+}
 
 static int decode_value_depth(reader_t *r, cowrie_g1_value_t **out, int depth) {
     /* Security: check depth limit */
@@ -555,50 +912,7 @@ static int decode_value_depth(reader_t *r, cowrie_g1_value_t **out, int depth) {
         uint64_t count;
         err = read_uvarint(r, &count);
         if (err) return err;
-        if (count > COWRIE_G1_MAX_OBJECT_LEN) return COWRIE_G1_ERR_OBJECT_LEN;
-        cowrie_g1_value_t *obj = cowrie_g1_object(count);
-        if (!obj) return COWRIE_G1_ERR_NOMEM;
-        for (uint64_t i = 0; i < count; i++) {
-            uint64_t key_len;
-            err = read_uvarint(r, &key_len);
-            if (err) {
-                cowrie_g1_value_free(obj);
-                return err;
-            }
-            if (key_len > COWRIE_G1_MAX_STRING_LEN) {
-                cowrie_g1_value_free(obj);
-                return COWRIE_G1_ERR_STRING_LEN;
-            }
-            if (r->pos + key_len > r->len) {
-                cowrie_g1_value_free(obj);
-                return COWRIE_G1_ERR_EOF;
-            }
-            char *key = malloc(key_len + 1);
-            if (!key) {
-                cowrie_g1_value_free(obj);
-                return COWRIE_G1_ERR_NOMEM;
-            }
-            memcpy(key, r->data + r->pos, key_len);
-            key[key_len] = '\0';
-            r->pos += key_len;
-
-            cowrie_g1_value_t *val;
-            err = decode_value_depth(r, &val, depth + 1);
-            if (err) {
-                free(key);
-                cowrie_g1_value_free(obj);
-                return err;
-            }
-            err = cowrie_g1_object_set(obj, key, val);
-            free(key);
-            if (err) {
-                cowrie_g1_value_free(val);
-                cowrie_g1_value_free(obj);
-                return err;
-            }
-        }
-        *out = obj;
-        return COWRIE_G1_OK;
+        return decode_object_counted(r, count, depth, out);
     }
 
     case COWRIE_G1_TAG_INT64_ARRAY: {
@@ -681,6 +995,429 @@ static int decode_value_depth(reader_t *r, cowrie_g1_value_t **out, int depth) {
         v->string_array_val.data = strings;
         v->string_array_val.len = count;
         *out = v;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_NODE: {
+        uint64_t zz;
+        err = read_uvarint(r, &zz);
+        if (err) return err;
+        int64_t id = cowrie_g1_zigzag_decode(zz);
+
+        uint64_t label_len;
+        err = read_uvarint(r, &label_len);
+        if (err) return err;
+        if (label_len > COWRIE_G1_MAX_STRING_LEN) return COWRIE_G1_ERR_STRING_LEN;
+        if (r->pos + label_len > r->len) return COWRIE_G1_ERR_EOF;
+        cowrie_g1_value_t *label = cowrie_g1_string((const char *)(r->data + r->pos), (size_t)label_len);
+        if (!label) return COWRIE_G1_ERR_NOMEM;
+        r->pos += (size_t)label_len;
+
+        uint64_t prop_count;
+        err = read_uvarint(r, &prop_count);
+        if (err) {
+            cowrie_g1_value_free(label);
+            return err;
+        }
+        cowrie_g1_value_t *properties;
+        err = decode_object_counted(r, prop_count, depth, &properties);
+        if (err) {
+            cowrie_g1_value_free(label);
+            return err;
+        }
+
+        cowrie_g1_value_t *node = cowrie_g1_object(3);
+        if (!node) {
+            cowrie_g1_value_free(label);
+            cowrie_g1_value_free(properties);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+
+        err = object_set_owned(node, "id", cowrie_g1_int64(id));
+        if (err) {
+            cowrie_g1_value_free(label);
+            cowrie_g1_value_free(properties);
+            cowrie_g1_value_free(node);
+            return err;
+        }
+        err = object_set_owned(node, "label", label);
+        if (err) {
+            cowrie_g1_value_free(properties);
+            cowrie_g1_value_free(node);
+            return err;
+        }
+        err = object_set_owned(node, "properties", properties);
+        if (err) {
+            cowrie_g1_value_free(node);
+            return err;
+        }
+        *out = node;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_EDGE: {
+        uint64_t src_zz;
+        uint64_t dst_zz;
+        err = read_uvarint(r, &src_zz);
+        if (err) return err;
+        err = read_uvarint(r, &dst_zz);
+        if (err) return err;
+        int64_t src = cowrie_g1_zigzag_decode(src_zz);
+        int64_t dst = cowrie_g1_zigzag_decode(dst_zz);
+
+        uint64_t label_len;
+        err = read_uvarint(r, &label_len);
+        if (err) return err;
+        if (label_len > COWRIE_G1_MAX_STRING_LEN) return COWRIE_G1_ERR_STRING_LEN;
+        if (r->pos + label_len > r->len) return COWRIE_G1_ERR_EOF;
+        cowrie_g1_value_t *label = cowrie_g1_string((const char *)(r->data + r->pos), (size_t)label_len);
+        if (!label) return COWRIE_G1_ERR_NOMEM;
+        r->pos += (size_t)label_len;
+
+        uint64_t prop_count;
+        err = read_uvarint(r, &prop_count);
+        if (err) {
+            cowrie_g1_value_free(label);
+            return err;
+        }
+        cowrie_g1_value_t *properties;
+        err = decode_object_counted(r, prop_count, depth, &properties);
+        if (err) {
+            cowrie_g1_value_free(label);
+            return err;
+        }
+
+        cowrie_g1_value_t *edge = cowrie_g1_object(4);
+        if (!edge) {
+            cowrie_g1_value_free(label);
+            cowrie_g1_value_free(properties);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+
+        err = object_set_owned(edge, "src", cowrie_g1_int64(src));
+        if (err) {
+            cowrie_g1_value_free(label);
+            cowrie_g1_value_free(properties);
+            cowrie_g1_value_free(edge);
+            return err;
+        }
+        err = object_set_owned(edge, "dst", cowrie_g1_int64(dst));
+        if (err) {
+            cowrie_g1_value_free(label);
+            cowrie_g1_value_free(properties);
+            cowrie_g1_value_free(edge);
+            return err;
+        }
+        err = object_set_owned(edge, "label", label);
+        if (err) {
+            cowrie_g1_value_free(properties);
+            cowrie_g1_value_free(edge);
+            return err;
+        }
+        err = object_set_owned(edge, "properties", properties);
+        if (err) {
+            cowrie_g1_value_free(edge);
+            return err;
+        }
+        *out = edge;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_ADJLIST: {
+        uint8_t id_width;
+        err = read_byte(r, &id_width);
+        if (err) return err;
+
+        uint64_t node_count_u64;
+        uint64_t edge_count_u64;
+        err = read_uvarint(r, &node_count_u64);
+        if (err) return err;
+        err = read_uvarint(r, &edge_count_u64);
+        if (err) return err;
+        if (node_count_u64 > COWRIE_G1_MAX_ARRAY_LEN) return COWRIE_G1_ERR_ARRAY_LEN;
+        if (edge_count_u64 > COWRIE_G1_MAX_ARRAY_LEN) return COWRIE_G1_ERR_ARRAY_LEN;
+        if (node_count_u64 > INT64_MAX || edge_count_u64 > INT64_MAX) return COWRIE_G1_ERR_OVERFLOW;
+        if (node_count_u64 > SIZE_MAX - 1) return COWRIE_G1_ERR_OVERFLOW;
+
+        size_t row_count = (size_t)(node_count_u64 + 1);
+        cowrie_g1_value_t *row_offsets = cowrie_g1_array(row_count);
+        if (!row_offsets) return COWRIE_G1_ERR_NOMEM;
+
+        for (size_t i = 0; i < row_count; i++) {
+            uint64_t offset_u64;
+            err = read_uvarint(r, &offset_u64);
+            if (err) {
+                cowrie_g1_value_free(row_offsets);
+                return err;
+            }
+            if (offset_u64 > INT64_MAX) {
+                cowrie_g1_value_free(row_offsets);
+                return COWRIE_G1_ERR_OVERFLOW;
+            }
+            cowrie_g1_value_t *offset_val = cowrie_g1_int64((int64_t)offset_u64);
+            if (!offset_val) {
+                cowrie_g1_value_free(row_offsets);
+                return COWRIE_G1_ERR_NOMEM;
+            }
+            err = cowrie_g1_array_append(row_offsets, offset_val);
+            if (err) {
+                cowrie_g1_value_free(offset_val);
+                cowrie_g1_value_free(row_offsets);
+                return err;
+            }
+        }
+
+        size_t col_width = id_width == 1 ? 4 : 8;
+        if (edge_count_u64 > (SIZE_MAX - r->pos) / col_width) {
+            cowrie_g1_value_free(row_offsets);
+            return COWRIE_G1_ERR_OVERFLOW;
+        }
+        size_t col_len = (size_t)edge_count_u64 * col_width;
+        if (r->pos + col_len > r->len) {
+            cowrie_g1_value_free(row_offsets);
+            return COWRIE_G1_ERR_EOF;
+        }
+        cowrie_g1_value_t *col_indices = cowrie_g1_bytes(r->data + r->pos, col_len);
+        if (!col_indices) {
+            cowrie_g1_value_free(row_offsets);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+        r->pos += col_len;
+
+        cowrie_g1_value_t *adj = cowrie_g1_object(5);
+        if (!adj) {
+            cowrie_g1_value_free(row_offsets);
+            cowrie_g1_value_free(col_indices);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+        err = object_set_owned(adj, "id_width", cowrie_g1_int64(id_width));
+        if (err) {
+            cowrie_g1_value_free(row_offsets);
+            cowrie_g1_value_free(col_indices);
+            cowrie_g1_value_free(adj);
+            return err;
+        }
+        err = object_set_owned(adj, "node_count", cowrie_g1_int64((int64_t)node_count_u64));
+        if (err) {
+            cowrie_g1_value_free(row_offsets);
+            cowrie_g1_value_free(col_indices);
+            cowrie_g1_value_free(adj);
+            return err;
+        }
+        err = object_set_owned(adj, "edge_count", cowrie_g1_int64((int64_t)edge_count_u64));
+        if (err) {
+            cowrie_g1_value_free(row_offsets);
+            cowrie_g1_value_free(col_indices);
+            cowrie_g1_value_free(adj);
+            return err;
+        }
+        err = object_set_owned(adj, "row_offsets", row_offsets);
+        if (err) {
+            cowrie_g1_value_free(col_indices);
+            cowrie_g1_value_free(adj);
+            return err;
+        }
+        err = object_set_owned(adj, "col_indices", col_indices);
+        if (err) {
+            cowrie_g1_value_free(adj);
+            return err;
+        }
+        *out = adj;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_NODE_BATCH: {
+        uint64_t count;
+        err = read_uvarint(r, &count);
+        if (err) return err;
+        if (count > COWRIE_G1_MAX_ARRAY_LEN) return COWRIE_G1_ERR_ARRAY_LEN;
+
+        cowrie_g1_value_t *nodes = cowrie_g1_array((size_t)count);
+        if (!nodes) return COWRIE_G1_ERR_NOMEM;
+        for (uint64_t i = 0; i < count; i++) {
+            cowrie_g1_value_t *node;
+            err = decode_value_depth(r, &node, depth + 1);
+            if (err) {
+                cowrie_g1_value_free(nodes);
+                return err;
+            }
+            if (!is_node_object(node)) {
+                cowrie_g1_value_free(node);
+                cowrie_g1_value_free(nodes);
+                return COWRIE_G1_ERR_INVALID;
+            }
+            err = cowrie_g1_array_append(nodes, node);
+            if (err) {
+                cowrie_g1_value_free(node);
+                cowrie_g1_value_free(nodes);
+                return err;
+            }
+        }
+
+        cowrie_g1_value_t *batch = cowrie_g1_object(1);
+        if (!batch) {
+            cowrie_g1_value_free(nodes);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+        err = object_set_owned(batch, "nodes", nodes);
+        if (err) {
+            cowrie_g1_value_free(batch);
+            return err;
+        }
+        *out = batch;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_EDGE_BATCH: {
+        uint64_t count;
+        err = read_uvarint(r, &count);
+        if (err) return err;
+        if (count > COWRIE_G1_MAX_ARRAY_LEN) return COWRIE_G1_ERR_ARRAY_LEN;
+
+        cowrie_g1_value_t *edges = cowrie_g1_array((size_t)count);
+        if (!edges) return COWRIE_G1_ERR_NOMEM;
+        for (uint64_t i = 0; i < count; i++) {
+            cowrie_g1_value_t *edge;
+            err = decode_value_depth(r, &edge, depth + 1);
+            if (err) {
+                cowrie_g1_value_free(edges);
+                return err;
+            }
+            if (!is_edge_object(edge)) {
+                cowrie_g1_value_free(edge);
+                cowrie_g1_value_free(edges);
+                return COWRIE_G1_ERR_INVALID;
+            }
+            err = cowrie_g1_array_append(edges, edge);
+            if (err) {
+                cowrie_g1_value_free(edge);
+                cowrie_g1_value_free(edges);
+                return err;
+            }
+        }
+
+        cowrie_g1_value_t *batch = cowrie_g1_object(1);
+        if (!batch) {
+            cowrie_g1_value_free(edges);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+        err = object_set_owned(batch, "edges", edges);
+        if (err) {
+            cowrie_g1_value_free(batch);
+            return err;
+        }
+        *out = batch;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_GRAPH_SHARD: {
+        uint64_t node_count;
+        err = read_uvarint(r, &node_count);
+        if (err) return err;
+        if (node_count > COWRIE_G1_MAX_ARRAY_LEN) return COWRIE_G1_ERR_ARRAY_LEN;
+
+        cowrie_g1_value_t *nodes = cowrie_g1_array((size_t)node_count);
+        if (!nodes) return COWRIE_G1_ERR_NOMEM;
+        for (uint64_t i = 0; i < node_count; i++) {
+            cowrie_g1_value_t *node;
+            err = decode_value_depth(r, &node, depth + 1);
+            if (err) {
+                cowrie_g1_value_free(nodes);
+                return err;
+            }
+            if (!is_node_object(node)) {
+                cowrie_g1_value_free(node);
+                cowrie_g1_value_free(nodes);
+                return COWRIE_G1_ERR_INVALID;
+            }
+            err = cowrie_g1_array_append(nodes, node);
+            if (err) {
+                cowrie_g1_value_free(node);
+                cowrie_g1_value_free(nodes);
+                return err;
+            }
+        }
+
+        uint64_t edge_count;
+        err = read_uvarint(r, &edge_count);
+        if (err) {
+            cowrie_g1_value_free(nodes);
+            return err;
+        }
+        if (edge_count > COWRIE_G1_MAX_ARRAY_LEN) {
+            cowrie_g1_value_free(nodes);
+            return COWRIE_G1_ERR_ARRAY_LEN;
+        }
+
+        cowrie_g1_value_t *edges = cowrie_g1_array((size_t)edge_count);
+        if (!edges) {
+            cowrie_g1_value_free(nodes);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+        for (uint64_t i = 0; i < edge_count; i++) {
+            cowrie_g1_value_t *edge;
+            err = decode_value_depth(r, &edge, depth + 1);
+            if (err) {
+                cowrie_g1_value_free(nodes);
+                cowrie_g1_value_free(edges);
+                return err;
+            }
+            if (!is_edge_object(edge)) {
+                cowrie_g1_value_free(edge);
+                cowrie_g1_value_free(nodes);
+                cowrie_g1_value_free(edges);
+                return COWRIE_G1_ERR_INVALID;
+            }
+            err = cowrie_g1_array_append(edges, edge);
+            if (err) {
+                cowrie_g1_value_free(edge);
+                cowrie_g1_value_free(nodes);
+                cowrie_g1_value_free(edges);
+                return err;
+            }
+        }
+
+        uint64_t meta_count;
+        err = read_uvarint(r, &meta_count);
+        if (err) {
+            cowrie_g1_value_free(nodes);
+            cowrie_g1_value_free(edges);
+            return err;
+        }
+        cowrie_g1_value_t *meta;
+        err = decode_object_counted(r, meta_count, depth, &meta);
+        if (err) {
+            cowrie_g1_value_free(nodes);
+            cowrie_g1_value_free(edges);
+            return err;
+        }
+
+        cowrie_g1_value_t *shard = cowrie_g1_object(3);
+        if (!shard) {
+            cowrie_g1_value_free(nodes);
+            cowrie_g1_value_free(edges);
+            cowrie_g1_value_free(meta);
+            return COWRIE_G1_ERR_NOMEM;
+        }
+        err = object_set_owned(shard, "nodes", nodes);
+        if (err) {
+            cowrie_g1_value_free(edges);
+            cowrie_g1_value_free(meta);
+            cowrie_g1_value_free(shard);
+            return err;
+        }
+        err = object_set_owned(shard, "edges", edges);
+        if (err) {
+            cowrie_g1_value_free(meta);
+            cowrie_g1_value_free(shard);
+            return err;
+        }
+        err = object_set_owned(shard, "meta", meta);
+        if (err) {
+            cowrie_g1_value_free(shard);
+            return err;
+        }
+        *out = shard;
         return COWRIE_G1_OK;
     }
 

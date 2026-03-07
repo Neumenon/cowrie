@@ -581,11 +581,11 @@ print(f"Token savings: {savings:.1f}%")
 
 **Examples:**
 - [Cookbook](archive/COOKBOOK.md) - 10 detailed recipes
-- [Visual Guide](visual-guide.html) - Interactive examples
+- [GLYPH Quickstart](QUICKSTART.md) - End-to-end examples
 
 **Research:**
-- [LLM Accuracy](reports/LLM_ACCURACY_REPORT.md) - Performance with language models
-- [Benchmarks](reports/CODEC_BENCHMARK_REPORT.md) - Speed and efficiency metrics
+- [GLYPH Specifications](SPECIFICATIONS.md) - Protocol and format details
+- [Codec Benchmarks](../../benchmarks/README.md) - Speed and efficiency metrics
 
 ---
 

@@ -124,3 +124,103 @@ describe('BigInt Support', () => {
     assert.strictEqual(typeof decoded, 'number');
   });
 });
+
+describe('Graph Types', () => {
+  it('should round-trip node', () => {
+    const original = {
+      id: 42,
+      label: 'Person',
+      properties: {
+        name: 'Alice',
+        age: 30,
+      },
+    };
+    const decoded = decode(encode(original)) as any;
+    assert.strictEqual(decoded.id, 42);
+    assert.strictEqual(decoded.label, 'Person');
+    assert.strictEqual(decoded.properties.name, 'Alice');
+    assert.strictEqual(decoded.properties.age, 30);
+  });
+
+  it('should round-trip edge', () => {
+    const original = {
+      src: 1,
+      dst: 2,
+      label: 'FOLLOWS',
+      properties: {
+        weight: 3,
+      },
+    };
+    const decoded = decode(encode(original)) as any;
+    assert.strictEqual(decoded.src, 1);
+    assert.strictEqual(decoded.dst, 2);
+    assert.strictEqual(decoded.label, 'FOLLOWS');
+    assert.strictEqual(decoded.properties.weight, 3);
+  });
+
+  it('should round-trip adjlist', () => {
+    const original = {
+      id_width: 1,
+      node_count: 2,
+      edge_count: 3,
+      row_offsets: [0, 1, 3],
+      col_indices: [
+        1, 0, 0, 0,
+        0, 0, 0, 0,
+        1, 0, 0, 0,
+      ],
+    };
+    const decoded = decode(encode(original)) as any;
+    assert.strictEqual(decoded.id_width, 1);
+    assert.strictEqual(decoded.node_count, 2);
+    assert.strictEqual(decoded.edge_count, 3);
+    assert.deepStrictEqual(decoded.row_offsets, [0n, 1n, 3n]);
+    assert.deepStrictEqual(decoded.col_indices, original.col_indices);
+  });
+
+  it('should round-trip node batch', () => {
+    const original = {
+      nodes: [
+        { id: 1, label: 'A', properties: { x: 1 } },
+        { id: 2, label: 'B', properties: { x: 2 } },
+      ],
+    };
+    const decoded = decode(encode(original)) as any;
+    assert.strictEqual(decoded.nodes.length, 2);
+    assert.strictEqual(decoded.nodes[0].id, 1);
+    assert.strictEqual(decoded.nodes[1].label, 'B');
+  });
+
+  it('should round-trip edge batch', () => {
+    const original = {
+      edges: [
+        { src: 1, dst: 2, label: 'A', properties: { w: 1 } },
+        { src: 2, dst: 3, label: 'B', properties: { w: 2 } },
+      ],
+    };
+    const decoded = decode(encode(original)) as any;
+    assert.strictEqual(decoded.edges.length, 2);
+    assert.strictEqual(decoded.edges[0].src, 1);
+    assert.strictEqual(decoded.edges[1].dst, 3);
+  });
+
+  it('should round-trip graph shard', () => {
+    const original = {
+      nodes: [
+        { id: 1, label: 'Person', properties: { name: 'Alice' } },
+        { id: 2, label: 'Person', properties: { name: 'Bob' } },
+      ],
+      edges: [
+        { src: 1, dst: 2, label: 'KNOWS', properties: { since: 2020 } },
+      ],
+      meta: {
+        shard: 's1',
+      },
+    };
+    const decoded = decode(encode(original)) as any;
+    assert.strictEqual(decoded.nodes.length, 2);
+    assert.strictEqual(decoded.edges.length, 1);
+    assert.strictEqual(decoded.meta.shard, 's1');
+    assert.strictEqual(decoded.edges[0].properties.since, 2020);
+  });
+});

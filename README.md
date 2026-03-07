@@ -23,8 +23,8 @@ A multi-language binary JSON codec with two variants:
 | Go | Yes | Yes | Complete |
 | Rust | Yes | Yes | Complete |
 | Python | Yes | Yes | Complete |
-| C | Yes | Yes | Complete |
-| TypeScript | Yes | Yes | Complete |
+| C | Yes (core + proto-tensor) | Yes | Partial (Gen1 graph types pending) |
+| TypeScript | Yes (core + proto-tensor) | Yes | Partial (Gen1 graph types pending) |
 
 ## Quick Start
 
@@ -32,8 +32,8 @@ A multi-language binary JSON codec with two variants:
 
 ```go
 import (
+    cowrie "github.com/Neumenon/cowrie"
     "github.com/Neumenon/cowrie/gen1"
-    "github.com/Neumenon/cowrie/gen2"
 )
 
 // Gen1
@@ -44,16 +44,16 @@ data, _ := gen1.Encode(map[string]any{
 result, _ := gen1.Decode(data)
 
 // Gen2
-val := gen2.Object(
-    gen2.Member{Key: "name", Value: gen2.String("Alice")},
+val := cowrie.Object(
+    cowrie.Member{Key: "name", Value: cowrie.String("Alice")},
 )
-data, _ = gen2.Encode(val)
+data, _ = cowrie.Encode(val)
 ```
 
 ### Rust
 
 ```rust
-use cowrie::{gen1, gen2};
+use cowrie_rs::{gen1, gen2};
 
 // Gen1
 let val = gen1::Value::Object(vec![
@@ -108,9 +108,7 @@ const data = gen1.encode({ name: 'Alice', scores: [1.0, 2.0, 3.0] });
 const result = gen1.decode(data);
 
 // Gen2
-const val = gen2.SJ.object([
-  ['name', gen2.SJ.string('Alice')],
-]);
+const val = gen2.SJ.object({ name: gen2.SJ.string('Alice') });
 const encoded = gen2.encode(val);
 ```
 
@@ -136,7 +134,7 @@ cargo test
 
 ```bash
 cd python
-pip install -e .
+pip install -e ".[dev]"
 pytest tests/
 ```
 
@@ -144,11 +142,14 @@ pytest tests/
 
 ```bash
 cd c
-mkdir build && cd build
-cmake ..
-make
-ctest
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build
 ```
+
+Requirements:
+- `zlib` development headers (required)
+- `libzstd` + `pkg-config` (optional, for zstd support)
 
 ### TypeScript
 
@@ -203,33 +204,37 @@ echo '{"name":"Alice","age":30}' | ./cowrie encode --gen2 > data.cowrie
 
 ## Graph Types (v2.1)
 
-Both Gen1 and Gen2 support graph data structures:
+Gen2 graph data structures:
 
 ```go
 // Go - Gen2 Graph Types
-node := gen2.Node(gen2.NodeConfig{
+node := cowrie.NodeData{
     ID:     "person_42",
     Labels: []string{"Person", "Employee"},
-    Props:  map[string]any{"name": "Alice", "age": 30},
-})
+    Props:  map[string]any{"name": "Alice", "age": int64(30)},
+}
 
-edge := gen2.Edge(gen2.EdgeConfig{
-    From:     "person_42",
-    To:       "company_1",
-    EdgeType: "WORKS_AT",
-    Props:    map[string]any{"since": 2020},
-})
+edge := cowrie.EdgeData{
+    From:  "person_42",
+    To:    "company_1",
+    Type:  "WORKS_AT",
+    Props: map[string]any{"since": int64(2020)},
+}
 
-shard := gen2.GraphShard(nodes, edges, metadata)
+shard := cowrie.GraphShard(
+    []cowrie.NodeData{node},
+    []cowrie.EdgeData{edge},
+    map[string]any{"source": "example"},
+)
 ```
 
 ```python
 # Python - Gen2 Graph Types
 from cowrie.gen2 import Value, NodeData, EdgeData
 
-node = Value.node("person_42", ["Person"], {"name": Value.string("Alice")})
-edge = Value.edge("person_42", "company_1", "WORKS_AT", {})
-shard = Value.graph_shard(nodes, edges, metadata)
+node = NodeData(id="person_42", labels=["Person"], props={"name": Value.string("Alice")})
+edge = EdgeData(from_id="person_42", to_id="company_1", edge_type="WORKS_AT", props={})
+shard = Value.graph_shard([node], [edge], {"source": Value.string("example")})
 ```
 
 ## Streaming Support
@@ -242,7 +247,7 @@ Cowrie supports streaming for large payloads:
 // Go - Stream decode from io.Reader
 dec := gen1.NewStreamDecoder(conn)
 for {
-    val, err := dec.Next()
+    val, err := dec.Decode()
     if err == io.EOF {
         break
     }
@@ -254,31 +259,42 @@ for {
 
 ```go
 // Go - Master stream with metadata
-frame := gen2.NewMasterFrame(data)
-frame.SetMetadata("version", "1.0")
-frame.WriteTo(writer)
+import (
+    cowrie "github.com/Neumenon/cowrie"
+    "github.com/Neumenon/cowrie/codec"
+)
+
+mw := codec.NewMasterWriter(writer, codec.DefaultMasterWriterOptions())
+_ = mw.WriteWithMeta(
+    map[string]any{"name": "Alice"},
+    cowrie.Object(cowrie.Member{Key: "version", Value: cowrie.String("1.0")}),
+)
 
 // Read frame
-frame, _ := gen2.ReadMasterFrame(reader)
-val := frame.Value()
-meta := frame.Metadata()
+mr := codec.NewMasterReader(streamBytes, codec.DefaultMasterReaderOptions())
+frame, _ := mr.Next()
+val := frame.Payload
+meta := frame.Meta
 ```
 
 ```python
 # Python - Master stream
-from cowrie.gen2 import write_master_frame, read_master_frame
+from cowrie.gen2 import Value, write_master_frame, read_master_frame
 
-write_master_frame(writer, value, metadata={"version": 1})
-frame = read_master_frame(reader)
+payload = write_master_frame(
+    Value.object({"name": Value.string("Alice")}),
+    Value.object({"version": Value.int64(1)}),
+)
+frame, _ = read_master_frame(payload)
 ```
 
 ### Gen2: Column-wise Access
 
 ```go
 // Go - Read specific columns without full decode
-cr := gen2.NewColumnReader(data)
-names := cr.Column("name")  // Only decode "name" field
-ages := cr.Column("age")    // Only decode "age" field
+cr, _ := cowrie.NewColumnReader(data)
+names, _ := cr.ReadColumn("name")   // Only decode "name" field
+ages, _, _ := cr.ReadInt64Column("age")
 ```
 
 ## Wire Format
@@ -291,7 +307,7 @@ Run benchmarks:
 
 ```bash
 # Go
-cd go && go test -bench=. -benchmem ../benchmarks/
+cd go && go test -bench=. -benchmem ./...
 
 # Python
 cd python && python ../benchmarks/bench_python.py

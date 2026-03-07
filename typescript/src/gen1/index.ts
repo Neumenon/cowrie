@@ -64,6 +64,41 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
+export interface Gen1Node {
+  id: number | bigint;
+  label: string;
+  properties: Record<string, JsonValue>;
+}
+
+export interface Gen1Edge {
+  src: number | bigint;
+  dst: number | bigint;
+  label: string;
+  properties: Record<string, JsonValue>;
+}
+
+export interface Gen1AdjList {
+  id_width: number;
+  node_count: number;
+  edge_count: number;
+  row_offsets: Array<number | bigint>;
+  col_indices: number[];
+}
+
+export interface Gen1NodeBatch {
+  nodes: Gen1Node[];
+}
+
+export interface Gen1EdgeBatch {
+  edges: Gen1Edge[];
+}
+
+export interface Gen1GraphShard {
+  nodes: Gen1Node[];
+  edges: Gen1Edge[];
+  meta: Record<string, JsonValue>;
+}
+
 /**
  * Encode a JavaScript value to Gen1 binary format.
  */
@@ -118,6 +153,159 @@ function isHomogeneousStringArray(arr: unknown[]): arr is string[] {
   return arr.every((x) => typeof x === 'string');
 }
 
+function isIntegerLike(v: unknown): v is number | bigint {
+  return (typeof v === 'number' && Number.isInteger(v)) || typeof v === 'bigint';
+}
+
+function isObjectRecord(v: unknown): v is Record<string, JsonValue> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function hasExactKeys(obj: Record<string, unknown>, keys: string[]): boolean {
+  const objKeys = Object.keys(obj);
+  if (objKeys.length !== keys.length) return false;
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(obj, k));
+}
+
+function isByteArray(v: unknown): v is number[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= 255);
+}
+
+function isNodeObject(v: Record<string, JsonValue>): v is Gen1Node {
+  if (!hasExactKeys(v, ['id', 'label', 'properties'])) return false;
+  return isIntegerLike(v.id) && typeof v.label === 'string' && isObjectRecord(v.properties);
+}
+
+function isEdgeObject(v: Record<string, JsonValue>): v is Gen1Edge {
+  if (!hasExactKeys(v, ['src', 'dst', 'label', 'properties'])) return false;
+  return isIntegerLike(v.src) && isIntegerLike(v.dst) && typeof v.label === 'string' && isObjectRecord(v.properties);
+}
+
+function isAdjListObject(v: Record<string, JsonValue>): v is Gen1AdjList {
+  if (!hasExactKeys(v, ['id_width', 'node_count', 'edge_count', 'row_offsets', 'col_indices'])) return false;
+  if (!isIntegerLike(v.id_width) || !isIntegerLike(v.node_count) || !isIntegerLike(v.edge_count)) return false;
+  if (!Array.isArray(v.row_offsets) || !v.row_offsets.every(isIntegerLike)) return false;
+  return isByteArray(v.col_indices);
+}
+
+function isNodeBatchObject(v: Record<string, JsonValue>): v is Gen1NodeBatch {
+  if (!hasExactKeys(v, ['nodes']) || !Array.isArray(v.nodes)) return false;
+  return v.nodes.every((n) => isObjectRecord(n) && isNodeObject(n));
+}
+
+function isEdgeBatchObject(v: Record<string, JsonValue>): v is Gen1EdgeBatch {
+  if (!hasExactKeys(v, ['edges']) || !Array.isArray(v.edges)) return false;
+  return v.edges.every((e) => isObjectRecord(e) && isEdgeObject(e));
+}
+
+function isGraphShardObject(v: Record<string, JsonValue>): v is Gen1GraphShard {
+  if (!hasExactKeys(v, ['nodes', 'edges', 'meta'])) return false;
+  if (!Array.isArray(v.nodes) || !v.nodes.every((n) => isObjectRecord(n) && isNodeObject(n))) return false;
+  if (!Array.isArray(v.edges) || !v.edges.every((e) => isObjectRecord(e) && isEdgeObject(e))) return false;
+  return isObjectRecord(v.meta);
+}
+
+function writeSignedInt(buf: number[], n: number | bigint): void {
+  if (typeof n === 'bigint') {
+    writeUvarintBigInt(buf, zigzagEncodeBigInt(n));
+    return;
+  }
+  if (n >= -2147483648 && n <= 2147483647) {
+    writeUvarint(buf, zigzagEncode(n));
+  } else {
+    writeUvarintBigInt(buf, zigzagEncodeBigInt(BigInt(n)));
+  }
+}
+
+function writeString(buf: number[], s: string): void {
+  const encoded = new TextEncoder().encode(s);
+  writeUvarint(buf, encoded.length);
+  for (const byte of encoded) buf.push(byte);
+}
+
+function writeObjectEntries(buf: number[], obj: Record<string, JsonValue>): void {
+  const keys = Object.keys(obj).sort();
+  writeUvarint(buf, keys.length);
+  for (const key of keys) {
+    writeString(buf, key);
+    encodeValue(buf, obj[key]);
+  }
+}
+
+function encodeNode(buf: number[], node: Gen1Node): void {
+  buf.push(Tags.NODE);
+  writeSignedInt(buf, node.id);
+  writeString(buf, node.label);
+  writeObjectEntries(buf, node.properties);
+}
+
+function encodeEdge(buf: number[], edge: Gen1Edge): void {
+  buf.push(Tags.EDGE);
+  writeSignedInt(buf, edge.src);
+  writeSignedInt(buf, edge.dst);
+  writeString(buf, edge.label);
+  writeObjectEntries(buf, edge.properties);
+}
+
+function encodeAdjList(buf: number[], adj: Gen1AdjList): void {
+  const idWidth = Number(adj.id_width);
+  const nodeCount = Number(adj.node_count);
+  const edgeCount = Number(adj.edge_count);
+  if (!Number.isInteger(idWidth) || idWidth < 0 || idWidth > 255) {
+    throw new Error('Invalid adjlist id_width');
+  }
+  if (!Number.isInteger(nodeCount) || nodeCount < 0) {
+    throw new Error('Invalid adjlist node_count');
+  }
+  if (!Number.isInteger(edgeCount) || edgeCount < 0) {
+    throw new Error('Invalid adjlist edge_count');
+  }
+  if (adj.row_offsets.length !== nodeCount + 1) {
+    throw new Error('Invalid adjlist row_offsets length');
+  }
+  const expectedBytes = edgeCount * (idWidth === 1 ? 4 : 8);
+  if (adj.col_indices.length !== expectedBytes) {
+    throw new Error('Invalid adjlist col_indices length');
+  }
+
+  buf.push(Tags.ADJLIST);
+  buf.push(idWidth);
+  writeUvarint(buf, nodeCount);
+  writeUvarint(buf, edgeCount);
+  for (const off of adj.row_offsets) {
+    if (!isIntegerLike(off)) throw new Error('Invalid row offset type');
+    if (typeof off === 'number' && off < 0) throw new Error('Negative row offset');
+    if (typeof off === 'bigint' && off < 0n) throw new Error('Negative row offset');
+    if (typeof off === 'bigint') {
+      writeUvarintBigInt(buf, off);
+    } else {
+      writeUvarint(buf, off);
+    }
+  }
+  for (const b of adj.col_indices) buf.push(b);
+}
+
+function encodeNodeBatch(buf: number[], nb: Gen1NodeBatch): void {
+  buf.push(Tags.NODE_BATCH);
+  writeUvarint(buf, nb.nodes.length);
+  for (const n of nb.nodes) encodeNode(buf, n);
+}
+
+function encodeEdgeBatch(buf: number[], eb: Gen1EdgeBatch): void {
+  buf.push(Tags.EDGE_BATCH);
+  writeUvarint(buf, eb.edges.length);
+  for (const e of eb.edges) encodeEdge(buf, e);
+}
+
+function encodeGraphShard(buf: number[], gs: Gen1GraphShard): void {
+  buf.push(Tags.GRAPH_SHARD);
+  writeUvarint(buf, gs.nodes.length);
+  for (const n of gs.nodes) encodeNode(buf, n);
+  writeUvarint(buf, gs.edges.length);
+  for (const e of gs.edges) encodeEdge(buf, e);
+  writeObjectEntries(buf, gs.meta);
+}
+
 function encodeValue(buf: number[], value: JsonValue): void {
   if (value === null) {
     buf.push(Tags.NULL);
@@ -147,11 +335,7 @@ function encodeValue(buf: number[], value: JsonValue): void {
     }
   } else if (typeof value === 'string') {
     buf.push(Tags.STRING);
-    const encoded = new TextEncoder().encode(value);
-    writeUvarint(buf, encoded.length);
-    for (const byte of encoded) {
-      buf.push(byte);
-    }
+    writeString(buf, value);
   } else if (Array.isArray(value)) {
     // Check for proto-tensor opportunity
     if (isHomogeneousNumberArray(value)) {
@@ -196,16 +380,22 @@ function encodeValue(buf: number[], value: JsonValue): void {
       }
     }
   } else if (typeof value === 'object') {
-    buf.push(Tags.OBJECT);
-    const keys = Object.keys(value).sort(); // Sort for determinism
-    writeUvarint(buf, keys.length);
-    for (const key of keys) {
-      const encodedKey = new TextEncoder().encode(key);
-      writeUvarint(buf, encodedKey.length);
-      for (const byte of encodedKey) {
-        buf.push(byte);
-      }
-      encodeValue(buf, (value as Record<string, JsonValue>)[key]);
+    const obj = value as Record<string, JsonValue>;
+    if (isGraphShardObject(obj)) {
+      encodeGraphShard(buf, obj);
+    } else if (isNodeBatchObject(obj)) {
+      encodeNodeBatch(buf, obj);
+    } else if (isEdgeBatchObject(obj)) {
+      encodeEdgeBatch(buf, obj);
+    } else if (isNodeObject(obj)) {
+      encodeNode(buf, obj);
+    } else if (isEdgeObject(obj)) {
+      encodeEdge(buf, obj);
+    } else if (isAdjListObject(obj)) {
+      encodeAdjList(buf, obj);
+    } else {
+      buf.push(Tags.OBJECT);
+      writeObjectEntries(buf, obj);
     }
   }
 }
@@ -263,6 +453,52 @@ function zigzagDecodeBigInt(n: bigint): bigint {
   return (n >> 1n) ^ -(n & 1n);
 }
 
+function readString(r: Reader): string {
+  const len = readUvarint(r);
+  if (len > Limits.MAX_STRING_LEN) {
+    throw new SecurityLimitExceeded(`String too long: ${len} > ${Limits.MAX_STRING_LEN}`);
+  }
+  return new TextDecoder().decode(readBytes(r, len));
+}
+
+function readSignedInt(r: Reader): number | bigint {
+  const decoded = zigzagDecodeBigInt(readUvarintBigInt(r));
+  if (decoded >= -9007199254740991n && decoded <= 9007199254740991n) {
+    return Number(decoded);
+  }
+  return decoded;
+}
+
+function readObjectEntries(r: Reader, depth: number): Record<string, JsonValue> {
+  const count = readUvarint(r);
+  if (count > Limits.MAX_OBJECT_LEN) {
+    throw new SecurityLimitExceeded(`Object too large: ${count} > ${Limits.MAX_OBJECT_LEN}`);
+  }
+  const obj: Record<string, JsonValue> = {};
+  for (let i = 0; i < count; i++) {
+    const key = readString(r);
+    obj[key] = decodeValue(r, depth + 1);
+  }
+  return obj;
+}
+
+function decodeNode(r: Reader, depth: number): Gen1Node {
+  return {
+    id: readSignedInt(r),
+    label: readString(r),
+    properties: readObjectEntries(r, depth),
+  };
+}
+
+function decodeEdge(r: Reader, depth: number): Gen1Edge {
+  return {
+    src: readSignedInt(r),
+    dst: readSignedInt(r),
+    label: readString(r),
+    properties: readObjectEntries(r, depth),
+  };
+}
+
 function decodeValue(r: Reader, depth: number): JsonValue {
   // Security: check depth limit
   if (depth > Limits.MAX_DEPTH) {
@@ -293,12 +529,7 @@ function decodeValue(r: Reader, depth: number): JsonValue {
       return view.getFloat64(0, true);
     }
     case Tags.STRING: {
-      const len = readUvarint(r);
-      if (len > Limits.MAX_STRING_LEN) {
-        throw new SecurityLimitExceeded(`String too long: ${len} > ${Limits.MAX_STRING_LEN}`);
-      }
-      const bytes = readBytes(r, len);
-      return new TextDecoder().decode(bytes);
+      return readString(r);
     }
     case Tags.BYTES: {
       const len = readUvarint(r);
@@ -319,21 +550,7 @@ function decodeValue(r: Reader, depth: number): JsonValue {
       return arr;
     }
     case Tags.OBJECT: {
-      const count = readUvarint(r);
-      if (count > Limits.MAX_OBJECT_LEN) {
-        throw new SecurityLimitExceeded(`Object too large: ${count} > ${Limits.MAX_OBJECT_LEN}`);
-      }
-      const obj: Record<string, JsonValue> = {};
-      for (let i = 0; i < count; i++) {
-        const keyLen = readUvarint(r);
-        if (keyLen > Limits.MAX_STRING_LEN) {
-          throw new SecurityLimitExceeded(`Key too long: ${keyLen} > ${Limits.MAX_STRING_LEN}`);
-        }
-        const keyBytes = readBytes(r, keyLen);
-        const key = new TextDecoder().decode(keyBytes);
-        obj[key] = decodeValue(r, depth + 1);
-      }
-      return obj;
+      return readObjectEntries(r, depth);
     }
     case Tags.INT64_ARRAY: {
       const count = readUvarint(r);
@@ -368,14 +585,95 @@ function decodeValue(r: Reader, depth: number): JsonValue {
       }
       const arr: string[] = [];
       for (let i = 0; i < count; i++) {
-        const len = readUvarint(r);
-        if (len > Limits.MAX_STRING_LEN) {
-          throw new SecurityLimitExceeded(`String too long: ${len} > ${Limits.MAX_STRING_LEN}`);
-        }
-        const bytes = readBytes(r, len);
-        arr.push(new TextDecoder().decode(bytes));
+        arr.push(readString(r));
       }
       return arr;
+    }
+    case Tags.NODE:
+      return decodeNode(r, depth);
+    case Tags.EDGE:
+      return decodeEdge(r, depth);
+    case Tags.ADJLIST: {
+      const idWidth = readByte(r);
+      const nodeCount = readUvarint(r);
+      const edgeCount = readUvarint(r);
+      if (nodeCount > Limits.MAX_ARRAY_LEN) {
+        throw new SecurityLimitExceeded(`Adjlist node_count too large: ${nodeCount}`);
+      }
+      if (edgeCount > Limits.MAX_ARRAY_LEN) {
+        throw new SecurityLimitExceeded(`Adjlist edge_count too large: ${edgeCount}`);
+      }
+      const rowOffsets: Array<number | bigint> = [];
+      for (let i = 0; i < nodeCount + 1; i++) {
+        rowOffsets.push(readUvarintBigInt(r));
+      }
+      const colBytes = edgeCount * (idWidth === 1 ? 4 : 8);
+      const colIndices = Array.from(readBytes(r, colBytes));
+      return {
+        id_width: idWidth,
+        node_count: nodeCount,
+        edge_count: edgeCount,
+        row_offsets: rowOffsets,
+        col_indices: colIndices,
+      };
+    }
+    case Tags.NODE_BATCH: {
+      const count = readUvarint(r);
+      if (count > Limits.MAX_ARRAY_LEN) {
+        throw new SecurityLimitExceeded(`Node batch too large: ${count}`);
+      }
+      const nodes: Gen1Node[] = [];
+      for (let i = 0; i < count; i++) {
+        const n = decodeValue(r, depth + 1);
+        if (!isObjectRecord(n) || !isNodeObject(n)) {
+          throw new Error('Invalid node in node batch');
+        }
+        nodes.push(n);
+      }
+      return { nodes };
+    }
+    case Tags.EDGE_BATCH: {
+      const count = readUvarint(r);
+      if (count > Limits.MAX_ARRAY_LEN) {
+        throw new SecurityLimitExceeded(`Edge batch too large: ${count}`);
+      }
+      const edges: Gen1Edge[] = [];
+      for (let i = 0; i < count; i++) {
+        const e = decodeValue(r, depth + 1);
+        if (!isObjectRecord(e) || !isEdgeObject(e)) {
+          throw new Error('Invalid edge in edge batch');
+        }
+        edges.push(e);
+      }
+      return { edges };
+    }
+    case Tags.GRAPH_SHARD: {
+      const nodeCount = readUvarint(r);
+      if (nodeCount > Limits.MAX_ARRAY_LEN) {
+        throw new SecurityLimitExceeded(`GraphShard node_count too large: ${nodeCount}`);
+      }
+      const nodes: Gen1Node[] = [];
+      for (let i = 0; i < nodeCount; i++) {
+        const n = decodeValue(r, depth + 1);
+        if (!isObjectRecord(n) || !isNodeObject(n)) {
+          throw new Error('Invalid node in graph shard');
+        }
+        nodes.push(n);
+      }
+      const edgeCount = readUvarint(r);
+      if (edgeCount > Limits.MAX_ARRAY_LEN) {
+        throw new SecurityLimitExceeded(`GraphShard edge_count too large: ${edgeCount}`);
+      }
+      const edges: Gen1Edge[] = [];
+      for (let i = 0; i < edgeCount; i++) {
+        const e = decodeValue(r, depth + 1);
+        if (!isObjectRecord(e) || !isEdgeObject(e)) {
+          throw new Error('Invalid edge in graph shard');
+        }
+        edges.push(e);
+      }
+      const meta = readObjectEntries(r, depth);
+      return { nodes, edges, meta };
     }
     default:
       throw new Error(`Invalid tag: 0x${tag.toString(16)}`);

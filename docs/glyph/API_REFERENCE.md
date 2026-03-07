@@ -8,11 +8,11 @@
 
 | Language | Installation | API Docs |
 |----------|--------------|----------|
-| [Python](#python-api) | `pip install glyph-serial` | [Full Docs →](../py/README.md) |
-| [Go](#go-api) | `go get github.com/Neumenon/glyph` | [Full Docs →](../go/README.md) |
-| [JavaScript](#javascript-api) | `npm install glyph-js` | [Full Docs →](../js/README.md) |
-| [Rust](#rust-api) | `cargo add glyph-codec` | [Full Docs →](../rust/README.md) |
-| [C](#c-api) | `make` | [Full Docs →](../c/README.md) |
+| [Python](#python-api) | `pip install glyph-serial` | [Full Docs →](../../python/glyph/README.md) |
+| [Go](#go-api) | `go get github.com/Neumenon/cowrie/glyph` | [Package Docs →](../../go/glyph/doc.go) |
+| [JavaScript](#javascript-api) | `npm install glyph-codec` | [Full Docs →](../../typescript/glyph/README.md) |
+| [Rust](#rust-api) | `cargo add glyph-codec` | [Full Docs →](../../rust/glyph-codec/glyph-codec/README.md) |
+| [C](#c-api) | `make` | [Full Docs →](../../c/glyph/README.md) |
 
 ---
 
@@ -102,7 +102,7 @@ for token in llm_stream:
         break
 ```
 
-**[Full Python Documentation →](../py/README.md)**
+**[Full Python Documentation →](../../python/glyph/README.md)**
 
 ---
 
@@ -111,7 +111,7 @@ for token in llm_stream:
 ### Installation
 
 ```bash
-go get github.com/Neumenon/glyph
+go get github.com/Neumenon/cowrie/glyph
 ```
 
 ### Core Functions
@@ -120,7 +120,7 @@ go get github.com/Neumenon/glyph
 Parse GLYPH text to Value.
 
 ```go
-import "github.com/Neumenon/glyph/glyph"
+import "github.com/Neumenon/cowrie/glyph"
 
 text := `{action=search query=weather limit=10}`
 val, err := glyph.Parse([]byte(text))
@@ -191,7 +191,7 @@ for token := range llmStream {
 }
 ```
 
-**[Full Go Documentation →](../go/README.md)**
+**[Go Package Documentation →](../../go/glyph/doc.go)**
 
 ---
 
@@ -200,7 +200,7 @@ for token := range llmStream {
 ### Installation
 
 ```bash
-npm install glyph-js
+npm install glyph-codec
 ```
 
 ### Core Functions
@@ -209,7 +209,7 @@ npm install glyph-js
 Parse GLYPH text.
 
 ```typescript
-import { parse } from 'glyph-js';
+import { parse } from 'glyph-codec';
 
 const value = parse('{action=search query=test}');
 console.log(value.get('action'));  // 'search'
@@ -219,7 +219,7 @@ console.log(value.get('action'));  // 'search'
 Emit GLYPH text.
 
 ```typescript
-import { emit, g } from 'glyph-js';
+import { emit, g } from 'glyph-codec';
 
 const data = g.map({
     name: g.str('Alice'),
@@ -235,7 +235,7 @@ const text = emit(data);
 Convert JS data to GValue.
 
 ```typescript
-import { fromJSON, emit } from 'glyph-js';
+import { fromJSON, emit } from 'glyph-codec';
 
 const data = { name: 'Alice', scores: [95, 87, 92] };
 const gv = fromJSON(data);
@@ -247,7 +247,7 @@ const text = emit(gv);
 Convert GValue to JS data.
 
 ```typescript
-import { parse, toJSON } from 'glyph-js';
+import { parse, toJSON } from 'glyph-codec';
 
 const value = parse('{name=Alice age=30}');
 const data = toJSON(value);
@@ -259,14 +259,14 @@ const data = toJSON(value);
 #### `fingerprintLoose(data: any): string`
 
 ```typescript
-import { fingerprintLoose } from 'glyph-js';
+import { fingerprintLoose } from 'glyph-codec';
 
 const data = { user: 'alice', count: 42 };
 const hash = fingerprintLoose(data);
 // sha256:a1b2c3d4e5f6...
 ```
 
-**[Full JavaScript Documentation →](../js/README.md)**
+**[Full JavaScript Documentation →](../../typescript/glyph/README.md)**
 
 ---
 
@@ -302,7 +302,7 @@ let json = to_json(&gvalue);
 // {"name": "Alice", "age": 30}
 ```
 
-**[Full Rust Documentation →](../rust/README.md)**
+**[Full Rust Documentation →](../../rust/glyph-codec/glyph-codec/README.md)**
 
 ---
 
@@ -311,7 +311,7 @@ let json = to_json(&gvalue);
 ### Installation
 
 ```bash
-cd c/glyph-codec
+cd c/glyph
 make
 ```
 
@@ -341,7 +341,7 @@ glyph_free(json);
 glyph_value_free(v);
 ```
 
-**[Full C Documentation →](../c/README.md)**
+**[Full C Documentation →](../../c/glyph/README.md)**
 
 ---
 

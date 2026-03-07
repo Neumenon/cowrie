@@ -145,7 +145,7 @@ gv = glyph.json_to_glyph(json_str)
 ```
 
 ```typescript
-import { fromJSON } from 'glyph-js';
+import { fromJSON } from 'glyph-codec';
 const gv = fromJSON(jsonData);
 ```
 
@@ -478,8 +478,8 @@ All implementations MUST produce byte-identical canonical forms.
 - [Agent Patterns](AGENTS.md) - AI integration
 
 **Research:**
-- [LLM Accuracy Report](reports/LLM_ACCURACY_REPORT.md)
-- [Performance Benchmarks](reports/CODEC_BENCHMARK_REPORT.md)
+- [Codec Benchmarks](../../benchmarks/README.md)
+- [Top-level Cowrie Benchmarks](../../README.md#benchmarks)
 
 ---
 

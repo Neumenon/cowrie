@@ -33,10 +33,10 @@ GLYPH: {action=search query="weather in NYC" max_results=10}
 | Language | Command |
 |----------|---------|
 | Python | `pip install glyph-serial` |
-| Go | `go get github.com/Neumenon/glyph` |
-| JavaScript | `npm install glyph-js` |
+| Go | `go get github.com/Neumenon/cowrie/glyph` |
+| JavaScript | `npm install glyph-codec` |
 | Rust | `cargo add glyph-codec` |
-| C | See [c/README.md](../c/README.md) |
+| C | See [c/glyph/README.md](../../c/glyph/README.md) |
 
 ---
 
@@ -64,7 +64,7 @@ print(result.get("age").as_int())   # 30
 ### Go
 
 ```go
-import "github.com/Neumenon/glyph/glyph"
+import "github.com/Neumenon/cowrie/glyph"
 
 // Parse GLYPH
 text := `{action=search query=weather limit=10}`
@@ -84,7 +84,7 @@ glyphText := glyph.CanonicalizeLoose(v)
 ### JavaScript
 
 ```typescript
-import { parse, emit, fromJSON, toJSON } from 'glyph-js';
+import { parse, emit, fromJSON, toJSON } from 'glyph-codec';
 
 // Parse GLYPH
 const value = parse('{action=search query=test}');
@@ -194,11 +194,11 @@ Float:   3.14            Struct:  User{name=Alice age=30}
 
 **Examples**:
 - [Cookbook](archive/COOKBOOK.md) - 10 practical recipes
-- [Language-Specific Docs](../README.md#implementations) - Go, Python, JS, Rust, C
+- [Language-Specific Docs](API_REFERENCE.md) - Go, Python, JS, Rust, C
 
-**Reports**:
-- [Performance Benchmarks](reports/CODEC_BENCHMARK_REPORT.md)
-- [LLM Accuracy](reports/LLM_ACCURACY_REPORT.md)
+**Benchmarks**:
+- [Codec Benchmarks](../../benchmarks/README.md)
+- [Top-level Cowrie Benchmarks](../../README.md#benchmarks)
 
 ---
 

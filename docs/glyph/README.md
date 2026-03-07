@@ -1074,10 +1074,10 @@ Changes to encoding rules must pass triple-implementation tests:
 go test ./...
 
 # Run Python tests  
-cd python && pytest
+cd python/glyph && pytest
 
 # Run JS tests
-cd js && npm test
+cd typescript/glyph && npm test
 ```
 
 ---
@@ -1090,7 +1090,7 @@ MIT License. See [LICENSE](./LICENSE).
 
 ## Links
 
-- [Specification](./SPEC.md) — Formal grammar and encoding rules
+- [Specification](./SPECIFICATIONS.md) — Formal grammar and encoding rules
 - [API Reference](https://pkg.go.dev/github.com/anthropics/glyph) — Go documentation
 - [Python Package](https://pypi.org/project/glyph-serial/) — PyPI
 - [npm Package](https://www.npmjs.com/package/@anthropics/glyph) — npm
