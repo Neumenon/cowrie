@@ -58,6 +58,7 @@ typedef enum {
     SJT_UUID128     = 0x0C,   /* 16 bytes */
     SJT_BIGINT      = 0x0D,   /* len:uvarint + two's complement BE */
     SJT_EXT         = 0x0E,   /* ext_type:uvarint + len:uvarint + payload */
+    SJT_FLOAT32     = 0x0F,   /* 4 bytes IEEE 754 LE, decoded as double */
     /* v2.1 ML/Multimodal extensions (0x20-0x2F) */
     SJT_TENSOR      = 0x20,   /* dtype:u8 + rank:u8 + dims[rank]:uvarint + data_len:uvarint + data */
     SJT_TENSOR_REF  = 0x21,   /* store_id:u8 + key_len:uvarint + key[] */
@@ -375,13 +376,13 @@ typedef struct {
 
 /* Default security limits - generous for ML workloads but prevent exhaustion */
 #define COWRIE_DEFAULT_MAX_DEPTH      1000
-#define COWRIE_DEFAULT_MAX_ARRAY_LEN  100000000   /* 100M elements */
-#define COWRIE_DEFAULT_MAX_OBJECT_LEN 10000000    /* 10M fields */
-#define COWRIE_DEFAULT_MAX_STRING_LEN 500000000   /* 500MB */
-#define COWRIE_DEFAULT_MAX_BYTES_LEN  1000000000  /* 1GB */
-#define COWRIE_DEFAULT_MAX_EXT_LEN    100000000   /* 100MB */
+#define COWRIE_DEFAULT_MAX_ARRAY_LEN  1000000     /* 1M elements (tightened: was 100M) */
+#define COWRIE_DEFAULT_MAX_OBJECT_LEN 1000000     /* 1M fields (tightened: was 10M) */
+#define COWRIE_DEFAULT_MAX_STRING_LEN 10000000    /* 10MB (tightened: was 500MB) */
+#define COWRIE_DEFAULT_MAX_BYTES_LEN  50000000    /* 50MB (tightened: was 1GB) */
+#define COWRIE_DEFAULT_MAX_EXT_LEN    1000000     /* 1MB (tightened: was 100MB) */
 #define COWRIE_DEFAULT_MAX_RANK       32
-#define COWRIE_DEFAULT_MAX_DICT_LEN   10000000    /* 10M */
+#define COWRIE_DEFAULT_MAX_DICT_LEN   1000000     /* 1M (tightened: was 10M) */
 #define COWRIE_DEFAULT_MAX_HINT_COUNT 10000       /* 10K column hints */
 
 /* Decode options for configurable security limits */

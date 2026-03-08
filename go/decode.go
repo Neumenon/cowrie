@@ -42,12 +42,12 @@ var (
 // these limits are a secondary defense against legitimately-sized but huge payloads.
 const (
 	DefaultMaxDepth     = 1000          // Maximum nesting depth
-	DefaultMaxArrayLen  = 100_000_000   // 100M elements (supports large embedding batches)
-	DefaultMaxObjectLen = 10_000_000    // 10M fields
-	DefaultMaxStringLen = 500_000_000   // 500MB strings
-	DefaultMaxBytesLen  = 1_000_000_000 // 1GB bytes (supports large tensor/image data)
-	DefaultMaxExtLen    = 100_000_000   // 100MB max extension payload (prevents DoS)
-	DefaultMaxDictLen   = 10_000_000    // 10M dictionary entries (same as object fields)
+	DefaultMaxArrayLen  = 1_000_000     // 1M elements (tightened: was 100M)
+	DefaultMaxObjectLen = 1_000_000     // 1M fields (tightened: was 10M)
+	DefaultMaxStringLen = 10_000_000    // 10MB strings (tightened: was 500MB)
+	DefaultMaxBytesLen  = 50_000_000    // 50MB bytes (tightened: was 1GB)
+	DefaultMaxExtLen    = 1_000_000     // 1MB max extension payload (tightened: was 100MB)
+	DefaultMaxDictLen   = 1_000_000     // 1M dictionary entries (tightened: was 10M)
 	DefaultMaxHintCount = 10_000        // 10K column hints max
 	DefaultMaxRank      = 32            // Maximum tensor rank (dimensions)
 )

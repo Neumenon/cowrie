@@ -16,6 +16,8 @@ pub enum CowrieError {
     TooDeep,
     TooLarge,
     TrailingData { pos: usize, remaining: usize },
+    InvalidDictIndex { index: usize, dict_len: usize },
+    RankExceeded { rank: usize, max: usize },
 }
 
 impl fmt::Display for CowrieError {
@@ -31,6 +33,8 @@ impl fmt::Display for CowrieError {
             CowrieError::TooDeep => write!(f, "nesting too deep"),
             CowrieError::TooLarge => write!(f, "data too large"),
             CowrieError::TrailingData { pos, remaining } => write!(f, "trailing data after root value: {} unconsumed bytes at position {}", remaining, pos),
+            CowrieError::InvalidDictIndex { index, dict_len } => write!(f, "dictionary index {} out of range (dict size: {})", index, dict_len),
+            CowrieError::RankExceeded { rank, max } => write!(f, "tensor rank {} exceeds maximum {}", rank, max),
         }
     }
 }

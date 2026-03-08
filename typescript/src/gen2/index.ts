@@ -29,14 +29,14 @@ const COMPRESS_THRESHOLD = 256;
 // Security limits - aligned with Go reference implementation
 const Limits = {
   MAX_DEPTH: 1000,               // Maximum nesting depth
-  MAX_ARRAY_LEN: 100_000_000,    // 100M elements
-  MAX_OBJECT_LEN: 10_000_000,    // 10M fields
-  MAX_STRING_LEN: 500_000_000,   // 500MB
-  MAX_BYTES_LEN: 1_000_000_000,  // 1GB
-  MAX_EXT_LEN: 100_000_000,      // 100MB extension payload
+  MAX_ARRAY_LEN: 1_000_000,     // 1M elements (tightened: was 100M)
+  MAX_OBJECT_LEN: 1_000_000,    // 1M fields (tightened: was 10M)
+  MAX_STRING_LEN: 10_000_000,   // 10MB (tightened: was 500MB)
+  MAX_BYTES_LEN: 50_000_000,    // 50MB (tightened: was 1GB)
+  MAX_EXT_LEN: 1_000_000,       // 1MB extension payload (tightened: was 100MB)
   MAX_RANK: 32,                  // Maximum tensor rank (dimensions)
   MAX_HINT_COUNT: 10_000,        // Maximum column hints
-  MAX_DICT_LEN: 10_000_000,      // 10M dictionary entries
+  MAX_DICT_LEN: 1_000_000,      // 1M dictionary entries (tightened: was 10M)
   MAX_DECOMPRESSED_SIZE: 256 * 1024 * 1024, // 256MB decompressed limit
 };
 
@@ -113,6 +113,7 @@ enum Tag {
   UUID128 = 0x0c,
   BIGINT = 0x0d,
   EXT = 0x0e,
+  FLOAT32 = 0x0f, // compact float32 -> decoded as number (float64)
   // ML/Multimodal extensions (0x20-0x2F)
   TENSOR = 0x20,
   TENSOR_REF = 0x21,
@@ -985,6 +986,11 @@ class Decoder {
       case Tag.FLOAT64: {
         const buf = this.read(8);
         const f = new DataView(buf.buffer, buf.byteOffset).getFloat64(0, true);
+        return SJ.float64(f);
+      }
+      case Tag.FLOAT32: {
+        const buf = this.read(4);
+        const f = new DataView(buf.buffer, buf.byteOffset).getFloat32(0, true);
         return SJ.float64(f);
       }
       case Tag.DECIMAL128: {

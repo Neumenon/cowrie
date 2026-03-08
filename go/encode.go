@@ -21,14 +21,21 @@ func Encode(v *Value) ([]byte, error) {
 	buf.data = buf.data[:0] // reset length, keep capacity
 
 	if err := encode(buf, v); err != nil {
-		bufferPool.Put(buf)
+		// Don't pool buffers > 1MB to prevent memory bloat (matches Gen1)
+		if cap(buf.data) <= 1<<20 {
+			bufferPool.Put(buf)
+		}
 		return nil, err
 	}
 
 	// Copy result (can't return pooled buffer)
 	out := make([]byte, len(buf.data))
 	copy(out, buf.data)
-	bufferPool.Put(buf)
+
+	// Don't pool buffers > 1MB to prevent memory bloat (matches Gen1)
+	if cap(buf.data) <= 1<<20 {
+		bufferPool.Put(buf)
+	}
 	return out, nil
 }
 

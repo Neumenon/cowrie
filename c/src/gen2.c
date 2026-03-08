@@ -1806,6 +1806,15 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         return *out ? 0 : -1;
     }
 
+    case SJT_FLOAT32: {
+        uint32_t bits;
+        if (rd_get(r, &bits, sizeof(bits)) != 0) return -1;
+        float f;
+        memcpy(&f, &bits, sizeof(f));
+        *out = cowrie_new_float64((double)f);
+        return *out ? 0 : -1;
+    }
+
     case SJT_DECIMAL128: {
         uint8_t scale;
         uint8_t coef[16];

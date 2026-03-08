@@ -1717,3 +1717,149 @@ func TestSetDefaultEncodeOptions(t *testing.T) {
 	// Restore original
 	SetDefaultEncodeOptions(original)
 }
+
+func TestCompactFloats(t *testing.T) {
+	opts := EncodeOptions{HighPrecision: true, CompactFloats: true}
+
+	tests := []struct {
+		name     string
+		value    float64
+		compact  bool // should use float32 encoding
+	}{
+		{"zero", 0.0, true},
+		{"one", 1.0, true},
+		{"negative", -1.0, true},
+		{"small_int", 42.0, true},
+		{"half", 0.5, true},
+		{"quarter", 0.25, true},
+		{"representable", 1.5, true},
+		{"needs_float64", 1.1, false},          // 1.1 is not exactly representable in float32
+		{"large_precise", 1.123456789012345, false}, // too many significant digits
+		{"subnormal", 5e-45, false},             // float32 subnormal range differs
+		{"pi", math.Pi, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Encode with compact floats
+			compactData, err := EncodeWithOptions(tt.value, opts)
+			if err != nil {
+				t.Fatalf("compact encode failed: %v", err)
+			}
+
+			// Encode without compact floats
+			fullData, err := EncodeWithOptions(tt.value, EncodeOptions{HighPrecision: true})
+			if err != nil {
+				t.Fatalf("full encode failed: %v", err)
+			}
+
+			if tt.compact {
+				// Compact should be smaller: 5 bytes (tag + float32) vs 9 bytes (tag + float64)
+				if len(compactData) != 5 {
+					t.Errorf("expected 5 bytes for compact float, got %d (tag=0x%02x)", len(compactData), compactData[0])
+				}
+				if len(fullData) != 9 {
+					t.Errorf("expected 9 bytes for full float, got %d", len(fullData))
+				}
+			} else {
+				// Should remain full size
+				if len(compactData) != 9 {
+					t.Errorf("expected 9 bytes for non-compact float, got %d", len(compactData))
+				}
+			}
+
+			// Decode must always return the original value
+			decoded, err := Decode(compactData)
+			if err != nil {
+				t.Fatalf("decode failed: %v", err)
+			}
+			got := decoded.(float64)
+			if got != tt.value {
+				t.Errorf("round-trip mismatch: got %v, want %v", got, tt.value)
+			}
+		})
+	}
+}
+
+func TestCompactFloatsSpecialValues(t *testing.T) {
+	opts := EncodeOptions{HighPrecision: true, CompactFloats: true}
+
+	// NaN should NOT be compacted (NaN representations differ between widths)
+	nanData, err := EncodeWithOptions(math.NaN(), opts)
+	if err != nil {
+		t.Fatalf("NaN encode failed: %v", err)
+	}
+	if len(nanData) != 9 {
+		t.Errorf("NaN should not be compacted, got %d bytes", len(nanData))
+	}
+	decoded, err := Decode(nanData)
+	if err != nil {
+		t.Fatalf("NaN decode failed: %v", err)
+	}
+	if !math.IsNaN(decoded.(float64)) {
+		t.Error("expected NaN after round-trip")
+	}
+
+	// +Inf should NOT be compacted
+	infData, err := EncodeWithOptions(math.Inf(1), opts)
+	if err != nil {
+		t.Fatalf("Inf encode failed: %v", err)
+	}
+	if len(infData) != 9 {
+		t.Errorf("+Inf should not be compacted, got %d bytes", len(infData))
+	}
+
+	// -Inf should NOT be compacted
+	ninfData, err := EncodeWithOptions(math.Inf(-1), opts)
+	if err != nil {
+		t.Fatalf("-Inf encode failed: %v", err)
+	}
+	if len(ninfData) != 9 {
+		t.Errorf("-Inf should not be compacted, got %d bytes", len(ninfData))
+	}
+}
+
+func TestCompactFloatsInMap(t *testing.T) {
+	opts := EncodeOptions{HighPrecision: true, CompactFloats: true}
+
+	data := map[string]any{
+		"score":     0.5,  // compact-eligible
+		"threshold": 1.1,  // NOT compact-eligible
+		"count":     42.0, // compact-eligible
+	}
+
+	encoded, err := EncodeWithOptions(data, opts)
+	if err != nil {
+		t.Fatalf("encode failed: %v", err)
+	}
+
+	// Encode without compact for size comparison
+	fullEncoded, err := EncodeWithOptions(data, EncodeOptions{HighPrecision: true})
+	if err != nil {
+		t.Fatalf("full encode failed: %v", err)
+	}
+
+	// Should save 8 bytes (2 floats * 4 bytes saved each)
+	expectedSaving := 8
+	actualSaving := len(fullEncoded) - len(encoded)
+	if actualSaving != expectedSaving {
+		t.Errorf("expected %d bytes saved, got %d (compact=%d, full=%d)",
+			expectedSaving, actualSaving, len(encoded), len(fullEncoded))
+	}
+
+	// Round-trip
+	decoded, err := Decode(encoded)
+	if err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	m := decoded.(map[string]any)
+	if m["score"] != 0.5 {
+		t.Errorf("score: got %v, want 0.5", m["score"])
+	}
+	if m["threshold"] != 1.1 {
+		t.Errorf("threshold: got %v, want 1.1", m["threshold"])
+	}
+	if m["count"] != 42.0 {
+		t.Errorf("count: got %v, want 42.0", m["count"])
+	}
+}

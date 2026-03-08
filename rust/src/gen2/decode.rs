@@ -21,6 +21,7 @@ mod tags {
     pub const UUID128: u8 = 0x0C;
     pub const BIGINT: u8 = 0x0D;
     pub const EXT: u8 = 0x0E;
+    pub const FLOAT32: u8 = 0x0F; // compact float32 → decoded as f64
     pub const TENSOR: u8 = 0x20;
     pub const TENSOR_REF: u8 = 0x21;
     pub const IMAGE: u8 = 0x22;
@@ -69,12 +70,12 @@ impl Default for DecodeOptions {
     fn default() -> Self {
         Self {
             max_depth: 1_000,
-            max_array_len: 100_000_000,
-            max_object_len: 10_000_000,
-            max_string_len: 500_000_000,
-            max_bytes_len: 1_000_000_000,
-            max_ext_len: 100_000_000,
-            max_dict_len: 10_000_000,
+            max_array_len: 1_000_000,     // Tightened: was 100M
+            max_object_len: 1_000_000,    // Tightened: was 10M
+            max_string_len: 10_000_000,   // Tightened: was 500M
+            max_bytes_len: 50_000_000,    // Tightened: was 1G
+            max_ext_len: 1_000_000,       // Tightened: was 100M
+            max_dict_len: 1_000_000,      // Tightened: was 10M
             max_rank: 32,
             max_hint_count: 10_000,
         }
@@ -181,6 +182,10 @@ impl<'a> Reader<'a> {
                 let bytes = self.read_bytes_fixed::<8>()?;
                 Value::Float(f64::from_le_bytes(bytes))
             }
+            tags::FLOAT32 => {
+                let bytes = self.read_bytes_fixed::<4>()?;
+                Value::Float(f32::from_le_bytes(bytes) as f64)
+            }
             tags::DECIMAL128 => {
                 let mut data = vec![0u8; 17];
                 data[0] = self.read_byte()?; // scale
@@ -235,7 +240,10 @@ impl<'a> Reader<'a> {
                 for _ in 0..len {
                     let key_idx = self.read_uvarint()? as usize;
                     if key_idx >= self.dict.len() {
-                        return Err(CowrieError::InvalidTag(tag));
+                        return Err(CowrieError::InvalidDictIndex {
+                            index: key_idx,
+                            dict_len: self.dict.len(),
+                        });
                     }
                     let key = self.dict[key_idx].clone();
                     let val = self.decode_value()?;
@@ -256,10 +264,10 @@ impl<'a> Reader<'a> {
                 let dtype = DType::try_from(self.read_byte()?)?;
                 let rank = self.read_byte()? as usize;
                 if rank > self.opts.max_rank {
-                    return Err(CowrieError::InvalidData(format!(
-                        "tensor rank {} exceeds maximum {}",
-                        rank, self.opts.max_rank
-                    )));
+                    return Err(CowrieError::RankExceeded {
+                        rank,
+                        max: self.opts.max_rank,
+                    });
                 }
                 let mut shape = Vec::with_capacity(rank);
                 for _ in 0..rank {

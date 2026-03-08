@@ -33,6 +33,7 @@ const (
 	tagArrayFloat64 = 0x0A // homogeneous float64 array (proto-tensor)
 	tagArrayString  = 0x0B // homogeneous string array
 	tagArrayFloat32 = 0x0C // homogeneous float32 array (Go extension, 4 bytes/float)
+	tagFloat32      = 0x0D // scalar float32 (compact float, 4 bytes vs 8)
 
 	// Graph types (0x10-0x1F reserved for graph)
 	tagNode       = 0x10 // Graph node: id + labels + props
@@ -52,13 +53,13 @@ const NumericArrayMin = 4
 // Security Limits - prevent memory exhaustion from malicious input
 // =============================================================================
 
-// Default security limits
+// Default security limits (tightened based on msgpack-go best practices)
 const (
-	DefaultMaxDepth     = 1000       // Maximum nesting depth
-	DefaultMaxArrayLen  = 100000000  // 100M elements
-	DefaultMaxObjectLen = 10000000   // 10M fields
-	DefaultMaxStringLen = 500000000  // 500MB
-	DefaultMaxBytesLen  = 1000000000 // 1GB
+	DefaultMaxDepth     = 1000      // Maximum nesting depth
+	DefaultMaxArrayLen  = 1000000   // 1M elements (was 100M)
+	DefaultMaxObjectLen = 1000000   // 1M fields (was 10M)
+	DefaultMaxStringLen = 10000000  // 10MB (was 500MB)
+	DefaultMaxBytesLen  = 50000000  // 50MB (was 1GB)
 )
 
 // DecodeOptions configures security limits for decoding.
@@ -86,12 +87,32 @@ var globalDecodeOptions = DefaultDecodeOptions()
 
 // Security errors
 var (
-	ErrMaxDepthExceeded  = errors.New("cowrie: maximum nesting depth exceeded")
-	ErrMaxArrayLen       = errors.New("cowrie: array too large")
-	ErrMaxObjectLen      = errors.New("cowrie: object has too many fields")
-	ErrMaxStringLen      = errors.New("cowrie: string too long")
-	ErrMaxBytesLen       = errors.New("cowrie: bytes too long")
-	ErrIntegerOverflow   = errors.New("cowrie: integer overflow in size calculation")
+	ErrMaxDepthExceeded = errors.New("cowrie: maximum nesting depth exceeded")
+	ErrMaxArrayLen      = errors.New("cowrie: array too large")
+	ErrMaxObjectLen     = errors.New("cowrie: object has too many fields")
+	ErrMaxStringLen     = errors.New("cowrie: string too long")
+	ErrMaxBytesLen      = errors.New("cowrie: bytes too long")
+	ErrIntegerOverflow  = errors.New("cowrie: integer overflow in size calculation")
+)
+
+// Decode errors — sentinel values for reliable error checking (replaces string matching)
+var (
+	ErrUnexpectedEOF     = errors.New("unexpected EOF")
+	ErrShortFloat64      = errors.New("short float64")
+	ErrShortFloat32      = errors.New("short float32")
+	ErrShortFloat64Array = errors.New("short float64 array")
+	ErrShortFloat32Array = errors.New("short float32 array")
+	ErrShortInt64Array   = errors.New("short int64 array")
+	ErrShortString       = errors.New("short string")
+	ErrShortBytes        = errors.New("short bytes")
+	ErrShortKey          = errors.New("short key")
+	ErrShortStringArray  = errors.New("short string in string array")
+	ErrInvalidUvarint    = errors.New("invalid uvarint")
+	ErrInvalidVarint     = errors.New("invalid varint")
+	ErrUnknownTag        = errors.New("unknown tag")
+	ErrShortData         = errors.New("short data")
+	ErrExpectedObjectTag = errors.New("expected object tag")
+	ErrIncompleteRecord  = errors.New("unexpected EOF: incomplete record")
 )
 
 // Buffer pool for encoding - reduces allocations in hot paths
@@ -108,8 +129,12 @@ func getBuffer() *[]byte {
 	return bufferPool.Get().(*[]byte)
 }
 
-// putBuffer returns a buffer to the pool
+// putBuffer returns a buffer to the pool.
+// Buffers larger than 1MB are not pooled to prevent memory bloat.
 func putBuffer(buf *[]byte) {
+	if cap(*buf) > 1<<20 {
+		return // don't pool oversized buffers
+	}
 	// Reset length but keep capacity
 	*buf = (*buf)[:0]
 	bufferPool.Put(buf)
@@ -301,6 +326,12 @@ type EncodeOptions struct {
 	//   - Sensor data and measurements
 	//   - Graphics and game data
 	HighPrecision bool
+
+	// CompactFloats encodes individual float64 values as float32 when lossless.
+	// A float64 value is compact-eligible if float64(float32(v)) == v and it's
+	// not NaN. This saves 4 bytes per qualifying float (5 bytes vs 9 bytes).
+	// Array floats already have their own compact encoding via HighPrecision.
+	CompactFloats bool
 }
 
 // DefaultEncodeOptions returns the default encoding options.
@@ -363,6 +394,7 @@ func Decode(data []byte) (any, error) {
 }
 
 // DecodeWithOptions decodes with custom security limits.
+// Thread-safe: options are passed through recursion, not stored globally.
 func DecodeWithOptions(data []byte, opts DecodeOptions) (any, error) {
 	// Apply defaults for any zero values
 	if opts.MaxDepth <= 0 {
@@ -381,13 +413,7 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (any, error) {
 		opts.MaxBytesLen = DefaultMaxBytesLen
 	}
 
-	// Temporarily set global options for this decode operation
-	// This is a simple approach; a production implementation would pass opts through recursion
-	oldOpts := globalDecodeOptions
-	globalDecodeOptions = opts
-	defer func() { globalDecodeOptions = oldOpts }()
-
-	v, _, err := readValue(data, 0)
+	v, _, err := readValue(data, 0, opts)
 	return v, err
 }
 
@@ -441,8 +467,10 @@ func EncodeTo(w io.Writer, v any) error {
 //	    process(v)
 //	}
 type StreamDecoder struct {
-	r   io.Reader
-	buf []byte // Accumulator for incomplete records
+	r    io.Reader
+	buf  []byte        // Accumulator for incomplete records
+	tmp  []byte        // Reusable read buffer (avoid per-Decode alloc)
+	opts DecodeOptions // Thread-safe: each decoder owns its options
 }
 
 // NewStreamDecoder creates a StreamDecoder for the given reader.
@@ -450,25 +478,32 @@ type StreamDecoder struct {
 // correctly, even for non-seekable readers like net.Conn or gzip.Reader.
 func NewStreamDecoder(r io.Reader) *StreamDecoder {
 	return &StreamDecoder{
-		r:   r,
-		buf: make([]byte, 0, 4096),
+		r:    r,
+		buf:  make([]byte, 0, 4096),
+		tmp:  make([]byte, 4096),
+		opts: DefaultDecodeOptions(),
 	}
+}
+
+// NewStreamDecoderWithOptions creates a StreamDecoder with custom security limits.
+func NewStreamDecoderWithOptions(r io.Reader, opts DecodeOptions) *StreamDecoder {
+	d := NewStreamDecoder(r)
+	d.opts = opts
+	return d
 }
 
 // Decode reads and decodes one value from the stream.
 // Returns io.EOF when no more data is available.
 // Safe for use with non-seekable readers (net.Conn, gzip.Reader, etc.).
 func (d *StreamDecoder) Decode() (any, error) {
-	// Temporary buffer for reading
-	tmp := make([]byte, 4096)
-
 	for {
 		// Try to decode from existing buffer first
 		if len(d.buf) > 0 {
-			v, consumed, decErr := readValue(d.buf, 0)
+			v, consumed, decErr := readValue(d.buf, 0, d.opts)
 			if decErr == nil {
 				// Success! Keep unconsumed bytes for next decode
 				if consumed < len(d.buf) {
+					// Buffer rewind: if all data consumed, just reset length (no memmove)
 					remaining := len(d.buf) - consumed
 					copy(d.buf[:remaining], d.buf[consumed:])
 					d.buf = d.buf[:remaining]
@@ -484,9 +519,9 @@ func (d *StreamDecoder) Decode() (any, error) {
 		}
 
 		// Read more data
-		n, err := d.r.Read(tmp)
+		n, err := d.r.Read(d.tmp)
 		if n > 0 {
-			d.buf = append(d.buf, tmp[:n]...)
+			d.buf = append(d.buf, d.tmp[:n]...)
 			continue // Try decode again with more data
 		}
 
@@ -495,12 +530,12 @@ func (d *StreamDecoder) Decode() (any, error) {
 				return nil, io.EOF
 			}
 			// Have data but can't decode - try one more time
-			v, _, decErr := readValue(d.buf, 0)
+			v, _, decErr := readValue(d.buf, 0, d.opts)
 			if decErr == nil {
 				d.buf = d.buf[:0]
 				return v, nil
 			}
-			return nil, errors.New("unexpected EOF: incomplete record")
+			return nil, ErrIncompleteRecord
 		}
 		if err != nil {
 			return nil, err
@@ -508,21 +543,23 @@ func (d *StreamDecoder) Decode() (any, error) {
 	}
 }
 
-// isIncompleteError checks if the decode error indicates we need more data
+// isIncompleteError checks if the decode error indicates we need more data.
+// Uses errors.Is with sentinel errors for reliable matching.
 func isIncompleteError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	return msg == "unexpected EOF" ||
-		msg == "unexpected EOF reading uvarint" ||
-		msg == "unexpected EOF reading varint" ||
-		msg == "short float64" ||
-		msg == "short float32" ||
-		msg == "short float64 array" ||
-		msg == "short float32 array" ||
-		msg == "short string" ||
-		msg == "short key"
+	return errors.Is(err, ErrUnexpectedEOF) ||
+		errors.Is(err, ErrShortFloat64) ||
+		errors.Is(err, ErrShortFloat32) ||
+		errors.Is(err, ErrShortFloat64Array) ||
+		errors.Is(err, ErrShortFloat32Array) ||
+		errors.Is(err, ErrShortInt64Array) ||
+		errors.Is(err, ErrShortString) ||
+		errors.Is(err, ErrShortBytes) ||
+		errors.Is(err, ErrShortKey) ||
+		errors.Is(err, ErrShortStringArray) ||
+		errors.Is(err, ErrShortData)
 }
 
 // ---------- Encoding ----------
@@ -551,6 +588,15 @@ func appendFloat32(buf []byte, f float32) []byte {
 	return append(buf, tmp[:]...)
 }
 
+// canCompactFloat returns true if a float64 can be losslessly represented as float32.
+// NaN and Inf are excluded (they have special representations that differ between widths).
+func canCompactFloat(f float64) bool {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return false
+	}
+	return float64(float32(f)) == f
+}
+
 // appendValue encodes with default options (backward compatible).
 func appendValue(buf []byte, v any) ([]byte, error) {
 	return appendValueWithOpts(buf, v, globalEncodeOptions)
@@ -569,10 +615,18 @@ func appendValueWithOpts(buf []byte, v any, opts EncodeOptions) ([]byte, error) 
 		return append(buf, tagFalse), nil
 
 	case float64:
+		if opts.CompactFloats && canCompactFloat(x) {
+			buf = append(buf, tagFloat32)
+			return appendFloat32(buf, float32(x)), nil
+		}
 		buf = append(buf, tagFloat64)
 		return appendFloat64(buf, x), nil
 
 	case float32:
+		if opts.CompactFloats {
+			buf = append(buf, tagFloat32)
+			return appendFloat32(buf, x), nil
+		}
 		buf = append(buf, tagFloat64)
 		return appendFloat64(buf, float64(x)), nil
 
@@ -1251,29 +1305,29 @@ func appendEdgeInline(buf []byte, e Edge) ([]byte, error) {
 
 func readUvarint(data []byte, off int) (uint64, int, error) {
 	if off >= len(data) {
-		return 0, 0, errors.New("unexpected EOF reading uvarint")
+		return 0, 0, ErrUnexpectedEOF
 	}
 	v, n := binary.Uvarint(data[off:])
 	if n <= 0 {
-		return 0, 0, errors.New("invalid uvarint")
+		return 0, 0, ErrInvalidUvarint
 	}
 	return v, n, nil
 }
 
 func readVarint(data []byte, off int) (int64, int, error) {
 	if off >= len(data) {
-		return 0, 0, errors.New("unexpected EOF reading varint")
+		return 0, 0, ErrUnexpectedEOF
 	}
 	v, n := binary.Varint(data[off:])
 	if n <= 0 {
-		return 0, 0, errors.New("invalid varint")
+		return 0, 0, ErrInvalidVarint
 	}
 	return v, n, nil
 }
 
 func readFloat64(data []byte, off int) (float64, int, error) {
 	if off+8 > len(data) {
-		return 0, 0, errors.New("short float64")
+		return 0, 0, ErrShortFloat64
 	}
 	bits := binary.LittleEndian.Uint64(data[off : off+8])
 	return math.Float64frombits(bits), 8, nil
@@ -1281,15 +1335,15 @@ func readFloat64(data []byte, off int) (float64, int, error) {
 
 func readFloat32(data []byte, off int) (float32, int, error) {
 	if off+4 > len(data) {
-		return 0, 0, errors.New("short float32")
+		return 0, 0, ErrShortFloat32
 	}
 	bits := binary.LittleEndian.Uint32(data[off : off+4])
 	return math.Float32frombits(bits), 4, nil
 }
 
-func readValue(data []byte, off int) (any, int, error) {
+func readValue(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	if off >= len(data) {
-		return nil, 0, errors.New("unexpected EOF")
+		return nil, 0, ErrUnexpectedEOF
 	}
 	tag := data[off]
 	off++
@@ -1318,19 +1372,26 @@ func readValue(data []byte, off int) (any, int, error) {
 		}
 		return f, off + n, nil
 
+	case tagFloat32:
+		f, n, err := readFloat32(data, off)
+		if err != nil {
+			return nil, 0, err
+		}
+		return float64(f), off + n, nil
+
 	case tagString:
 		length, n, err := readUvarint(data, off)
 		if err != nil {
 			return nil, 0, err
 		}
 		// Security: validate string length
-		if length > uint64(globalDecodeOptions.MaxStringLen) {
+		if length > uint64(opts.MaxStringLen) {
 			return nil, 0, ErrMaxStringLen
 		}
 		off += n
 		end := off + int(length)
 		if end > len(data) {
-			return nil, 0, errors.New("short string")
+			return nil, 0, ErrShortString
 		}
 		return string(data[off:end]), end, nil
 
@@ -1340,61 +1401,61 @@ func readValue(data []byte, off int) (any, int, error) {
 			return nil, 0, err
 		}
 		// Security: validate bytes length
-		if length > uint64(globalDecodeOptions.MaxBytesLen) {
+		if length > uint64(opts.MaxBytesLen) {
 			return nil, 0, ErrMaxBytesLen
 		}
 		off += n
 		end := off + int(length)
 		if end > len(data) {
-			return nil, 0, errors.New("short bytes")
+			return nil, 0, ErrShortBytes
 		}
 		result := make([]byte, length)
 		copy(result, data[off:end])
 		return result, end, nil
 
 	case tagObject:
-		return readObject(data, off)
+		return readObject(data, off, opts)
 
 	case tagArrayGeneric:
-		return readArrayGeneric(data, off)
+		return readArrayGeneric(data, off, opts)
 
 	case tagArrayFloat64:
-		return readArrayFloat64(data, off)
+		return readArrayFloat64(data, off, opts)
 
 	case tagArrayInt64:
-		return readArrayInt64(data, off)
+		return readArrayInt64(data, off, opts)
 
 	case tagArrayFloat32:
-		return readArrayFloat32(data, off)
+		return readArrayFloat32(data, off, opts)
 
 	case tagArrayString:
-		return readArrayString(data, off)
+		return readArrayString(data, off, opts)
 
 	// Graph types
 	case tagNode:
-		return readNode(data, off)
+		return readNode(data, off, opts)
 
 	case tagEdge:
-		return readEdge(data, off)
+		return readEdge(data, off, opts)
 
 	case tagAdjList:
-		return readAdjList(data, off)
+		return readAdjList(data, off, opts)
 
 	case tagNodeBatch:
-		return readNodeBatch(data, off)
+		return readNodeBatch(data, off, opts)
 
 	case tagEdgeBatch:
-		return readEdgeBatch(data, off)
+		return readEdgeBatch(data, off, opts)
 
 	case tagGraphShard:
-		return readGraphShard(data, off)
+		return readGraphShard(data, off, opts)
 
 	default:
-		return nil, 0, errors.New("unknown tag")
+		return nil, 0, ErrUnknownTag
 	}
 }
 
-func readObject(data []byte, off int) (any, int, error) {
+func readObject(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1402,7 +1463,7 @@ func readObject(data []byte, off int) (any, int, error) {
 	off += n
 
 	// Security: validate count before allocation
-	if count > uint64(globalDecodeOptions.MaxObjectLen) {
+	if count > uint64(opts.MaxObjectLen) {
 		return nil, 0, ErrMaxObjectLen
 	}
 
@@ -1417,13 +1478,13 @@ func readObject(data []byte, off int) (any, int, error) {
 
 		end := off + int(klen)
 		if end > len(data) {
-			return nil, 0, errors.New("short key")
+			return nil, 0, ErrShortKey
 		}
 		key := string(data[off:end])
 		off = end
 
 		// Read value
-		val, newOff, err := readValue(data, off)
+		val, newOff, err := readValue(data, off, opts)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1433,7 +1494,7 @@ func readObject(data []byte, off int) (any, int, error) {
 	return m, off, nil
 }
 
-func readArrayGeneric(data []byte, off int) (any, int, error) {
+func readArrayGeneric(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1441,13 +1502,13 @@ func readArrayGeneric(data []byte, off int) (any, int, error) {
 	off += n
 
 	// Security: validate count before allocation
-	if count > uint64(globalDecodeOptions.MaxArrayLen) {
+	if count > uint64(opts.MaxArrayLen) {
 		return nil, 0, ErrMaxArrayLen
 	}
 
 	out := make([]any, int(count))
 	for i := 0; i < int(count); i++ {
-		v, newOff, err := readValue(data, off)
+		v, newOff, err := readValue(data, off, opts)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1457,7 +1518,7 @@ func readArrayGeneric(data []byte, off int) (any, int, error) {
 	return out, off, nil
 }
 
-func readArrayFloat64(data []byte, off int) (any, int, error) {
+func readArrayFloat64(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1465,7 +1526,7 @@ func readArrayFloat64(data []byte, off int) (any, int, error) {
 	off += n
 
 	// Security: validate count before allocation and calculation
-	if count > uint64(globalDecodeOptions.MaxArrayLen) {
+	if count > uint64(opts.MaxArrayLen) {
 		return nil, 0, ErrMaxArrayLen
 	}
 	// Check for integer overflow in size calculation
@@ -1476,7 +1537,7 @@ func readArrayFloat64(data []byte, off int) (any, int, error) {
 	// Bulk read optimization: check we have enough bytes upfront
 	needed := int(count) * 8
 	if off+needed > len(data) {
-		return nil, 0, errors.New("short float64 array")
+		return nil, 0, ErrShortFloat64Array
 	}
 
 	// Return []float64 for type safety and usability
@@ -1490,7 +1551,7 @@ func readArrayFloat64(data []byte, off int) (any, int, error) {
 	return out, off, nil
 }
 
-func readArrayInt64(data []byte, off int) (any, int, error) {
+func readArrayInt64(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1498,7 +1559,7 @@ func readArrayInt64(data []byte, off int) (any, int, error) {
 	off += n
 
 	// Security: validate count before allocation
-	if count > uint64(globalDecodeOptions.MaxArrayLen) {
+	if count > uint64(opts.MaxArrayLen) {
 		return nil, 0, ErrMaxArrayLen
 	}
 	// Check for integer overflow in size calculation
@@ -1510,7 +1571,7 @@ func readArrayInt64(data []byte, off int) (any, int, error) {
 	// Bulk read optimization: check we have enough bytes upfront
 	needed := int(count) * 8
 	if off+needed > len(data) {
-		return nil, 0, errors.New("short int64 array")
+		return nil, 0, ErrShortInt64Array
 	}
 
 	// Return []int64 for type safety and usability
@@ -1524,7 +1585,7 @@ func readArrayInt64(data []byte, off int) (any, int, error) {
 	return out, off, nil
 }
 
-func readArrayFloat32(data []byte, off int) (any, int, error) {
+func readArrayFloat32(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1532,7 +1593,7 @@ func readArrayFloat32(data []byte, off int) (any, int, error) {
 	off += n
 
 	// Security: validate count before allocation and calculation
-	if count > uint64(globalDecodeOptions.MaxArrayLen) {
+	if count > uint64(opts.MaxArrayLen) {
 		return nil, 0, ErrMaxArrayLen
 	}
 	// Check for integer overflow in size calculation
@@ -1543,7 +1604,7 @@ func readArrayFloat32(data []byte, off int) (any, int, error) {
 	// Bulk read optimization: check we have enough bytes upfront
 	needed := int(count) * 4
 	if off+needed > len(data) {
-		return nil, 0, errors.New("short float32 array")
+		return nil, 0, ErrShortFloat32Array
 	}
 
 	// Return []float64 for API consistency (float32 values promoted to float64)
@@ -1557,7 +1618,7 @@ func readArrayFloat32(data []byte, off int) (any, int, error) {
 	return out, off, nil
 }
 
-func readArrayString(data []byte, off int) (any, int, error) {
+func readArrayString(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1565,7 +1626,7 @@ func readArrayString(data []byte, off int) (any, int, error) {
 	off += n
 
 	// Security: validate count before allocation
-	if count > uint64(globalDecodeOptions.MaxArrayLen) {
+	if count > uint64(opts.MaxArrayLen) {
 		return nil, 0, ErrMaxArrayLen
 	}
 
@@ -1579,7 +1640,7 @@ func readArrayString(data []byte, off int) (any, int, error) {
 
 		end := off + int(sLen)
 		if end > len(data) {
-			return nil, 0, errors.New("short string in string array")
+			return nil, 0, ErrShortStringArray
 		}
 		out[i] = string(data[off:end])
 		off = end
@@ -1590,7 +1651,7 @@ func readArrayString(data []byte, off int) (any, int, error) {
 // ---------- Graph Decoding ----------
 
 // readNode decodes a Node
-func readNode(data []byte, off int) (any, int, error) {
+func readNode(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	// ID
 	idLen, n, err := readUvarint(data, off)
 	if err != nil {
@@ -1598,7 +1659,7 @@ func readNode(data []byte, off int) (any, int, error) {
 	}
 	off += n
 	if off+int(idLen) > len(data) {
-		return nil, 0, errors.New("short node id")
+		return nil, 0, ErrShortData
 	}
 	id := string(data[off : off+int(idLen)])
 	off += int(idLen)
@@ -1618,7 +1679,7 @@ func readNode(data []byte, off int) (any, int, error) {
 		}
 		off += n
 		if off+int(lLen) > len(data) {
-			return nil, 0, errors.New("short label")
+			return nil, 0, ErrShortData
 		}
 		labels[i] = string(data[off : off+int(lLen)])
 		off += int(lLen)
@@ -1626,10 +1687,10 @@ func readNode(data []byte, off int) (any, int, error) {
 
 	// Props (encoded as object - skip the tagObject byte first)
 	if off >= len(data) || data[off] != tagObject {
-		return nil, 0, errors.New("expected object tag for node props")
+		return nil, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off)
+	propsVal, off, err := readObject(data, off, opts)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1639,7 +1700,7 @@ func readNode(data []byte, off int) (any, int, error) {
 }
 
 // readNodeInline decodes a node without the tag (for batches)
-func readNodeInline(data []byte, off int) (Node, int, error) {
+func readNodeInline(data []byte, off int, opts DecodeOptions) (Node, int, error) {
 	// ID
 	idLen, n, err := readUvarint(data, off)
 	if err != nil {
@@ -1647,7 +1708,7 @@ func readNodeInline(data []byte, off int) (Node, int, error) {
 	}
 	off += n
 	if off+int(idLen) > len(data) {
-		return Node{}, 0, errors.New("short node id")
+		return Node{}, 0, ErrShortData
 	}
 	id := string(data[off : off+int(idLen)])
 	off += int(idLen)
@@ -1667,7 +1728,7 @@ func readNodeInline(data []byte, off int) (Node, int, error) {
 		}
 		off += n
 		if off+int(lLen) > len(data) {
-			return Node{}, 0, errors.New("short label")
+			return Node{}, 0, ErrShortData
 		}
 		labels[i] = string(data[off : off+int(lLen)])
 		off += int(lLen)
@@ -1675,10 +1736,10 @@ func readNodeInline(data []byte, off int) (Node, int, error) {
 
 	// Props (encoded as object - skip the tagObject byte first)
 	if off >= len(data) || data[off] != tagObject {
-		return Node{}, 0, errors.New("expected object tag for node props")
+		return Node{}, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off)
+	propsVal, off, err := readObject(data, off, opts)
 	if err != nil {
 		return Node{}, 0, err
 	}
@@ -1688,7 +1749,7 @@ func readNodeInline(data []byte, off int) (Node, int, error) {
 }
 
 // readEdge decodes an Edge
-func readEdge(data []byte, off int) (any, int, error) {
+func readEdge(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	// ID
 	idLen, n, err := readUvarint(data, off)
 	if err != nil {
@@ -1696,7 +1757,7 @@ func readEdge(data []byte, off int) (any, int, error) {
 	}
 	off += n
 	if off+int(idLen) > len(data) {
-		return nil, 0, errors.New("short edge id")
+		return nil, 0, ErrShortData
 	}
 	id := string(data[off : off+int(idLen)])
 	off += int(idLen)
@@ -1708,7 +1769,7 @@ func readEdge(data []byte, off int) (any, int, error) {
 	}
 	off += n
 	if off+int(typeLen) > len(data) {
-		return nil, 0, errors.New("short edge type")
+		return nil, 0, ErrShortData
 	}
 	edgeType := string(data[off : off+int(typeLen)])
 	off += int(typeLen)
@@ -1720,7 +1781,7 @@ func readEdge(data []byte, off int) (any, int, error) {
 	}
 	off += n
 	if off+int(fromLen) > len(data) {
-		return nil, 0, errors.New("short edge from")
+		return nil, 0, ErrShortData
 	}
 	from := string(data[off : off+int(fromLen)])
 	off += int(fromLen)
@@ -1732,17 +1793,17 @@ func readEdge(data []byte, off int) (any, int, error) {
 	}
 	off += n
 	if off+int(toLen) > len(data) {
-		return nil, 0, errors.New("short edge to")
+		return nil, 0, ErrShortData
 	}
 	to := string(data[off : off+int(toLen)])
 	off += int(toLen)
 
 	// Props (encoded as object - skip the tagObject byte first)
 	if off >= len(data) || data[off] != tagObject {
-		return nil, 0, errors.New("expected object tag for edge props")
+		return nil, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off)
+	propsVal, off, err := readObject(data, off, opts)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1752,7 +1813,7 @@ func readEdge(data []byte, off int) (any, int, error) {
 }
 
 // readAdjList decodes an AdjList
-func readAdjList(data []byte, off int) (any, int, error) {
+func readAdjList(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	// NodeID
 	nodeID, n, err := readVarint(data, off)
 	if err != nil {
@@ -1782,7 +1843,7 @@ func readAdjList(data []byte, off int) (any, int, error) {
 }
 
 // readNodeBatch decodes a NodeBatch
-func readNodeBatch(data []byte, off int) (any, int, error) {
+func readNodeBatch(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	// Node count
 	count, n, err := readUvarint(data, off)
 	if err != nil {
@@ -1793,7 +1854,7 @@ func readNodeBatch(data []byte, off int) (any, int, error) {
 	// Nodes (inline, without tags)
 	nodes := make([]Node, count)
 	for i := uint64(0); i < count; i++ {
-		node, newOff, err := readNodeInline(data, off)
+		node, newOff, err := readNodeInline(data, off, opts)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1805,7 +1866,7 @@ func readNodeBatch(data []byte, off int) (any, int, error) {
 }
 
 // readEdgeBatch decodes an EdgeBatch
-func readEdgeBatch(data []byte, off int) (any, int, error) {
+func readEdgeBatch(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	// Edge count
 	edgeCount, n, err := readUvarint(data, off)
 	if err != nil {
@@ -1815,7 +1876,7 @@ func readEdgeBatch(data []byte, off int) (any, int, error) {
 
 	// Flags
 	if off+2 > len(data) {
-		return nil, 0, errors.New("short edge batch flags")
+		return nil, 0, ErrShortData
 	}
 	hasTypes := data[off] == 1
 	hasProps := data[off+1] == 1
@@ -1854,7 +1915,7 @@ func readEdgeBatch(data []byte, off int) (any, int, error) {
 			}
 			off += n
 			if off+int(tLen) > len(data) {
-				return nil, 0, errors.New("short edge type")
+				return nil, 0, ErrShortData
 			}
 			types[i] = string(data[off : off+int(tLen)])
 			off += int(tLen)
@@ -1867,10 +1928,10 @@ func readEdgeBatch(data []byte, off int) (any, int, error) {
 		props = make([]map[string]any, edgeCount)
 		for i := uint64(0); i < edgeCount; i++ {
 			if off >= len(data) || data[off] != tagObject {
-				return nil, 0, errors.New("expected object tag for edge batch props")
+				return nil, 0, ErrExpectedObjectTag
 			}
 			off++ // skip tagObject
-			propsVal, newOff, err := readObject(data, off)
+			propsVal, newOff, err := readObject(data, off, opts)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -1883,10 +1944,10 @@ func readEdgeBatch(data []byte, off int) (any, int, error) {
 }
 
 // readGraphShard decodes a GraphShard container
-func readGraphShard(data []byte, off int) (any, int, error) {
+func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	// Read flags
 	if off+2 > len(data) {
-		return nil, 0, errors.New("short graphshard flags")
+		return nil, 0, ErrShortData
 	}
 	flags1 := data[off]
 	flags2 := data[off+1]
@@ -1903,7 +1964,7 @@ func readGraphShard(data []byte, off int) (any, int, error) {
 		}
 		off += n
 		if off+int(nameLen) > len(data) {
-			return nil, 0, errors.New("short graphshard name")
+			return nil, 0, ErrShortData
 		}
 		gs.Name = string(data[off : off+int(nameLen)])
 		off += int(nameLen)
@@ -1912,10 +1973,10 @@ func readGraphShard(data []byte, off int) (any, int, error) {
 	// Metadata (as object)
 	if flags1&gsHasMetadata != 0 {
 		if off >= len(data) || data[off] != tagObject {
-			return nil, 0, errors.New("expected object tag for graphshard metadata")
+			return nil, 0, ErrExpectedObjectTag
 		}
 		off++ // skip tagObject
-		metaVal, newOff, err := readObject(data, off)
+		metaVal, newOff, err := readObject(data, off, opts)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1932,7 +1993,7 @@ func readGraphShard(data []byte, off int) (any, int, error) {
 		off += n
 		gs.Nodes = make([]Node, nodeCount)
 		for i := uint64(0); i < nodeCount; i++ {
-			node, newOff, err := readNodeInline(data, off)
+			node, newOff, err := readNodeInline(data, off, opts)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -1950,7 +2011,7 @@ func readGraphShard(data []byte, off int) (any, int, error) {
 		off += n
 		gs.Edges = make([]Edge, edgeCount)
 		for i := uint64(0); i < edgeCount; i++ {
-			edge, newOff, err := readEdgeInline(data, off)
+			edge, newOff, err := readEdgeInline(data, off, opts)
 			if err != nil {
 				return nil, 0, err
 			}
@@ -2125,7 +2186,7 @@ func readGraphShard(data []byte, off int) (any, int, error) {
 }
 
 // readEdgeInline decodes an edge without the tag (for GraphShard)
-func readEdgeInline(data []byte, off int) (Edge, int, error) {
+func readEdgeInline(data []byte, off int, opts DecodeOptions) (Edge, int, error) {
 	// ID
 	idLen, n, err := readUvarint(data, off)
 	if err != nil {
@@ -2133,7 +2194,7 @@ func readEdgeInline(data []byte, off int) (Edge, int, error) {
 	}
 	off += n
 	if off+int(idLen) > len(data) {
-		return Edge{}, 0, errors.New("short edge id")
+		return Edge{}, 0, ErrShortData
 	}
 	id := string(data[off : off+int(idLen)])
 	off += int(idLen)
@@ -2145,7 +2206,7 @@ func readEdgeInline(data []byte, off int) (Edge, int, error) {
 	}
 	off += n
 	if off+int(typeLen) > len(data) {
-		return Edge{}, 0, errors.New("short edge type")
+		return Edge{}, 0, ErrShortData
 	}
 	edgeType := string(data[off : off+int(typeLen)])
 	off += int(typeLen)
@@ -2157,7 +2218,7 @@ func readEdgeInline(data []byte, off int) (Edge, int, error) {
 	}
 	off += n
 	if off+int(fromLen) > len(data) {
-		return Edge{}, 0, errors.New("short edge from")
+		return Edge{}, 0, ErrShortData
 	}
 	from := string(data[off : off+int(fromLen)])
 	off += int(fromLen)
@@ -2169,17 +2230,17 @@ func readEdgeInline(data []byte, off int) (Edge, int, error) {
 	}
 	off += n
 	if off+int(toLen) > len(data) {
-		return Edge{}, 0, errors.New("short edge to")
+		return Edge{}, 0, ErrShortData
 	}
 	to := string(data[off : off+int(toLen)])
 	off += int(toLen)
 
 	// Props (encoded as object - skip the tagObject byte first)
 	if off >= len(data) || data[off] != tagObject {
-		return Edge{}, 0, errors.New("expected object tag for edge props")
+		return Edge{}, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off)
+	propsVal, off, err := readObject(data, off, opts)
 	if err != nil {
 		return Edge{}, 0, err
 	}

@@ -485,7 +485,7 @@ func TestSecurity_DictTooLarge(t *testing.T) {
 	// Cowrie v2 header
 	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
 
-	// Dictionary length = 100 million (exceeds DefaultMaxDictLen of 10M)
+	// Dictionary length = 100 million (exceeds DefaultMaxDictLen of 1M)
 	var varintBuf [binary.MaxVarintLen64]byte
 	n := binary.PutUvarint(varintBuf[:], 100_000_000)
 	buf.Write(varintBuf[:n])

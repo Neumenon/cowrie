@@ -27,6 +27,9 @@ Gen1 uses a simple tag-length-value encoding without a header.
 | 0x09 | Int64Array | Tag + count:varint + count*8 bytes LE |
 | 0x0A | Float64Array | Tag + count:varint + count*8 bytes LE |
 | 0x0B | StringArray | Tag + count:varint + (length:varint + UTF-8)* |
+| 0x0C | Float32Array | Tag + count:varint + count*4 bytes LE |
+| 0x0D | Float32 | Tag + 4 bytes LE (compact float, decodes as float64) |
+| 0x0F | Int32GroupVB | Tag + count:varint + group-varint groups |
 | 0x10 | Node | Graph node (see below) |
 | 0x11 | Edge | Graph edge (see below) |
 | 0x12 | AdjList | CSR adjacency list (see below) |

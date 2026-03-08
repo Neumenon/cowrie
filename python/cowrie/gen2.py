@@ -55,15 +55,15 @@ COMPRESS_THRESHOLD = 256
 
 # Security limits - aligned with Go reference implementation
 MAX_DEPTH = 1000               # Maximum nesting depth
-MAX_ARRAY_LEN = 100_000_000    # 100M elements
-MAX_OBJECT_LEN = 10_000_000    # 10M fields
-MAX_STRING_LEN = 500_000_000   # 500MB
-MAX_BYTES_LEN = 1_000_000_000  # 1GB
-MAX_EXT_LEN = 100_000_000      # 100MB extension payload
+MAX_ARRAY_LEN = 1_000_000     # 1M elements (tightened: was 100M)
+MAX_OBJECT_LEN = 1_000_000    # 1M fields (tightened: was 10M)
+MAX_STRING_LEN = 10_000_000   # 10MB (tightened: was 500MB)
+MAX_BYTES_LEN = 50_000_000    # 50MB (tightened: was 1GB)
+MAX_EXT_LEN = 1_000_000       # 1MB extension payload (tightened: was 100MB)
 MAX_RANK = 32                  # Maximum tensor rank (dimensions)
 MAX_HINT_COUNT = 10_000        # Maximum column hints
 MAX_DECOMPRESSED_SIZE = 256 * 1024 * 1024  # 256MB
-MAX_DICT_LEN = 10_000_000     # 10M dictionary entries
+MAX_DICT_LEN = 1_000_000      # 1M dictionary entries (tightened: was 10M)
 
 
 class SecurityLimitExceeded(ValueError):
@@ -78,13 +78,13 @@ class DecodeOptions:
     All fields have safe defaults matching the module-level constants.
     Pass an instance to decode() or decode_framed() to override limits.
     """
-    max_depth: int = 1000
-    max_array_len: int = 100_000_000
-    max_object_len: int = 10_000_000
-    max_string_len: int = 500_000_000
-    max_bytes_len: int = 1_000_000_000
-    max_ext_len: int = 100_000_000
-    max_dict_len: int = 10_000_000
+    max_depth: int = MAX_DEPTH
+    max_array_len: int = MAX_ARRAY_LEN
+    max_object_len: int = MAX_OBJECT_LEN
+    max_string_len: int = MAX_STRING_LEN
+    max_bytes_len: int = MAX_BYTES_LEN
+    max_ext_len: int = MAX_EXT_LEN
+    max_dict_len: int = MAX_DICT_LEN
     max_rank: int = 32
     max_hint_count: int = 10_000
     max_decompressed_size: int = 256 * 1024 * 1024
@@ -107,6 +107,7 @@ class Tag(IntEnum):
     UUID128 = 0x0C
     BIGINT = 0x0D
     EXT = 0x0E
+    FLOAT32 = 0x0F  # compact float32 -> decoded as float64
     # ML/Multimodal extensions (0x20-0x2F)
     TENSOR = 0x20
     TENSOR_REF = 0x21
@@ -1274,6 +1275,8 @@ class Decoder:
             return Value.uint64(self._read_uvarint())
         elif tag == Tag.FLOAT64:
             return Value.float64(struct.unpack('<d', self._read(8))[0])
+        elif tag == Tag.FLOAT32:
+            return Value.float64(struct.unpack('<f', self._read(4))[0])
         elif tag == Tag.DECIMAL128:
             scale = self._read_byte()
             if scale > 127:
