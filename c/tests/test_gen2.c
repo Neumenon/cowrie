@@ -774,6 +774,88 @@ static int test_fixtures_core(void) {
 }
 
 /* ============================================================
+ * Overflow Protection Tests
+ * ============================================================ */
+
+/* Helper: encode a uint64 as a protobuf-style uvarint into buf, return bytes written */
+static size_t encode_uvarint(uint8_t *buf, uint64_t v) {
+    size_t i = 0;
+    while (v >= 0x80) {
+        buf[i++] = (uint8_t)(v | 0x80);
+        v >>= 7;
+    }
+    buf[i++] = (uint8_t)v;
+    return i;
+}
+
+/* Test: adjlist with node_count that would overflow (node_count+1)*sizeof(size_t) */
+static int test_oversized_adjlist_rejects(void) {
+    /* Build: header(4) + dict_count(1) + tag(1) + id_width(1) + node_count(varint) + edge_count(varint)
+     * Set node_count to SIZE_MAX so (node_count+1) wraps to 0 */
+    uint8_t payload[30];
+    size_t pos = 0;
+    payload[pos++] = 0x53; /* S */
+    payload[pos++] = 0x4A; /* J */
+    payload[pos++] = 0x02; /* version 2 */
+    payload[pos++] = 0x00; /* flags */
+    payload[pos++] = 0x00; /* dict count = 0 */
+    payload[pos++] = 0x30; /* SJT_ADJLIST */
+    payload[pos++] = 0x00; /* id_width = INT32 */
+    /* node_count = 0xFFFFFFFFFFFFFFFF (max uint64) */
+    pos += encode_uvarint(payload + pos, UINT64_MAX);
+    /* edge_count = 0 */
+    payload[pos++] = 0x00;
+
+    COWRIEValue *result = NULL;
+    int rc = cowrie_decode(payload, pos, &result);
+    ASSERT(rc != 0);  /* Must reject */
+    ASSERT(result == NULL);
+    return 1;
+}
+
+/* Test: richtext with huge token_count that would overflow token_count*sizeof(int32_t) */
+static int test_oversized_richtext_tokens_rejects(void) {
+    uint8_t payload[30];
+    size_t pos = 0;
+    payload[pos++] = 0x53; /* S */
+    payload[pos++] = 0x4A; /* J */
+    payload[pos++] = 0x02; /* version 2 */
+    payload[pos++] = 0x00; /* flags */
+    payload[pos++] = 0x00; /* dict count = 0 */
+    payload[pos++] = 0x31; /* SJT_RICH_TEXT */
+    payload[pos++] = 0x00; /* text_len = 0 */
+    payload[pos++] = 0x01; /* flags: has tokens */
+    /* token_count = 0x4000000000000000 — would overflow when * 4 */
+    pos += encode_uvarint(payload + pos, (uint64_t)0x4000000000000000ULL);
+
+    COWRIEValue *result = NULL;
+    int rc = cowrie_decode(payload, pos, &result);
+    ASSERT(rc != 0);  /* Must reject */
+    ASSERT(result == NULL);
+    return 1;
+}
+
+/* Test: array with count exceeding remaining input */
+static int test_oversized_array_rejects(void) {
+    uint8_t payload[20];
+    size_t pos = 0;
+    payload[pos++] = 0x53; /* S */
+    payload[pos++] = 0x4A; /* J */
+    payload[pos++] = 0x02; /* version 2 */
+    payload[pos++] = 0x00; /* flags */
+    payload[pos++] = 0x00; /* dict count = 0 */
+    payload[pos++] = 0x06; /* SJT_ARRAY */
+    /* count = 999999999 but only 0 bytes of data follow */
+    pos += encode_uvarint(payload + pos, 999999999ULL);
+
+    COWRIEValue *result = NULL;
+    int rc = cowrie_decode(payload, pos, &result);
+    ASSERT(rc != 0);  /* Must reject */
+    ASSERT(result == NULL);
+    return 1;
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -816,6 +898,11 @@ int main(void) {
 
     printf("\nFixtures:\n");
     TEST(fixtures_core);
+
+    printf("\nOverflow Protection:\n");
+    TEST(oversized_adjlist_rejects);
+    TEST(oversized_richtext_tokens_rejects);
+    TEST(oversized_array_rejects);
 
     printf("\n=====================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);

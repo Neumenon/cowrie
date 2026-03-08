@@ -422,6 +422,84 @@ test("crc32 consistency", () => {
 });
 
 // ============================================================
+// Overflow Protection Tests
+// ============================================================
+
+console.log("# --- Overflow Protection Tests ---");
+
+function encodeUvarintBytes(n: bigint): Uint8Array {
+  const bytes: number[] = [];
+  while (n >= 0x80n) {
+    bytes.push(Number(n & 0x7fn) | 0x80);
+    n >>= 7n;
+  }
+  bytes.push(Number(n));
+  return new Uint8Array(bytes);
+}
+
+test("varint > 2^53 throws SecurityLimitExceeded", () => {
+  // Craft a payload: header(SJ, v2, flags=0) + dict(count=0) + SJT_ARRAY + count=2^53+1
+  const hugeCount = (1n << 53n) + 1n;
+  const countBytes = encodeUvarintBytes(hugeCount);
+
+  const header = new Uint8Array([
+    0x53, 0x4a,  // magic "SJ"
+    0x02,        // version 2
+    0x00,        // flags
+    0x00,        // dict count = 0
+    0x06,        // SJT_ARRAY tag
+  ]);
+
+  const payload = new Uint8Array(header.length + countBytes.length);
+  payload.set(header);
+  payload.set(countBytes, header.length);
+
+  let threw = false;
+  try {
+    decode(payload);
+  } catch (e: any) {
+    threw = true;
+    if (!e.message.includes("safe integer")) {
+      throw new Error(`Expected 'safe integer' error, got: ${e.message}`);
+    }
+  }
+  if (!threw) {
+    throw new Error("Expected decode to throw for varint > 2^53");
+  }
+});
+
+test("varint at exactly 2^53-1 does not throw for safe integer check", () => {
+  // This should pass the safe integer check (but fail later due to no data)
+  const maxSafe = (1n << 53n) - 1n;
+  const countBytes = encodeUvarintBytes(maxSafe);
+
+  const header = new Uint8Array([
+    0x53, 0x4a,  // magic "SJ"
+    0x02,        // version 2
+    0x00,        // flags
+    0x00,        // dict count = 0
+    0x06,        // SJT_ARRAY tag
+  ]);
+
+  const payload = new Uint8Array(header.length + countBytes.length);
+  payload.set(header);
+  payload.set(countBytes, header.length);
+
+  let threwSafeInt = false;
+  try {
+    decode(payload);
+  } catch (e: any) {
+    if (e.message.includes("safe integer")) {
+      threwSafeInt = true;
+    }
+    // Other errors (like "array too long") are expected and OK
+  }
+  if (threwSafeInt) {
+    throw new Error("Should not throw safe integer error for 2^53-1");
+  }
+});
+
+// ============================================================
 // Summary
 // ============================================================
 
