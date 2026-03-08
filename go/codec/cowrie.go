@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"sort"
 
 	"github.com/Neumenon/cowrie/go"
 )
@@ -118,12 +119,17 @@ func toCowrieValueWithOpts(v any, highPrecision bool) *cowrie.Value {
 		return EncodeFloat64AsFloat32Tensor(x)
 
 	case map[string]any:
-		// Walk the map and convert float slices
+		// Sort keys for deterministic encoding (required for byte-stable round-trips)
+		keys := make([]string, 0, len(x))
+		for key := range x {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
 		members := make([]cowrie.Member, 0, len(x))
-		for key, val := range x {
+		for _, key := range keys {
 			members = append(members, cowrie.Member{
 				Key:   key,
-				Value: toCowrieValueWithOpts(val, highPrecision),
+				Value: toCowrieValueWithOpts(x[key], highPrecision),
 			})
 		}
 		return cowrie.Object(members...)
