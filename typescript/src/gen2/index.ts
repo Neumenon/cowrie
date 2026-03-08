@@ -940,8 +940,17 @@ class Decoder {
     return val;
   }
 
+  /** Read a uvarint and convert to number, throwing if it exceeds safe integer range */
+  private readUvarintAsNumber(): number {
+    const v = this.readUvarint();
+    if (v > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new SecurityLimitExceeded('varint length exceeds safe integer range');
+    }
+    return Number(v);
+  }
+
   private readString(): string {
-    const len = Number(this.readUvarint());
+    const len = this.readUvarintAsNumber();
     if (len > this.limits.maxStringLen) {
       throw new SecurityLimitExceeded(`String too long: ${len} > ${this.limits.maxStringLen}`);
     }
@@ -986,7 +995,7 @@ class Decoder {
       case Tag.STRING:
         return SJ.string(this.readString());
       case Tag.BYTES: {
-        const len = Number(this.readUvarint());
+        const len = this.readUvarintAsNumber();
         if (len > this.limits.maxBytesLen) {
           throw new SecurityLimitExceeded(`Bytes too long: ${len} > ${this.limits.maxBytesLen}`);
         }
@@ -1000,12 +1009,12 @@ class Decoder {
       case Tag.UUID128:
         return SJ.uuid128(this.read(16));
       case Tag.BIGINT: {
-        const len = Number(this.readUvarint());
+        const len = this.readUvarintAsNumber();
         return SJ.bigint(this.read(len));
       }
       case Tag.EXT: {
         const extType = this.readUvarint();
-        const len = Number(this.readUvarint());
+        const len = this.readUvarintAsNumber();
         if (len > this.limits.maxExtLen) {
           throw new SecurityLimitExceeded(`Extension payload too large: ${len} > ${this.limits.maxExtLen}`);
         }
@@ -1019,7 +1028,7 @@ class Decoder {
         return SJ.unknownExt(extType, payload);
       }
       case Tag.ARRAY: {
-        const count = Number(this.readUvarint());
+        const count = this.readUvarintAsNumber();
         if (count > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Array too large: ${count} > ${this.limits.maxArrayLen}`);
         }
@@ -1032,14 +1041,14 @@ class Decoder {
         return SJ.array(items);
       }
       case Tag.OBJECT: {
-        const count = Number(this.readUvarint());
+        const count = this.readUvarintAsNumber();
         if (count > this.limits.maxObjectLen) {
           throw new SecurityLimitExceeded(`Object too large: ${count} > ${this.limits.maxObjectLen}`);
         }
         this.enterNested();
         const members: Record<string, Value> = {};
         for (let i = 0; i < count; i++) {
-          const fieldId = Number(this.readUvarint());
+          const fieldId = this.readUvarintAsNumber();
           if (fieldId >= this.dict.length) {
             throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
           }
@@ -1057,9 +1066,9 @@ class Decoder {
         }
         const shape: number[] = [];
         for (let i = 0; i < rank; i++) {
-          shape.push(Number(this.readUvarint()));
+          shape.push(this.readUvarintAsNumber());
         }
-        const dataLen = Number(this.readUvarint());
+        const dataLen = this.readUvarintAsNumber();
         if (dataLen > this.limits.maxBytesLen) {
           throw new SecurityLimitExceeded(`Tensor data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
         }
@@ -1072,7 +1081,7 @@ class Decoder {
         const dimView = new DataView(dimBuf.buffer, dimBuf.byteOffset, 4);
         const width = dimView.getUint16(0, true);
         const height = dimView.getUint16(2, true);
-        const dataLen = Number(this.readUvarint());
+        const dataLen = this.readUvarintAsNumber();
         if (dataLen > this.limits.maxBytesLen) {
           throw new SecurityLimitExceeded(`Image data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
         }
@@ -1084,7 +1093,7 @@ class Decoder {
         const rateBuf = this.read(4);
         const sampleRate = new DataView(rateBuf.buffer, rateBuf.byteOffset, 4).getUint32(0, true);
         const channels = this.readByte();
-        const dataLen = Number(this.readUvarint());
+        const dataLen = this.readUvarintAsNumber();
         if (dataLen > this.limits.maxBytesLen) {
           throw new SecurityLimitExceeded(`Audio data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
         }
@@ -1093,7 +1102,7 @@ class Decoder {
       }
       case Tag.TENSOR_REF: {
         const storeId = this.readByte();
-        const keyLen = Number(this.readUvarint());
+        const keyLen = this.readUvarintAsNumber();
         if (keyLen > this.limits.maxStringLen) {
           throw new SecurityLimitExceeded(`TensorRef key too long: ${keyLen} > ${this.limits.maxStringLen}`);
         }
@@ -1102,18 +1111,18 @@ class Decoder {
       }
       case Tag.ADJLIST: {
         const idWidth = this.readByte() as IDWidth;
-        const nodeCount = Number(this.readUvarint());
+        const nodeCount = this.readUvarintAsNumber();
         if (nodeCount > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Adjlist node count too large: ${nodeCount} > ${this.limits.maxArrayLen}`);
         }
-        const edgeCount = Number(this.readUvarint());
+        const edgeCount = this.readUvarintAsNumber();
         if (edgeCount > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Adjlist edge count too large: ${edgeCount} > ${this.limits.maxArrayLen}`);
         }
         // Read row_offsets (node_count + 1 varints)
         const rowOffsets: number[] = [];
         for (let i = 0; i < nodeCount + 1; i++) {
-          rowOffsets.push(Number(this.readUvarint()));
+          rowOffsets.push(this.readUvarintAsNumber());
         }
         // Read col_indices (edge_count * id_size bytes)
         const idSize = idWidth === IDWidth.INT32 ? 4 : 8;
@@ -1122,7 +1131,7 @@ class Decoder {
       }
       case Tag.RICHTEXT: {
         // Text (readString format: len:varint + bytes)
-        const textLen = Number(this.readUvarint());
+        const textLen = this.readUvarintAsNumber();
         if (textLen > this.limits.maxStringLen) {
           throw new SecurityLimitExceeded(`RichText text too long: ${textLen} > ${this.limits.maxStringLen}`);
         }
@@ -1132,7 +1141,7 @@ class Decoder {
         // Read tokens if present (flags & 0x01)
         let tokens: number[] | undefined;
         if (flags & 0x01) {
-          const tokenCount = Number(this.readUvarint());
+          const tokenCount = this.readUvarintAsNumber();
           if (tokenCount > this.limits.maxArrayLen) {
             throw new SecurityLimitExceeded(`RichText token count too large: ${tokenCount} > ${this.limits.maxArrayLen}`);
           }
@@ -1145,30 +1154,30 @@ class Decoder {
         // Read spans if present (flags & 0x02)
         let spans: RichTextSpan[] | undefined;
         if (flags & 0x02) {
-          const spanCount = Number(this.readUvarint());
+          const spanCount = this.readUvarintAsNumber();
           if (spanCount > this.limits.maxArrayLen) {
             throw new SecurityLimitExceeded(`RichText span count too large: ${spanCount} > ${this.limits.maxArrayLen}`);
           }
           spans = [];
           for (let i = 0; i < spanCount; i++) {
-            const start = Number(this.readUvarint());
-            const end = Number(this.readUvarint());
-            const kindId = Number(this.readUvarint());
+            const start = this.readUvarintAsNumber();
+            const end = this.readUvarintAsNumber();
+            const kindId = this.readUvarintAsNumber();
             spans.push({ start, end, kindId });
           }
         }
         return SJ.richtext(text, tokens, spans);
       }
       case Tag.DELTA: {
-        const baseId = Number(this.readUvarint());
-        const opCount = Number(this.readUvarint());
+        const baseId = this.readUvarintAsNumber();
+        const opCount = this.readUvarintAsNumber();
         if (opCount > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Delta op count too large: ${opCount} > ${this.limits.maxArrayLen}`);
         }
         const ops: DeltaOp[] = [];
         for (let i = 0; i < opCount; i++) {
           const opCode = this.readByte() as DeltaOpCode;
-          const fieldId = Number(this.readUvarint());
+          const fieldId = this.readUvarintAsNumber();
           let value: Value | undefined;
           if (opCode === DeltaOpCode.SET_FIELD || opCode === DeltaOpCode.APPEND_ARRAY) {
             value = this.decodeValue();
@@ -1187,7 +1196,7 @@ class Decoder {
         return SJ.edge(edge.fromId, edge.toId, edge.edgeType, edge.props);
       }
       case Tag.NODE_BATCH: {
-        const count = Number(this.readUvarint());
+        const count = this.readUvarintAsNumber();
         if (count > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Node batch count too large: ${count} > ${this.limits.maxArrayLen}`);
         }
@@ -1198,7 +1207,7 @@ class Decoder {
         return SJ.nodeBatch(nodes);
       }
       case Tag.EDGE_BATCH: {
-        const count = Number(this.readUvarint());
+        const count = this.readUvarintAsNumber();
         if (count > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Edge batch count too large: ${count} > ${this.limits.maxArrayLen}`);
         }
@@ -1210,7 +1219,7 @@ class Decoder {
       }
       case Tag.GRAPH_SHARD: {
         // Decode nodes
-        const nodeCount = Number(this.readUvarint());
+        const nodeCount = this.readUvarintAsNumber();
         if (nodeCount > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Graph shard node count too large: ${nodeCount} > ${this.limits.maxArrayLen}`);
         }
@@ -1219,7 +1228,7 @@ class Decoder {
           nodes.push(this.decodeNode());
         }
         // Decode edges
-        const edgeCount = Number(this.readUvarint());
+        const edgeCount = this.readUvarintAsNumber();
         if (edgeCount > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Graph shard edge count too large: ${edgeCount} > ${this.limits.maxArrayLen}`);
         }
@@ -1237,14 +1246,14 @@ class Decoder {
   }
 
   private skipHints(): void {
-    const count = Number(this.readUvarint());
+    const count = this.readUvarintAsNumber();
     if (count > this.limits.maxHintCount) {
       throw new SecurityLimitExceeded(`Too many hints: ${count} > ${this.limits.maxHintCount}`);
     }
     for (let i = 0; i < count; i++) {
       this.readString(); // field name
       this.readByte();   // type
-      const shapeLen = Number(this.readUvarint());
+      const shapeLen = this.readUvarintAsNumber();
       if (shapeLen > this.limits.maxRank) {
         throw new SecurityLimitExceeded(`Hint shape too large: ${shapeLen} > ${this.limits.maxRank}`);
       }
@@ -1271,7 +1280,7 @@ class Decoder {
     }
 
     // Dictionary
-    const dictLen = Number(this.readUvarint());
+    const dictLen = this.readUvarintAsNumber();
     if (dictLen > this.limits.maxDictLen) {
       throw new SecurityLimitExceeded('cowrie: dictionary too large');
     }
@@ -1294,7 +1303,7 @@ class Decoder {
 
   private decodeNode(): NodeData {
     const id = this.readString();
-    const labelCount = Number(this.readUvarint());
+    const labelCount = this.readUvarintAsNumber();
     if (labelCount > this.limits.maxArrayLen) {
       throw new SecurityLimitExceeded(`Node label count too large: ${labelCount} > ${this.limits.maxArrayLen}`);
     }
@@ -1315,13 +1324,13 @@ class Decoder {
   }
 
   private decodeProps(): Record<string, Value> {
-    const propCount = Number(this.readUvarint());
+    const propCount = this.readUvarintAsNumber();
     if (propCount > this.limits.maxObjectLen) {
       throw new SecurityLimitExceeded(`Props count too large: ${propCount} > ${this.limits.maxObjectLen}`);
     }
     const props: Record<string, Value> = {};
     for (let i = 0; i < propCount; i++) {
-      const fieldId = Number(this.readUvarint());
+      const fieldId = this.readUvarintAsNumber();
       if (fieldId >= this.dict.length) {
         throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
       }

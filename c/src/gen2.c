@@ -1591,6 +1591,20 @@ static size_t rd_remaining(const Reader *r) {
     return r->len - r->pos;
 }
 
+/* Overflow-safe multiplication: returns 0 on success, -1 on overflow */
+static int safe_mul(size_t a, size_t b, size_t *result) {
+    if (a != 0 && b > SIZE_MAX / a) return -1;
+    *result = a * b;
+    return 0;
+}
+
+/* Overflow-safe addition: returns 0 on success, -1 on overflow */
+static int safe_add(size_t a, size_t b, size_t *result) {
+    if (a > SIZE_MAX - b) return -1;
+    *result = a + b;
+    return 0;
+}
+
 static int rd_get_byte(Reader *r, uint8_t *out) {
     if (r->pos >= r->len) return -1;
     *out = r->data[r->pos++];
@@ -1817,6 +1831,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         uint64_t len;
         if (rd_get_uvarint(r, &len) != 0) return -1;
         if (len > SIZE_MAX) return -1;
+        if (len > rd_remaining(r)) return -1;
         uint8_t *data = malloc((size_t)len);
         if (!data && len > 0) return -1;
         if (len > 0 && rd_get(r, data, (size_t)len) != 0) { free(data); return -1; }
@@ -1843,6 +1858,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         uint64_t len;
         if (rd_get_uvarint(r, &len) != 0) return -1;
         if (len > SIZE_MAX) return -1;
+        if (len > rd_remaining(r)) return -1;
         uint8_t *data = malloc((size_t)len);
         if (!data && len > 0) return -1;
         if (len > 0 && rd_get(r, data, (size_t)len) != 0) { free(data); return -1; }
@@ -2023,6 +2039,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         uint64_t key_len;
         if (rd_get_uvarint(r, &key_len) != 0) return -1;
+        if (key_len > rd_remaining(r)) return -1;
 
         uint8_t *key = NULL;
         if (key_len > 0) {
@@ -2045,6 +2062,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         uint64_t data_len;
         if (rd_get_uvarint(r, &data_len) != 0) return -1;
+        if (data_len > rd_remaining(r)) return -1;
 
         uint8_t *data = NULL;
         if (data_len > 0) {
@@ -2067,6 +2085,7 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         uint64_t data_len;
         if (rd_get_uvarint(r, &data_len) != 0) return -1;
+        if (data_len > rd_remaining(r)) return -1;
 
         uint8_t *data = NULL;
         if (data_len > 0) {
@@ -2088,7 +2107,13 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         if (rd_get_uvarint(r, &node_count) != 0) return -1;
         if (rd_get_uvarint(r, &edge_count) != 0) return -1;
 
-        size_t *row_offsets = malloc(((size_t)node_count + 1) * sizeof(size_t));
+        /* Overflow-safe allocation: node_count + 1 could wrap, then * sizeof could overflow */
+        size_t ro_count;
+        if (safe_add((size_t)node_count, 1, &ro_count) != 0) return -1;
+        size_t ro_alloc;
+        if (safe_mul(ro_count, sizeof(size_t), &ro_alloc) != 0) return -1;
+        if (ro_alloc > rd_remaining(r)) return -1;
+        size_t *row_offsets = malloc(ro_alloc);
         if (!row_offsets) return -1;
         for (size_t i = 0; i <= (size_t)node_count; i++) {
             uint64_t off;
@@ -2099,9 +2124,12 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         void *col_indices = NULL;
         if (edge_count > 0) {
             size_t elem_size = (id_width == COWRIE_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
-            col_indices = malloc((size_t)edge_count * elem_size);
+            size_t ci_alloc;
+            if (safe_mul((size_t)edge_count, elem_size, &ci_alloc) != 0) { free(row_offsets); return -1; }
+            if (ci_alloc > rd_remaining(r)) { free(row_offsets); return -1; }
+            col_indices = malloc(ci_alloc);
             if (!col_indices) { free(row_offsets); return -1; }
-            if (rd_get(r, col_indices, (size_t)edge_count * elem_size) != 0) {
+            if (rd_get(r, col_indices, ci_alloc) != 0) {
                 free(col_indices);
                 free(row_offsets);
                 return -1;
@@ -2117,6 +2145,8 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
     case SJT_RICH_TEXT: {
         uint64_t text_len;
         if (rd_get_uvarint(r, &text_len) != 0) return -1;
+        if (text_len > SIZE_MAX - 1) return -1;
+        if (text_len > rd_remaining(r)) return -1;
 
         char *text = malloc((size_t)text_len + 1);
         if (!text) return -1;
@@ -2133,9 +2163,12 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             if (rd_get_uvarint(r, &tc) != 0) { free(text); return -1; }
             token_count = (size_t)tc;
             if (token_count > 0) {
-                tokens = malloc(token_count * sizeof(int32_t));
+                size_t tok_alloc;
+                if (safe_mul(token_count, sizeof(int32_t), &tok_alloc) != 0) { free(text); return -1; }
+                if (tok_alloc > rd_remaining(r)) { free(text); return -1; }
+                tokens = malloc(tok_alloc);
                 if (!tokens) { free(text); return -1; }
-                if (rd_get(r, tokens, token_count * sizeof(int32_t)) != 0) {
+                if (rd_get(r, tokens, tok_alloc) != 0) {
                     free(tokens);
                     free(text);
                     return -1;
@@ -2150,7 +2183,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             if (rd_get_uvarint(r, &sc) != 0) { free(tokens); free(text); return -1; }
             span_count = (size_t)sc;
             if (span_count > 0) {
-                spans = malloc(span_count * sizeof(COWRIERichTextSpan));
+                size_t span_alloc;
+                if (safe_mul(span_count, sizeof(COWRIERichTextSpan), &span_alloc) != 0) { free(tokens); free(text); return -1; }
+                spans = malloc(span_alloc);
                 if (!spans) { free(tokens); free(text); return -1; }
                 for (size_t i = 0; i < span_count; i++) {
                     uint64_t start, end, kind_id;
@@ -2183,7 +2218,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         COWRIEDeltaOp_t *ops = NULL;
         if (op_count > 0) {
-            ops = malloc((size_t)op_count * sizeof(COWRIEDeltaOp_t));
+            size_t ops_alloc;
+            if (safe_mul((size_t)op_count, sizeof(COWRIEDeltaOp_t), &ops_alloc) != 0) return -1;
+            ops = malloc(ops_alloc);
             if (!ops) return -1;
 
             for (size_t i = 0; i < (size_t)op_count; i++) {
@@ -2234,8 +2271,13 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         char **labels = NULL;
         size_t *label_lens = NULL;
         if (label_count > 0) {
-            labels = malloc((size_t)label_count * sizeof(char *));
-            label_lens = malloc((size_t)label_count * sizeof(size_t));
+            size_t lbl_alloc, lbllen_alloc;
+            if (safe_mul((size_t)label_count, sizeof(char *), &lbl_alloc) != 0 ||
+                safe_mul((size_t)label_count, sizeof(size_t), &lbllen_alloc) != 0) {
+                free(id); return -1;
+            }
+            labels = malloc(lbl_alloc);
+            label_lens = malloc(lbllen_alloc);
             if (!labels || !label_lens) {
                 free(labels); free(label_lens); free(id);
                 return -1;
@@ -2265,7 +2307,13 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         COWRIEMember *props = NULL;
         if (prop_count > 0) {
-            props = malloc((size_t)prop_count * sizeof(COWRIEMember));
+            size_t props_alloc;
+            if (safe_mul((size_t)prop_count, sizeof(COWRIEMember), &props_alloc) != 0) {
+                for (size_t i = 0; i < (size_t)label_count; i++) free(labels[i]);
+                free(labels); free(label_lens); free(id);
+                return -1;
+            }
+            props = malloc(props_alloc);
             if (!props) {
                 for (size_t i = 0; i < (size_t)label_count; i++) free(labels[i]);
                 free(labels); free(label_lens); free(id);
@@ -2330,7 +2378,12 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         COWRIEMember *props = NULL;
         if (prop_count > 0) {
-            props = malloc((size_t)prop_count * sizeof(COWRIEMember));
+            size_t eprops_alloc;
+            if (safe_mul((size_t)prop_count, sizeof(COWRIEMember), &eprops_alloc) != 0) {
+                free(edge_type); free(to_id); free(from_id);
+                return -1;
+            }
+            props = malloc(eprops_alloc);
             if (!props) {
                 free(edge_type); free(to_id); free(from_id);
                 return -1;
@@ -2387,8 +2440,11 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             nodes[i].label_count = (size_t)lc;
 
             if (lc > 0) {
-                nodes[i].labels = malloc((size_t)lc * sizeof(char *));
-                nodes[i].label_lens = malloc((size_t)lc * sizeof(size_t));
+                size_t lbl_a, lbll_a;
+                if (safe_mul((size_t)lc, sizeof(char *), &lbl_a) != 0 ||
+                    safe_mul((size_t)lc, sizeof(size_t), &lbll_a) != 0) goto node_batch_fail;
+                nodes[i].labels = malloc(lbl_a);
+                nodes[i].label_lens = malloc(lbll_a);
                 if (!nodes[i].labels || !nodes[i].label_lens) goto node_batch_fail;
                 for (size_t j = 0; j < (size_t)lc; j++) {
                     if (decode_string_raw(r, &nodes[i].labels[j], &nodes[i].label_lens[j]) != 0) goto node_batch_fail;
@@ -2400,7 +2456,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             nodes[i].prop_count = (size_t)pc;
 
             if (pc > 0) {
-                nodes[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
+                size_t p_a;
+                if (safe_mul((size_t)pc, sizeof(COWRIEMember), &p_a) != 0) goto node_batch_fail;
+                nodes[i].props = malloc(p_a);
                 if (!nodes[i].props) goto node_batch_fail;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2443,7 +2501,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             edges[i].prop_count = (size_t)pc;
 
             if (pc > 0) {
-                edges[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
+                size_t ep_a;
+                if (safe_mul((size_t)pc, sizeof(COWRIEMember), &ep_a) != 0) goto edge_batch_fail;
+                edges[i].props = malloc(ep_a);
                 if (!edges[i].props) goto edge_batch_fail;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2483,8 +2543,11 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             if (rd_get_uvarint(r, &lc) != 0) goto shard_fail;
             nodes[i].label_count = (size_t)lc;
             if (lc > 0) {
-                nodes[i].labels = malloc((size_t)lc * sizeof(char *));
-                nodes[i].label_lens = malloc((size_t)lc * sizeof(size_t));
+                size_t sl_a, sll_a;
+                if (safe_mul((size_t)lc, sizeof(char *), &sl_a) != 0 ||
+                    safe_mul((size_t)lc, sizeof(size_t), &sll_a) != 0) goto shard_fail;
+                nodes[i].labels = malloc(sl_a);
+                nodes[i].label_lens = malloc(sll_a);
                 if (!nodes[i].labels || !nodes[i].label_lens) goto shard_fail;
                 for (size_t j = 0; j < (size_t)lc; j++) {
                     if (decode_string_raw(r, &nodes[i].labels[j], &nodes[i].label_lens[j]) != 0) goto shard_fail;
@@ -2494,7 +2557,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             if (rd_get_uvarint(r, &pc) != 0) goto shard_fail;
             nodes[i].prop_count = (size_t)pc;
             if (pc > 0) {
-                nodes[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
+                size_t sp_a;
+                if (safe_mul((size_t)pc, sizeof(COWRIEMember), &sp_a) != 0) goto shard_fail;
+                nodes[i].props = malloc(sp_a);
                 if (!nodes[i].props) goto shard_fail;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2526,7 +2591,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             if (rd_get_uvarint(r, &pc) != 0) goto shard_fail2;
             edges[i].prop_count = (size_t)pc;
             if (pc > 0) {
-                edges[i].props = malloc((size_t)pc * sizeof(COWRIEMember));
+                size_t sep_a;
+                if (safe_mul((size_t)pc, sizeof(COWRIEMember), &sep_a) != 0) goto shard_fail2;
+                edges[i].props = malloc(sep_a);
                 if (!edges[i].props) goto shard_fail2;
                 for (size_t j = 0; j < (size_t)pc; j++) {
                     uint64_t fid;
@@ -2544,7 +2611,9 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
 
         COWRIEMember *metadata = NULL;
         if (meta_count > 0) {
-            metadata = malloc((size_t)meta_count * sizeof(COWRIEMember));
+            size_t meta_alloc;
+            if (safe_mul((size_t)meta_count, sizeof(COWRIEMember), &meta_alloc) != 0) goto shard_fail2;
+            metadata = malloc(meta_alloc);
             if (!metadata) goto shard_fail2;
             for (size_t i = 0; i < (size_t)meta_count; i++) {
                 uint64_t fid;
