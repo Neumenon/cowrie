@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"strconv"
 
 	"github.com/Neumenon/cowrie/go"
 )
@@ -78,24 +79,64 @@ func (r *reader) readUvarint() (uint64, error) {
 }
 
 func (r *reader) readString() (string, error) {
-	length, err := r.readUvarint()
+	length, err := r.readLength()
 	if err != nil {
 		return "", err
 	}
-	// Sanity check: length can't exceed remaining data
-	if length > uint64(r.remaining()) {
-		return "", ErrMalformedLength
-	}
-	b, err := r.read(int(length))
+	b, err := r.read(length)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
 }
 
+func uint64ToInt(v uint64) (int, error) {
+	if strconv.IntSize == 32 && v > 1<<31-1 {
+		return 0, ErrMalformedLength
+	}
+
+	// #nosec G115 -- bounded by the platform int size above.
+	return int(v), nil
+}
+
+func (r *reader) readCount(minBytes int) (int, error) {
+	count, err := r.readUvarint()
+	if err != nil {
+		return 0, err
+	}
+	countInt, err := uint64ToInt(count)
+	if err != nil {
+		return 0, err
+	}
+	if countInt > r.remaining()/minBytes {
+		return 0, ErrMalformedLength
+	}
+	return countInt, nil
+}
+
+func (r *reader) readLength() (int, error) {
+	length, err := r.readUvarint()
+	if err != nil {
+		return 0, err
+	}
+	lengthInt, err := uint64ToInt(length)
+	if err != nil {
+		return 0, ErrMalformedLength
+	}
+	if lengthInt > r.remaining() {
+		return 0, ErrMalformedLength
+	}
+	return lengthInt, nil
+}
+
 // zigzagDecode decodes a zigzag-encoded value.
 func zigzagDecode(n uint64) int64 {
-	return int64((n >> 1) ^ -(n & 1))
+	// #nosec G115 -- shifting right by 1 bounds the value to MaxInt64.
+	decoded := int64(n >> 1)
+	if n&1 != 0 {
+		return ^decoded
+	}
+	return decoded
 }
 
 // decode reads the complete Cowrie-LD format.
@@ -138,16 +179,12 @@ func decode(r *reader) (*LDDocument, error) {
 	doc := NewDocument()
 
 	// Read field dictionary
-	fieldDictLen, err := r.readUvarint()
+	fieldDictLen, err := r.readCount(1)
 	if err != nil {
 		return nil, err
 	}
-	// Sanity check: each field needs at least 1 byte
-	if fieldDictLen > uint64(r.remaining()) {
-		return nil, ErrMalformedLength
-	}
 	doc.FieldDict = make([]string, fieldDictLen)
-	for i := uint64(0); i < fieldDictLen; i++ {
+	for i := 0; i < fieldDictLen; i++ {
 		s, err := r.readString()
 		if err != nil {
 			return nil, err
@@ -156,16 +193,12 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 
 	// Read terms table
-	termCount, err := r.readUvarint()
+	termCount, err := r.readCount(3)
 	if err != nil {
 		return nil, err
 	}
-	// Sanity check: each term needs at least 3 bytes (term string len + IRI index + flags)
-	if termCount*3 > uint64(r.remaining()) {
-		return nil, ErrMalformedLength
-	}
 	doc.Terms = make([]TermEntry, termCount)
-	for i := uint64(0); i < termCount; i++ {
+	for i := 0; i < termCount; i++ {
 		term, err := r.readString()
 		if err != nil {
 			return nil, err
@@ -186,16 +219,12 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 
 	// Read IRIs table
-	iriCount, err := r.readUvarint()
+	iriCount, err := r.readCount(1)
 	if err != nil {
 		return nil, err
 	}
-	// Sanity check: each IRI needs at least 1 byte
-	if iriCount > uint64(r.remaining()) {
-		return nil, ErrMalformedLength
-	}
 	doc.IRIs = make([]IRI, iriCount)
-	for i := uint64(0); i < iriCount; i++ {
+	for i := 0; i < iriCount; i++ {
 		s, err := r.readString()
 		if err != nil {
 			return nil, err
@@ -204,16 +233,12 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 
 	// Read datatypes table
-	dtCount, err := r.readUvarint()
+	dtCount, err := r.readCount(1)
 	if err != nil {
 		return nil, err
 	}
-	// Sanity check: each datatype needs at least 1 byte
-	if dtCount > uint64(r.remaining()) {
-		return nil, ErrMalformedLength
-	}
 	doc.Datatypes = make([]IRI, dtCount)
-	for i := uint64(0); i < dtCount; i++ {
+	for i := 0; i < dtCount; i++ {
 		s, err := r.readString()
 		if err != nil {
 			return nil, err
@@ -280,7 +305,12 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		}
 		var coef [16]byte
 		copy(coef[:], coefBytes)
-		return cowrie.NewDecimal128(int8(scale), coef), nil
+		scaleInt := int16(scale)
+		if scaleInt >= 1<<7 {
+			scaleInt -= 1 << 8
+		}
+		// #nosec G115 -- scaleInt is normalized into the int8 range above.
+		return cowrie.NewDecimal128(int8(scaleInt), coef), nil
 
 	case cowrie.TagString:
 		s, err := r.readString()
@@ -290,15 +320,11 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		return cowrie.String(s), nil
 
 	case cowrie.TagBytes:
-		length, err := r.readUvarint()
+		length, err := r.readLength()
 		if err != nil {
 			return nil, err
 		}
-		// Sanity check
-		if length > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		b, err := r.read(int(length))
+		b, err := r.read(length)
 		if err != nil {
 			return nil, err
 		}
@@ -309,7 +335,12 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		nanos := int64(binary.LittleEndian.Uint64(b))
+		lo := binary.LittleEndian.Uint32(b[:4])
+		hi := int64(binary.LittleEndian.Uint32(b[4:]))
+		if hi >= 1<<31 {
+			hi -= 1 << 32
+		}
+		nanos := hi<<32 | int64(lo)
 		return cowrie.Datetime64(nanos), nil
 
 	case cowrie.TagUUID128:
@@ -322,31 +353,23 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		return cowrie.UUID128(uuid), nil
 
 	case cowrie.TagBigInt:
-		length, err := r.readUvarint()
+		length, err := r.readLength()
 		if err != nil {
 			return nil, err
 		}
-		// Sanity check
-		if length > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		b, err := r.read(int(length))
+		b, err := r.read(length)
 		if err != nil {
 			return nil, err
 		}
 		return cowrie.BigInt(b), nil
 
 	case cowrie.TagArray:
-		count, err := r.readUvarint()
+		count, err := r.readCount(1)
 		if err != nil {
 			return nil, err
 		}
-		// Sanity check: each element needs at least 1 byte
-		if count > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
 		items := make([]*cowrie.Value, count)
-		for i := uint64(0); i < count; i++ {
+		for i := 0; i < count; i++ {
 			v, err := decodeValue(r, doc)
 			if err != nil {
 				return nil, err
@@ -356,16 +379,12 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		return cowrie.Array(items...), nil
 
 	case cowrie.TagObject:
-		count, err := r.readUvarint()
+		count, err := r.readCount(2)
 		if err != nil {
 			return nil, err
 		}
-		// Sanity check: each field needs at least 2 bytes
-		if count > uint64(r.remaining()/2) {
-			return nil, ErrMalformedLength
-		}
 		members := make([]cowrie.Member, count)
-		for i := uint64(0); i < count; i++ {
+		for i := 0; i < count; i++ {
 			fieldID, err := r.readUvarint()
 			if err != nil {
 				return nil, err
@@ -373,11 +392,15 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 			if fieldID >= uint64(len(doc.FieldDict)) {
 				return nil, ErrInvalidFieldID
 			}
+			fieldIDInt, err := uint64ToInt(fieldID)
+			if err != nil {
+				return nil, ErrInvalidFieldID
+			}
 			v, err := decodeValue(r, doc)
 			if err != nil {
 				return nil, err
 			}
-			members[i] = cowrie.Member{Key: doc.FieldDict[fieldID], Value: v}
+			members[i] = cowrie.Member{Key: doc.FieldDict[fieldIDInt], Value: v}
 		}
 		return cowrie.Object(members...), nil
 
@@ -390,9 +413,13 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		if iriID >= uint64(len(doc.IRIs)) {
 			return nil, ErrInvalidIRIID
 		}
+		iriIDInt, err := uint64ToInt(iriID)
+		if err != nil {
+			return nil, ErrInvalidIRIID
+		}
 		// Return the IRI as a string value
 		// Callers can check the LDDocument to understand this is an IRI
-		return cowrie.String(string(doc.IRIs[iriID])), nil
+		return cowrie.String(string(doc.IRIs[iriIDInt])), nil
 
 	case TagBNode:
 		// Blank node - decode ID string
@@ -426,10 +453,14 @@ func DecodeLDValue(r *reader, doc *LDDocument) (*LDValue, error) {
 		if iriID >= uint64(len(doc.IRIs)) {
 			return nil, ErrInvalidIRIID
 		}
+		iriIDInt, err := uint64ToInt(iriID)
+		if err != nil {
+			return nil, ErrInvalidIRIID
+		}
 		return &LDValue{
-			Value: cowrie.String(string(doc.IRIs[iriID])),
+			Value: cowrie.String(string(doc.IRIs[iriIDInt])),
 			IsIRI: true,
-			IRIID: int(iriID),
+			IRIID: iriIDInt,
 		}, nil
 
 	case TagBNode:
