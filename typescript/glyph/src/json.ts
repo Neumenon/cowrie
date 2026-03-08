@@ -7,6 +7,12 @@
 import { GValue, RefID, MapEntry } from './types';
 import { Schema, TypeDef } from './schema';
 
+const hasOwnProperty = Object.prototype.hasOwnProperty;
+
+function hasOwn(obj: object, key: string): boolean {
+  return hasOwnProperty.call(obj, key);
+}
+
 // ============================================================
 // JSON to GValue Conversion
 // ============================================================
@@ -90,7 +96,7 @@ function convertValue(
     const obj = v as Record<string, unknown>;
     
     // Check for special type markers
-    if ('$type' in obj && typeof obj.$type === 'string') {
+    if (hasOwn(obj, '$type') && typeof obj.$type === 'string') {
       // Typed struct: { $type: "TypeName", field1: ..., field2: ... }
       const structTypeName = obj.$type;
       const td = schema?.getType(structTypeName);
@@ -113,7 +119,7 @@ function convertValue(
     }
 
     // Check for ref marker
-    if ('$ref' in obj && typeof obj.$ref === 'string') {
+    if (hasOwn(obj, '$ref') && typeof obj.$ref === 'string') {
       const ref = obj.$ref;
       const colonIdx = ref.indexOf(':');
       if (colonIdx > 0) {
@@ -123,18 +129,18 @@ function convertValue(
     }
 
     // Check for time marker
-    if ('$time' in obj && typeof obj.$time === 'string') {
+    if (hasOwn(obj, '$time') && typeof obj.$time === 'string') {
       return GValue.time(new Date(obj.$time));
     }
 
     // Check for bytes marker
-    if ('$bytes' in obj && typeof obj.$bytes === 'string') {
+    if (hasOwn(obj, '$bytes') && typeof obj.$bytes === 'string') {
       return GValue.bytes(base64ToBytes(obj.$bytes));
     }
 
     // Check for sum type marker
-    if ('$tag' in obj && typeof obj.$tag === 'string') {
-      const value = '$value' in obj 
+    if (hasOwn(obj, '$tag') && typeof obj.$tag === 'string') {
+      const value = hasOwn(obj, '$value')
         ? convertValue(obj.$value, schema, undefined, parseDates, parseRefs)
         : null;
       return GValue.sum(obj.$tag, value);

@@ -145,7 +145,17 @@ impl<'a> Reader<'a> {
         }
 
         // Read root value
-        self.decode_value()
+        let value = self.decode_value()?;
+
+        // Verify all input consumed — trailing bytes indicate corruption or concatenated data
+        if self.pos < self.data.len() {
+            return Err(CowrieError::TrailingData {
+                pos: self.pos,
+                remaining: self.data.len() - self.pos,
+            });
+        }
+
+        Ok(value)
     }
 
     fn decode_value(&mut self) -> Result<Value, CowrieError> {

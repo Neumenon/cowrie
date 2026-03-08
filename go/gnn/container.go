@@ -19,6 +19,7 @@ var (
 	ErrUnexpectedEOF   = errors.New("gnn: unexpected end of data")
 	ErrInvalidSection  = errors.New("gnn: invalid section")
 	ErrMalformedLength = errors.New("gnn: malformed length exceeds remaining data")
+	ErrInvalidVarint   = errors.New("gnn: invalid varint (overflow)")
 )
 
 // Encode writes the container to bytes.
@@ -764,8 +765,11 @@ func (r *reader) read(n int) ([]byte, error) {
 
 func (r *reader) readUvarint() (uint64, error) {
 	v, n := binary.Uvarint(r.data[r.pos:])
-	if n <= 0 {
+	if n == 0 {
 		return 0, ErrUnexpectedEOF
+	}
+	if n < 0 {
+		return 0, ErrInvalidVarint
 	}
 	r.pos += n
 	return v, nil

@@ -59,6 +59,10 @@ class PackedParser {
     }
     
     this.expect(')');
+    this.skipWhitespace();
+    if (this.pos !== this.input.length) {
+      throw new Error(`trailing garbage at pos ${this.pos}`);
+    }
     return value;
   }
 

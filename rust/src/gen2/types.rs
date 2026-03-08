@@ -15,6 +15,7 @@ pub enum CowrieError {
     Io(std::io::Error),
     TooDeep,
     TooLarge,
+    TrailingData { pos: usize, remaining: usize },
 }
 
 impl fmt::Display for CowrieError {
@@ -29,6 +30,7 @@ impl fmt::Display for CowrieError {
             CowrieError::Io(e) => write!(f, "I/O error: {}", e),
             CowrieError::TooDeep => write!(f, "nesting too deep"),
             CowrieError::TooLarge => write!(f, "data too large"),
+            CowrieError::TrailingData { pos, remaining } => write!(f, "trailing data after root value: {} unconsumed bytes at position {}", remaining, pos),
         }
     }
 }

@@ -312,7 +312,11 @@ export const SJ = {
     return { type: Type.INT64, data: BigInt(i) };
   },
   uint64(u: bigint | number): Value {
-    return { type: Type.UINT64, data: BigInt(u) };
+    const v = BigInt(u);
+    if (v < 0n || v > 0xFFFFFFFFFFFFFFFFn) {
+      throw new RangeError(`UINT64 value out of range: ${v} (must be 0..2^64-1)`);
+    }
+    return { type: Type.UINT64, data: v };
   },
   float64(f: number): Value {
     return { type: Type.FLOAT64, data: f };
@@ -469,6 +473,9 @@ function bytesToBigint(bytes: Uint8Array): bigint {
 // Varint encoding/decoding
 function encodeUvarint(n: bigint | number): Uint8Array {
   let v = BigInt(n);
+  if (v < 0n || v > 0xFFFFFFFFFFFFFFFFn) {
+    throw new RangeError(`uvarint value out of range: ${v} (must be 0..2^64-1)`);
+  }
   const bytes: number[] = [];
   while (v >= 0x80n) {
     bytes.push(Number(v & 0x7fn) | 0x80);
@@ -602,10 +609,15 @@ class Encoder {
         this.writeByte(Tag.INT64);
         this.writeUvarint(zigzagEncode(v.data as bigint));
         break;
-      case Type.UINT64:
+      case Type.UINT64: {
+        const u64 = v.data as bigint;
+        if (u64 < 0n || u64 > 0xFFFFFFFFFFFFFFFFn) {
+          throw new RangeError(`UINT64 value out of range: ${u64} (must be 0..2^64-1)`);
+        }
         this.writeByte(Tag.UINT64);
-        this.writeUvarint(v.data as bigint);
+        this.writeUvarint(u64);
         break;
+      }
       case Type.FLOAT64: {
         this.writeByte(Tag.FLOAT64);
         const buf = new ArrayBuffer(8);
@@ -1267,7 +1279,17 @@ class Decoder {
       this.dict.push(this.readString());
     }
 
-    return this.decodeValue();
+    const result = this.decodeValue();
+
+    // Verify all input consumed — trailing bytes indicate corruption or concatenated data
+    if (this.pos < this.data.length) {
+      const remaining = this.data.length - this.pos;
+      throw new Error(
+        `cowrie: trailing data after root value: ${remaining} unconsumed bytes at position ${this.pos}`
+      );
+    }
+
+    return result;
   }
 
   private decodeNode(): NodeData {
@@ -1757,10 +1779,15 @@ class DeterministicEncoder extends Encoder {
         this.writeByteSorted(Tag.INT64);
         this.writeUvarintSorted(zigzagEncode(v.data as bigint));
         break;
-      case Type.UINT64:
+      case Type.UINT64: {
+        const u64 = v.data as bigint;
+        if (u64 < 0n || u64 > 0xFFFFFFFFFFFFFFFFn) {
+          throw new RangeError(`UINT64 value out of range: ${u64} (must be 0..2^64-1)`);
+        }
         this.writeByteSorted(Tag.UINT64);
-        this.writeUvarintSorted(v.data as bigint);
+        this.writeUvarintSorted(u64);
         break;
+      }
       case Type.FLOAT64: {
         this.writeByteSorted(Tag.FLOAT64);
         const buf = new ArrayBuffer(8);

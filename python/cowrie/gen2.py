@@ -723,6 +723,8 @@ class Value:
 
     @staticmethod
     def uint64(u: int) -> Value:
+        if u < 0 or u > 0xFFFFFFFFFFFFFFFF:
+            raise ValueError(f"UINT64 value out of range: {u} (must be 0..2^64-1)")
         return Value(Type.UINT64, u)
 
     @staticmethod
@@ -875,6 +877,8 @@ class Value:
 
 def encode_uvarint(n: int) -> bytes:
     """Encode unsigned integer as varint."""
+    if n < 0 or n > 0xFFFFFFFFFFFFFFFF:
+        raise ValueError(f"uvarint value out of range: {n} (must be 0..2^64-1)")
     result = []
     while n >= 0x80:
         result.append((n & 0x7F) | 0x80)
@@ -999,6 +1003,8 @@ class Encoder:
             self._write_byte(Tag.INT64)
             self._write_uvarint(zigzag_encode(v.data))
         elif v.type == Type.UINT64:
+            if v.data < 0 or v.data > 0xFFFFFFFFFFFFFFFF:
+                raise ValueError(f"UINT64 value out of range: {v.data} (must be 0..2^64-1)")
             self._write_byte(Tag.UINT64)
             self._write_uvarint(v.data)
         elif v.type == Type.FLOAT64:
@@ -1520,7 +1526,16 @@ class Decoder:
         self.dict = [self._read_string() for _ in range(dict_len)]
 
         # Decode root value
-        return self._decode_value()
+        result = self._decode_value()
+
+        # Verify all input consumed — trailing bytes indicate corruption or concatenated data
+        if self.pos < len(self.data):
+            remaining = len(self.data) - self.pos
+            raise ValueError(
+                f"cowrie: trailing data after root value: {remaining} unconsumed bytes at position {self.pos}"
+            )
+
+        return result
 
 
 def decode(data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.KEEP,
@@ -1985,6 +2000,8 @@ class DeterministicEncoder(Encoder):
             self._write_byte(Tag.INT64)
             self._write_uvarint(zigzag_encode(v.data))
         elif v.type == Type.UINT64:
+            if v.data < 0 or v.data > 0xFFFFFFFFFFFFFFFF:
+                raise ValueError(f"UINT64 value out of range: {v.data} (must be 0..2^64-1)")
             self._write_byte(Tag.UINT64)
             self._write_uvarint(v.data)
         elif v.type == Type.FLOAT64:

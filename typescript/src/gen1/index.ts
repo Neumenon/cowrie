@@ -114,7 +114,11 @@ export function encode(value: JsonValue): Uint8Array {
  */
 export function decode(data: Uint8Array): JsonValue {
   const reader = { data, pos: 0 };
-  return decodeValue(reader, 0);
+  const value = decodeValue(reader, 0);
+  if (reader.pos < data.length) {
+    throw new Error(`trailing data: ${data.length - reader.pos} unconsumed bytes at position ${reader.pos}`);
+  }
+  return value;
 }
 
 // Encoding helpers

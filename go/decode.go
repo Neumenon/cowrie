@@ -3,6 +3,7 @@ package cowrie
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 )
@@ -32,6 +33,7 @@ var (
 	ErrInvalidVarint   = errors.New("cowrie: invalid or overflow varint encoding")
 	ErrDictTooLarge    = errors.New("cowrie: dictionary exceeds maximum size")
 	ErrTooManyHints    = errors.New("cowrie: too many column hints")
+	ErrTrailingData    = errors.New("cowrie: trailing data after root value")
 )
 
 // Default security limits (can be overridden via DecodeOptions)
@@ -485,7 +487,17 @@ func decode(r *reader) (*Value, error) {
 	}
 
 	// Decode root value
-	return decodeValue(r, dict)
+	val, err := decodeValue(r, dict)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify all input consumed — trailing bytes indicate corruption or concatenated data
+	if r.pos != len(r.data) {
+		return nil, fmt.Errorf("%w: %d unconsumed bytes at position %d", ErrTrailingData, len(r.data)-r.pos, r.pos)
+	}
+
+	return val, nil
 }
 
 // decodeValue reads a single value.

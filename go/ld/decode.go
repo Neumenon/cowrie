@@ -18,6 +18,7 @@ var (
 	ErrInvalidFieldID  = errors.New("cowrie-ld: invalid field ID")
 	ErrInvalidIRIID    = errors.New("cowrie-ld: invalid IRI ID")
 	ErrMalformedLength = errors.New("cowrie-ld: malformed length exceeds remaining data")
+	ErrInvalidVarint   = errors.New("cowrie-ld: invalid varint (overflow)")
 )
 
 // Decode decodes Cowrie-LD binary data into an LDDocument.
@@ -66,8 +67,11 @@ func (r *reader) read(n int) ([]byte, error) {
 
 func (r *reader) readUvarint() (uint64, error) {
 	v, n := binary.Uvarint(r.data[r.pos:])
-	if n <= 0 {
+	if n == 0 {
 		return 0, ErrUnexpectedEOF
+	}
+	if n < 0 {
+		return 0, ErrInvalidVarint
 	}
 	r.pos += n
 	return v, nil
