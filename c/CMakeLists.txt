@@ -4,6 +4,11 @@ project(cowrie VERSION 0.1.0 LANGUAGES C)
 # Options
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(BUILD_TESTS "Build tests" ON)
+option(COVERAGE "Enable coverage reporting" OFF)
+if(COVERAGE)
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage -O0")
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -lgcov")
+endif()
 
 # C standard
 set(CMAKE_C_STANDARD 11)

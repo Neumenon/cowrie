@@ -826,7 +826,7 @@ static int write_value(COWRIEBuf *buf, const COWRIEValue *v, int pretty, int dep
             /* {"_type":"ext","ext_type":123,"payload":"base64"} */
             COWRIEBuf b64;
             if (cowrie_base64_encode(v->as.ext.payload, v->as.ext.payload_len, &b64) != 0) return -1;
-            if (buf_append(buf, "{\"_type\":\"ext\",\"ext_type\":", 27) != 0) { free(b64.data); return -1; }
+            if (buf_append(buf, "{\"_type\":\"ext\",\"ext_type\":", 26) != 0) { free(b64.data); return -1; }
             snprintf(num_buf, sizeof(num_buf), "%llu", (unsigned long long)v->as.ext.ext_type);
             if (buf_append(buf, num_buf, strlen(num_buf)) != 0) { free(b64.data); return -1; }
             if (buf_append(buf, ",\"payload\":\"", 12) != 0) { free(b64.data); return -1; }

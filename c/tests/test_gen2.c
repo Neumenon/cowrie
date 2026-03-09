@@ -856,6 +856,1339 @@ static int test_oversized_array_rejects(void) {
 }
 
 /* ============================================================
+ * Additional Type Tests
+ * ============================================================ */
+
+static int test_decimal128_roundtrip(void) {
+    uint8_t coef[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x27, 0x10};
+    COWRIEValue *v = cowrie_new_decimal128(2, coef);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_DECIMAL128);
+    ASSERT(v->as.decimal128.scale == 2);
+    ASSERT(memcmp(v->as.decimal128.coef, coef, 16) == 0);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_DECIMAL128);
+    ASSERT(dec->as.decimal128.scale == 2);
+    ASSERT(memcmp(dec->as.decimal128.coef, coef, 16) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_bigint_roundtrip(void) {
+    uint8_t data[] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    COWRIEValue *v = cowrie_new_bigint(data, sizeof(data));
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_BIGINT);
+    ASSERT(v->as.bigint.len == sizeof(data));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_BIGINT);
+    ASSERT(dec->as.bigint.len == sizeof(data));
+    ASSERT(memcmp(dec->as.bigint.data, data, sizeof(data)) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_ext_roundtrip(void) {
+    uint8_t payload[] = {0xCA, 0xFE, 0xBA, 0xBE};
+    COWRIEValue *v = cowrie_new_ext(42, payload, sizeof(payload));
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_EXT);
+    ASSERT(v->as.ext.ext_type == 42);
+    ASSERT(v->as.ext.payload_len == sizeof(payload));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_EXT);
+    ASSERT(dec->as.ext.ext_type == 42);
+    ASSERT(dec->as.ext.payload_len == sizeof(payload));
+    ASSERT(memcmp(dec->as.ext.payload, payload, sizeof(payload)) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_bitmask_roundtrip(void) {
+    /* 10 bits: 1010110011 -> bytes: 0b11001101=0xCD, 0b00000010=0x02 */
+    uint8_t bits[] = {0xCD, 0x02};
+    COWRIEValue *v = cowrie_new_bitmask(10, bits);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_BITMASK);
+    ASSERT(v->as.bitmask.count == 10);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_BITMASK);
+    ASSERT(dec->as.bitmask.count == 10);
+    ASSERT(dec->as.bitmask.bits_len == 2);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_empty_bitmask(void) {
+    COWRIEValue *v = cowrie_new_bitmask(0, NULL);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_BITMASK);
+    ASSERT(v->as.bitmask.count == 0);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_BITMASK);
+    ASSERT(dec->as.bitmask.count == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_adjlist_construct_encode(void) {
+    /* Full roundtrip: construct → encode → decode → compare all fields */
+    size_t row_offsets[] = {0, 2, 3};
+    int32_t col_indices[] = {1, 2, 0};
+    COWRIEValue *v = cowrie_new_adjlist(COWRIE_ID_INT32, 2, 3, row_offsets, col_indices);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_ADJLIST);
+    ASSERT(v->as.adjlist.node_count == 2);
+    ASSERT(v->as.adjlist.edge_count == 3);
+    ASSERT(v->as.adjlist.id_width == COWRIE_ID_INT32);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+    ASSERT(buf.len > 0);
+
+    /* Decode and verify all fields match */
+    COWRIEValue *decoded;
+    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
+    ASSERT(decoded->type == COWRIE_ADJLIST);
+    ASSERT(decoded->as.adjlist.node_count == 2);
+    ASSERT(decoded->as.adjlist.edge_count == 3);
+    ASSERT(decoded->as.adjlist.id_width == COWRIE_ID_INT32);
+
+    /* Compare row_offsets */
+    for (size_t i = 0; i <= 2; i++) {
+        ASSERT(decoded->as.adjlist.row_offsets[i] == row_offsets[i]);
+    }
+
+    /* Compare col_indices */
+    int32_t *dec_cols = (int32_t *)decoded->as.adjlist.col_indices;
+    for (size_t i = 0; i < 3; i++) {
+        ASSERT(dec_cols[i] == col_indices[i]);
+    }
+
+    cowrie_free(v);
+    cowrie_free(decoded);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_adjlist_int64_construct_encode(void) {
+    size_t row_offsets[] = {0, 1, 2};
+    int64_t col_indices[] = {100, 200};
+    COWRIEValue *v = cowrie_new_adjlist(COWRIE_ID_INT64, 2, 2, row_offsets, col_indices);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_ADJLIST);
+    ASSERT(v->as.adjlist.id_width == COWRIE_ID_INT64);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+    ASSERT(buf.len > 0);
+
+    cowrie_free(v);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_rich_text_roundtrip(void) {
+    const char *text = "Hello, World!";
+    int32_t tokens[] = {101, 102, 103};
+    COWRIERichTextSpan spans[] = {{0, 5, 1}, {7, 12, 2}};
+
+    COWRIEValue *v = cowrie_new_rich_text(text, strlen(text), tokens, 3, spans, 2);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_RICH_TEXT);
+    ASSERT(v->as.rich_text.text_len == strlen(text));
+    ASSERT(v->as.rich_text.token_count == 3);
+    ASSERT(v->as.rich_text.span_count == 2);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_RICH_TEXT);
+    ASSERT(strcmp(dec->as.rich_text.text, text) == 0);
+    ASSERT(dec->as.rich_text.token_count == 3);
+    ASSERT(dec->as.rich_text.tokens[0] == 101);
+    ASSERT(dec->as.rich_text.tokens[2] == 103);
+    ASSERT(dec->as.rich_text.span_count == 2);
+    ASSERT(dec->as.rich_text.spans[0].start == 0);
+    ASSERT(dec->as.rich_text.spans[0].end == 5);
+    ASSERT(dec->as.rich_text.spans[1].kind_id == 2);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_rich_text_plain(void) {
+    const char *text = "Just plain text";
+    COWRIEValue *v = cowrie_new_rich_text(text, strlen(text), NULL, 0, NULL, 0);
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_RICH_TEXT);
+    ASSERT(strcmp(dec->as.rich_text.text, text) == 0);
+    ASSERT(dec->as.rich_text.token_count == 0);
+    ASSERT(dec->as.rich_text.span_count == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_delta_roundtrip(void) {
+    COWRIEDeltaOp_t ops[3];
+    ops[0].op_code = COWRIE_DELTA_SET_FIELD;
+    ops[0].field_id = 0;
+    ops[0].value = cowrie_new_int64(42);
+    ops[1].op_code = COWRIE_DELTA_DELETE_FIELD;
+    ops[1].field_id = 1;
+    ops[1].value = NULL;
+    ops[2].op_code = COWRIE_DELTA_APPEND_ARRAY;
+    ops[2].field_id = 2;
+    ops[2].value = cowrie_new_string("appended", 8);
+
+    COWRIEValue *v = cowrie_new_delta(100, ops, 3);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_DELTA);
+    ASSERT(v->as.delta.base_id == 100);
+    ASSERT(v->as.delta.op_count == 3);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_DELTA);
+    ASSERT(dec->as.delta.base_id == 100);
+    ASSERT(dec->as.delta.op_count == 3);
+    ASSERT(dec->as.delta.ops[0].op_code == COWRIE_DELTA_SET_FIELD);
+    ASSERT(dec->as.delta.ops[0].value->as.i64 == 42);
+    ASSERT(dec->as.delta.ops[1].op_code == COWRIE_DELTA_DELETE_FIELD);
+    ASSERT(dec->as.delta.ops[2].op_code == COWRIE_DELTA_APPEND_ARRAY);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_fixint_encoding(void) {
+    /* Values 0-127 should use FIXINT inline encoding */
+    for (int i = 0; i <= 127; i++) {
+        COWRIEValue *v = cowrie_new_int64(i);
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(v, &buf) == 0);
+
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_INT64);
+        ASSERT(dec->as.i64 == i);
+
+        cowrie_free(v);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
+    }
+    return 1;
+}
+
+static int test_fixneg_encoding(void) {
+    /* Values -1 to -16 should use FIXNEG inline encoding */
+    for (int i = -1; i >= -16; i--) {
+        COWRIEValue *v = cowrie_new_int64(i);
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(v, &buf) == 0);
+
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_INT64);
+        ASSERT(dec->as.i64 == i);
+
+        cowrie_free(v);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
+    }
+    return 1;
+}
+
+static int test_large_int64_roundtrip(void) {
+    /* Values outside fixint/fixneg range use standard INT64 tag */
+    int64_t values[] = {128, 256, -17, -128, 32767, -32768, 1000000LL, -1000000LL};
+    for (int i = 0; i < 8; i++) {
+        COWRIEValue *v = cowrie_new_int64(values[i]);
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(v, &buf) == 0);
+
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_INT64);
+        ASSERT(dec->as.i64 == values[i]);
+
+        cowrie_free(v);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
+    }
+    return 1;
+}
+
+static int test_fixarray_encoding(void) {
+    /* Arrays with 0-15 items should use FIXARRAY inline encoding */
+    for (int n = 0; n <= 15; n++) {
+        COWRIEValue *arr = cowrie_new_array();
+        for (int i = 0; i < n; i++) {
+            cowrie_array_append(arr, cowrie_new_int64(i));
+        }
+
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(arr, &buf) == 0);
+
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_ARRAY);
+        ASSERT(cowrie_array_len(dec) == (size_t)n);
+
+        cowrie_free(arr);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
+    }
+    return 1;
+}
+
+static int test_fixmap_encoding(void) {
+    /* Objects with 0-15 fields should use FIXMAP inline encoding */
+    for (int n = 0; n <= 5; n++) {
+        COWRIEValue *obj = cowrie_new_object();
+        for (int i = 0; i < n; i++) {
+            char key[16];
+            snprintf(key, sizeof(key), "key%d", i);
+            cowrie_object_set(obj, key, strlen(key), cowrie_new_int64(i));
+        }
+
+        COWRIEBuf buf;
+        ASSERT(cowrie_encode(obj, &buf) == 0);
+
+        COWRIEValue *dec;
+        ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+        ASSERT(dec->type == COWRIE_OBJECT);
+        ASSERT(cowrie_object_len(dec) == (size_t)n);
+
+        cowrie_free(obj);
+        cowrie_free(dec);
+        cowrie_buf_free(&buf);
+    }
+    return 1;
+}
+
+static int test_large_array_roundtrip(void) {
+    /* Array with > 15 items should use regular ARRAY tag */
+    COWRIEValue *arr = cowrie_new_array();
+    for (int i = 0; i < 20; i++) {
+        cowrie_array_append(arr, cowrie_new_int64(i));
+    }
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(arr, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_ARRAY);
+    ASSERT(cowrie_array_len(dec) == 20);
+    ASSERT(cowrie_array_get(dec, 19)->as.i64 == 19);
+
+    cowrie_free(arr);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_large_object_roundtrip(void) {
+    /* Object with > 15 fields should use regular OBJECT tag */
+    COWRIEValue *obj = cowrie_new_object();
+    for (int i = 0; i < 20; i++) {
+        char key[16];
+        snprintf(key, sizeof(key), "field_%d", i);
+        cowrie_object_set(obj, key, strlen(key), cowrie_new_int64(i * 10));
+    }
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(obj, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    ASSERT(cowrie_object_len(dec) == 20);
+
+    COWRIEValue *f0 = cowrie_object_get(dec, "field_0", 7);
+    ASSERT(f0 != NULL && f0->as.i64 == 0);
+    COWRIEValue *f19 = cowrie_object_get(dec, "field_19", 8);
+    ASSERT(f19 != NULL && f19->as.i64 == 190);
+
+    cowrie_free(obj);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_omit_null_encoding(void) {
+    COWRIEValue *obj = cowrie_new_object();
+    cowrie_object_set(obj, "keep", 4, cowrie_new_int64(1));
+    cowrie_object_set(obj, "drop", 4, cowrie_new_null());
+    cowrie_object_set(obj, "also_keep", 9, cowrie_new_string("hi", 2));
+
+    COWRIEEncodeOpts opts;
+    cowrie_encode_opts_init(&opts);
+    opts.deterministic = 1;
+    opts.omit_null = 1;
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_with_opts(obj, &opts, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    ASSERT(cowrie_object_len(dec) == 2);
+    ASSERT(cowrie_object_get(dec, "keep", 4) != NULL);
+    ASSERT(cowrie_object_get(dec, "also_keep", 9) != NULL);
+    ASSERT(cowrie_object_get(dec, "drop", 4) == NULL);
+
+    cowrie_free(obj);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_framed_none(void) {
+    COWRIEValue *v = cowrie_new_object();
+    cowrie_object_set(v, "msg", 3, cowrie_new_string("test", 4));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_framed(v, COWRIE_COMP_NONE, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode_framed(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    COWRIEValue *msg = cowrie_object_get(dec, "msg", 3);
+    ASSERT(msg != NULL && strcmp(msg->as.str.data, "test") == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_framed_gzip(void) {
+    COWRIEValue *v = cowrie_new_object();
+    cowrie_object_set(v, "data", 4, cowrie_new_string("compressed content", 18));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_framed(v, COWRIE_COMP_GZIP, &buf) == 0);
+    ASSERT(buf.len > 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode_framed(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    COWRIEValue *data = cowrie_object_get(dec, "data", 4);
+    ASSERT(data != NULL && strcmp(data->as.str.data, "compressed content") == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_decode_with_opts(void) {
+    COWRIEValue *v = cowrie_new_object();
+    cowrie_object_set(v, "test", 4, cowrie_new_int64(123));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEDecodeOpts opts;
+    cowrie_decode_opts_init(&opts);
+    opts.max_depth = 10;
+    opts.max_array_len = 100;
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode_with_opts(buf.data, buf.len, &opts, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    COWRIEValue *test = cowrie_object_get(dec, "test", 4);
+    ASSERT(test != NULL && test->as.i64 == 123);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_empty_string_roundtrip(void) {
+    COWRIEValue *v = cowrie_new_string("", 0);
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_STRING);
+    ASSERT(dec->as.str.len == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_empty_bytes_roundtrip(void) {
+    COWRIEValue *v = cowrie_new_bytes(NULL, 0);
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_BYTES);
+    ASSERT(dec->as.bytes.len == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_empty_array_roundtrip(void) {
+    COWRIEValue *v = cowrie_new_array();
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_ARRAY);
+    ASSERT(cowrie_array_len(dec) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_empty_object_roundtrip(void) {
+    COWRIEValue *v = cowrie_new_object();
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    ASSERT(cowrie_object_len(dec) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_node_batch_roundtrip(void) {
+    const char *labels[] = {"Person"};
+    size_t label_lens[] = {6};
+
+    COWRIEMember props[1];
+    props[0].key = "name";
+    props[0].key_len = 4;
+    props[0].value = cowrie_new_string("Alice", 5);
+
+    COWRIENode nodes[1];
+    nodes[0].id = "n1";
+    nodes[0].id_len = 2;
+    nodes[0].labels = (char **)labels;
+    nodes[0].label_lens = label_lens;
+    nodes[0].label_count = 1;
+    nodes[0].props = props;
+    nodes[0].prop_count = 1;
+
+    COWRIEValue *v = cowrie_new_node_batch(nodes, 1);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_NODE_BATCH);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_NODE_BATCH);
+    ASSERT(dec->as.node_batch.node_count == 1);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_edge_batch_roundtrip(void) {
+    COWRIEEdge edges[1];
+    edges[0].from_id = "n1";
+    edges[0].from_id_len = 2;
+    edges[0].to_id = "n2";
+    edges[0].to_id_len = 2;
+    edges[0].edge_type = "KNOWS";
+    edges[0].edge_type_len = 5;
+    edges[0].props = NULL;
+    edges[0].prop_count = 0;
+
+    COWRIEValue *v = cowrie_new_edge_batch(edges, 1);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_EDGE_BATCH);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_EDGE_BATCH);
+    ASSERT(dec->as.edge_batch.edge_count == 1);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_master_stream_with_crc(void) {
+    COWRIEValue *value = cowrie_new_object();
+    cowrie_object_set(value, "key", 3, cowrie_new_int64(42));
+
+    COWRIEMasterWriterOpts opts;
+    cowrie_master_writer_opts_init(&opts);
+    opts.enable_crc = 1;
+    opts.deterministic = 1;
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_master_write_frame(value, NULL, &opts, &buf) == 0);
+    ASSERT(buf.len > 0);
+
+    COWRIEMasterFrame frame;
+    int consumed = cowrie_master_read_frame(buf.data, buf.len, &frame);
+    ASSERT(consumed > 0);
+    ASSERT(frame.payload != NULL);
+
+    COWRIEValue *key = cowrie_object_get(frame.payload, "key", 3);
+    ASSERT(key != NULL && key->as.i64 == 42);
+
+    cowrie_master_frame_free(&frame);
+    cowrie_free(value);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_invalid_magic_rejects(void) {
+    uint8_t bad_data[] = {0xFF, 0xFF, 0x02, 0x00, 0x00, 0x00};
+    COWRIEValue *result = NULL;
+    int rc = cowrie_decode(bad_data, sizeof(bad_data), &result);
+    ASSERT(rc != 0);
+    ASSERT(result == NULL);
+    return 1;
+}
+
+static int test_mixed_type_array(void) {
+    COWRIEValue *arr = cowrie_new_array();
+    cowrie_array_append(arr, cowrie_new_null());
+    cowrie_array_append(arr, cowrie_new_bool(1));
+    cowrie_array_append(arr, cowrie_new_int64(-42));
+    cowrie_array_append(arr, cowrie_new_uint64(999));
+    cowrie_array_append(arr, cowrie_new_float64(2.718));
+    cowrie_array_append(arr, cowrie_new_string("hello", 5));
+    uint8_t bytes_data[] = {0xAB, 0xCD};
+    cowrie_array_append(arr, cowrie_new_bytes(bytes_data, 2));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(arr, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(cowrie_array_len(dec) == 7);
+    ASSERT(cowrie_array_get(dec, 0)->type == COWRIE_NULL);
+    ASSERT(cowrie_array_get(dec, 1)->type == COWRIE_BOOL);
+    ASSERT(cowrie_array_get(dec, 2)->type == COWRIE_INT64);
+    ASSERT(cowrie_array_get(dec, 2)->as.i64 == -42);
+    ASSERT(cowrie_array_get(dec, 3)->type == COWRIE_UINT64);
+    ASSERT(cowrie_array_get(dec, 3)->as.u64 == 999);
+    ASSERT(cowrie_array_get(dec, 4)->type == COWRIE_FLOAT64);
+    ASSERT(cowrie_array_get(dec, 5)->type == COWRIE_STRING);
+    ASSERT(cowrie_array_get(dec, 6)->type == COWRIE_BYTES);
+
+    cowrie_free(arr);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_deeply_nested(void) {
+    /* Create a deeply nested structure: [[[[42]]]] */
+    COWRIEValue *inner = cowrie_new_array();
+    cowrie_array_append(inner, cowrie_new_int64(42));
+    for (int i = 0; i < 10; i++) {
+        COWRIEValue *wrapper = cowrie_new_array();
+        cowrie_array_append(wrapper, inner);
+        inner = wrapper;
+    }
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(inner, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_ARRAY);
+
+    cowrie_free(inner);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+static int test_tensor_copy_float32(void) {
+    size_t dims[] = {2, 2};
+    float data[] = {1.0f, 2.0f, 3.0f, 4.0f};
+
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_FLOAT32, 2, dims,
+        (const uint8_t *)data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    float *copied = cowrie_tensor_copy_float32(&v->as.tensor, &count);
+    ASSERT(copied != NULL);
+    ASSERT(count == 4);
+    ASSERT(fabs(copied[0] - 1.0f) < 0.001f);
+    ASSERT(fabs(copied[3] - 4.0f) < 0.001f);
+
+    free(copied);
+    cowrie_free(v);
+    return 1;
+}
+
+static int test_tensor_copy_float64(void) {
+    size_t dims[] = {3};
+    double data[] = {1.0, 2.0, 3.0};
+
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_FLOAT64, 1, dims,
+        (const uint8_t *)data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    double *copied = cowrie_tensor_copy_float64(&v->as.tensor, &count);
+    ASSERT(copied != NULL);
+    ASSERT(count == 3);
+    ASSERT(fabs(copied[0] - 1.0) < 0.001);
+    ASSERT(fabs(copied[2] - 3.0) < 0.001);
+
+    free(copied);
+    cowrie_free(v);
+    return 1;
+}
+
+static int test_tensor_copy_int32(void) {
+    size_t dims[] = {4};
+    int32_t data[] = {-1, 0, 1, 2147483647};
+
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_INT32, 1, dims,
+        (const uint8_t *)data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    int32_t *copied = cowrie_tensor_copy_int32(&v->as.tensor, &count);
+    ASSERT(copied != NULL);
+    ASSERT(count == 4);
+    ASSERT(copied[0] == -1);
+    ASSERT(copied[3] == 2147483647);
+
+    free(copied);
+    cowrie_free(v);
+    return 1;
+}
+
+static int test_tensor_copy_int64(void) {
+    size_t dims[] = {3};
+    int64_t data[] = {-1LL, 0LL, 9223372036854775807LL};
+
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_INT64, 1, dims,
+        (const uint8_t *)data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    int64_t *copied = cowrie_tensor_copy_int64(&v->as.tensor, &count);
+    ASSERT(copied != NULL);
+    ASSERT(count == 3);
+    ASSERT(copied[0] == -1LL);
+    ASSERT(copied[2] == 9223372036854775807LL);
+
+    free(copied);
+    cowrie_free(v);
+    return 1;
+}
+
+/* Test framed gzip roundtrip (encode_framed + decode_framed) */
+static int test_framed_gzip_roundtrip(void) {
+    COWRIEValue *obj = cowrie_new_object();
+    cowrie_object_set(obj, "key", 3, cowrie_new_string("value", 5));
+    cowrie_object_set(obj, "num", 3, cowrie_new_int64(42));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_framed(obj, COWRIE_COMP_GZIP, &buf) == 0);
+    ASSERT(buf.len > 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode_framed(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+
+    COWRIEValue *key_val = cowrie_object_get(dec, "key", 3);
+    ASSERT(key_val != NULL);
+    ASSERT(key_val->type == COWRIE_STRING);
+    ASSERT(memcmp(key_val->as.str.data, "value", 5) == 0);
+
+    cowrie_free(obj);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Test framed none roundtrip */
+static int test_framed_none_roundtrip(void) {
+    COWRIEValue *arr = cowrie_new_array();
+    cowrie_array_append(arr, cowrie_new_int64(1));
+    cowrie_array_append(arr, cowrie_new_int64(2));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_framed(arr, COWRIE_COMP_NONE, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode_framed(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_ARRAY);
+    ASSERT(dec->as.array.len == 2);
+
+    cowrie_free(arr);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Test tensor view functions (inline, need coverage) */
+static int test_tensor_view_int32(void) {
+    size_t dims[] = {3};
+    int32_t data[] = {10, 20, 30};
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_INT32, 1, dims,
+        (const uint8_t *)data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    const int32_t *view = cowrie_tensor_view_int32(&v->as.tensor, &count);
+    ASSERT(view != NULL);
+    ASSERT(count == 3);
+    ASSERT(view[0] == 10);
+    ASSERT(view[2] == 30);
+
+    cowrie_free(v);
+    return 1;
+}
+
+static int test_tensor_view_int64(void) {
+    size_t dims[] = {2};
+    int64_t data[] = {100LL, 200LL};
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_INT64, 1, dims,
+        (const uint8_t *)data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    const int64_t *view = cowrie_tensor_view_int64(&v->as.tensor, &count);
+    ASSERT(view != NULL);
+    ASSERT(count == 2);
+    ASSERT(view[0] == 100LL);
+
+    cowrie_free(v);
+    return 1;
+}
+
+static int test_tensor_view_uint8(void) {
+    size_t dims[] = {4};
+    uint8_t data[] = {0, 128, 255, 1};
+    COWRIEValue *v = cowrie_new_tensor(
+        COWRIE_DTYPE_UINT8, 1, dims,
+        data, sizeof(data)
+    );
+    ASSERT(v != NULL);
+
+    size_t count;
+    const uint8_t *view = cowrie_tensor_view_uint8(&v->as.tensor, &count);
+    ASSERT(view != NULL);
+    ASSERT(count == 4);
+    ASSERT(view[2] == 255);
+
+    cowrie_free(v);
+    return 1;
+}
+
+/* Test encode_with_opts for deterministic + sorted keys with diverse types */
+static int test_encode_sorted_deterministic(void) {
+    COWRIEValue *obj = cowrie_new_object();
+    cowrie_object_set(obj, "z_null", 6, cowrie_new_null());
+    cowrie_object_set(obj, "a_bool", 6, cowrie_new_bool(1));
+    cowrie_object_set(obj, "m_int", 5, cowrie_new_int64(-42));
+    cowrie_object_set(obj, "b_uint", 6, cowrie_new_uint64(999));
+    cowrie_object_set(obj, "c_float", 7, cowrie_new_float64(3.14));
+    cowrie_object_set(obj, "d_str", 5, cowrie_new_string("hello", 5));
+    cowrie_object_set(obj, "e_bytes", 7, cowrie_new_bytes((const uint8_t*)"data", 4));
+
+    /* Add a nested array */
+    COWRIEValue *arr = cowrie_new_array();
+    cowrie_array_append(arr, cowrie_new_int64(1));
+    cowrie_array_append(arr, cowrie_new_string("two", 3));
+    cowrie_object_set(obj, "f_arr", 5, arr);
+
+    /* Nested object */
+    COWRIEValue *inner = cowrie_new_object();
+    cowrie_object_set(inner, "x", 1, cowrie_new_int64(10));
+    cowrie_object_set(obj, "g_obj", 5, inner);
+
+    COWRIEEncodeOpts opts = {0};
+    opts.deterministic = 1;
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_with_opts(obj, &opts, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    /* Keys should be sorted alphabetically */
+    ASSERT(dec->as.object.len == 9);
+    ASSERT(strcmp(dec->as.object.members[0].key, "a_bool") == 0);
+    ASSERT(dec->as.object.members[0].value->type == COWRIE_BOOL);
+
+    /* Check null is present */
+    COWRIEValue *z_null = cowrie_object_get(dec, "z_null", 6);
+    ASSERT(z_null != NULL && z_null->type == COWRIE_NULL);
+
+    /* Check float */
+    COWRIEValue *c_float = cowrie_object_get(dec, "c_float", 7);
+    ASSERT(c_float != NULL && c_float->type == COWRIE_FLOAT64);
+
+    /* Check uint */
+    COWRIEValue *b_uint = cowrie_object_get(dec, "b_uint", 6);
+    ASSERT(b_uint != NULL);
+
+    cowrie_free(obj);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Test deterministic encoding with omit_null */
+static int test_deterministic_omit_null(void) {
+    COWRIEValue *obj = cowrie_new_object();
+    cowrie_object_set(obj, "keep", 4, cowrie_new_int64(42));
+    cowrie_object_set(obj, "drop", 4, cowrie_new_null());
+    cowrie_object_set(obj, "also_keep", 9, cowrie_new_string("yes", 3));
+
+    COWRIEEncodeOpts opts = {0};
+    opts.deterministic = 1;
+    opts.omit_null = 1;
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode_with_opts(obj, &opts, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_OBJECT);
+    /* null should be omitted */
+    ASSERT(dec->as.object.len == 2);
+
+    cowrie_free(obj);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Test schema_fingerprint for extension types to cover fingerprint switch cases */
+static int test_schema_fingerprint_ext_types(void) {
+    /* Tensor */
+    size_t dims[] = {2};
+    float fdata[] = {1.0f, 2.0f};
+    COWRIEValue *tensor = cowrie_new_tensor(COWRIE_DTYPE_FLOAT32, 1, dims, (const uint8_t*)fdata, sizeof(fdata));
+    ASSERT(tensor != NULL);
+    uint32_t fp_tensor = cowrie_schema_fingerprint32(tensor);
+    ASSERT(fp_tensor != 0);
+
+    /* Different dtype tensor should have different fingerprint */
+    double ddata[] = {1.0, 2.0};
+    COWRIEValue *tensor2 = cowrie_new_tensor(COWRIE_DTYPE_FLOAT64, 1, dims, (const uint8_t*)ddata, sizeof(ddata));
+    uint32_t fp_tensor2 = cowrie_schema_fingerprint32(tensor2);
+    ASSERT(fp_tensor != fp_tensor2);
+
+    /* TensorRef */
+    uint8_t key[] = {1, 2};
+    COWRIEValue *tref = cowrie_new_tensor_ref(1, key, 2);
+    uint32_t fp_tref = cowrie_schema_fingerprint32(tref);
+    ASSERT(fp_tref != 0);
+
+    /* Ext */
+    uint8_t payload[] = {0xAB};
+    COWRIEValue *ext = cowrie_new_ext(42, payload, 1);
+    uint32_t fp_ext = cowrie_schema_fingerprint32(ext);
+    ASSERT(fp_ext != 0);
+
+    /* Image */
+    uint8_t img[] = {0xFF};
+    COWRIEValue *image = cowrie_new_image(1, 10, 10, img, 1);
+    uint32_t fp_img = cowrie_schema_fingerprint32(image);
+    ASSERT(fp_img != 0);
+
+    /* Audio */
+    uint8_t aud[] = {0x00};
+    COWRIEValue *audio = cowrie_new_audio(1, 44100, 2, aud, 1);
+    uint32_t fp_aud = cowrie_schema_fingerprint32(audio);
+    ASSERT(fp_aud != 0);
+
+    /* Adjlist */
+    size_t row_offsets[] = {0, 1};
+    int32_t col_indices[] = {0};
+    COWRIEValue *adj = cowrie_new_adjlist(COWRIE_ID_INT32, 1, 1, row_offsets, col_indices);
+    uint32_t fp_adj = cowrie_schema_fingerprint32(adj);
+    ASSERT(fp_adj != 0);
+
+    /* RichText */
+    int32_t tokens[] = {1};
+    COWRIERichTextSpan spans[] = {{0, 2, 1}};
+    COWRIEValue *rt = cowrie_new_rich_text("hi", 2, tokens, 1, spans, 1);
+    uint32_t fp_rt = cowrie_schema_fingerprint32(rt);
+    ASSERT(fp_rt != 0);
+
+    /* Delta */
+    COWRIEDeltaOp_t ops[1];
+    ops[0].op_code = COWRIE_DELTA_SET_FIELD;
+    ops[0].field_id = 1;
+    ops[0].value = cowrie_new_int64(99);
+    COWRIEValue *delta = cowrie_new_delta(0, ops, 1);
+    uint32_t fp_delta = cowrie_schema_fingerprint32(delta);
+    ASSERT(fp_delta != 0);
+
+    /* All types should have distinct fingerprints */
+    ASSERT(fp_tensor != fp_ext);
+    ASSERT(fp_ext != fp_img);
+    ASSERT(fp_img != fp_aud);
+
+    cowrie_free(tensor);
+    cowrie_free(tensor2);
+    cowrie_free(tref);
+    cowrie_free(ext);
+    cowrie_free(image);
+    cowrie_free(audio);
+    cowrie_free(adj);
+    cowrie_free(rt);
+    cowrie_free(delta);
+    return 1;
+}
+
+/* Test UTF-8 multi-byte strings (2-byte and 3-byte sequences) */
+static int test_utf8_multibyte_string(void) {
+    /* 2-byte UTF-8: e-acute (U+00E9) = 0xC3 0xA9 */
+    /* 3-byte UTF-8: CJK char (U+4E16) = 0xE4 0xB8 0x96 */
+    const char utf8[] = "\xC3\xA9\xE4\xB8\x96";
+    COWRIEValue *v = cowrie_new_string(utf8, 5);
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_STRING);
+    ASSERT(dec->as.str.len == 5);
+    ASSERT(memcmp(dec->as.str.data, utf8, 5) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Test UTF-8 4-byte sequences (emoji) */
+static int test_utf8_4byte_string(void) {
+    /* 4-byte UTF-8: U+1F600 (grinning face) = 0xF0 0x9F 0x98 0x80 */
+    const char utf8[] = "\xF0\x9F\x98\x80";
+    COWRIEValue *v = cowrie_new_string(utf8, 4);
+    ASSERT(v != NULL);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_STRING);
+    ASSERT(dec->as.str.len == 4);
+    ASSERT(memcmp(dec->as.str.data, utf8, 4) == 0);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Test graph_shard with properties on nodes/edges (covers collect_keys/dict_find paths) */
+static int test_graph_shard_with_props(void) {
+    /* Create nodes with properties */
+    const char *labels[] = {"Person"};
+    size_t label_lens[] = {6};
+
+    COWRIEMember props1[1];
+    COWRIEValue *age1 = cowrie_new_int64(25);
+    props1[0].key = "age";
+    props1[0].key_len = 3;
+    props1[0].value = age1;
+    COWRIEValue *node1 = cowrie_new_node("n1", 2, labels, label_lens, 1, props1, 1);
+    ASSERT(node1 != NULL);
+
+    COWRIEMember props2[1];
+    COWRIEValue *age2 = cowrie_new_int64(30);
+    props2[0].key = "age";
+    props2[0].key_len = 3;
+    props2[0].value = age2;
+    COWRIEValue *node2 = cowrie_new_node("n2", 2, labels, label_lens, 1, props2, 1);
+    ASSERT(node2 != NULL);
+
+    /* Create edge with properties */
+    COWRIEMember eprops[1];
+    COWRIEValue *weight = cowrie_new_float64(0.5);
+    eprops[0].key = "weight";
+    eprops[0].key_len = 6;
+    eprops[0].value = weight;
+    COWRIEValue *edge = cowrie_new_edge("n1", 2, "n2", 2, "knows", 5, eprops, 1);
+    ASSERT(edge != NULL);
+
+    /* Build graph shard */
+    COWRIENode nodes[2];
+    nodes[0] = node1->as.node;
+    nodes[1] = node2->as.node;
+    COWRIEEdge edges[1];
+    edges[0] = edge->as.edge;
+
+    COWRIEMember meta_props[1];
+    COWRIEValue *version = cowrie_new_int64(1);
+    meta_props[0].key = "version";
+    meta_props[0].key_len = 7;
+    meta_props[0].value = version;
+
+    COWRIEValue *shard = cowrie_new_graph_shard(nodes, 2, edges, 1, meta_props, 1);
+    ASSERT(shard != NULL);
+    ASSERT(shard->type == COWRIE_GRAPH_SHARD);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(shard, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_GRAPH_SHARD);
+    ASSERT(dec->as.graph_shard.node_count == 2);
+    ASSERT(dec->as.graph_shard.edge_count == 1);
+
+    /* Clean up - note: node1/node2/edge own the values, shard copies them */
+    cowrie_free(shard);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    /* node1, node2, edge still own their original values */
+    cowrie_free(node1);
+    cowrie_free(node2);
+    cowrie_free(edge);
+    return 1;
+}
+
+/* Test node with multiple labels */
+static int test_node_multi_label(void) {
+    const char *labels[] = {"Person", "Employee"};
+    size_t label_lens[] = {6, 8};
+    const char *id = "n001";
+
+    COWRIEMember props[1];
+    COWRIEValue *age = cowrie_new_int64(30);
+    props[0].key = "age";
+    props[0].key_len = 3;
+    props[0].value = age;
+
+    COWRIEValue *v = cowrie_new_node(id, 4, labels, label_lens, 2, props, 1);
+    ASSERT(v != NULL);
+    ASSERT(v->type == COWRIE_NODE);
+    ASSERT(v->as.node.label_count == 2);
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(v, &buf) == 0);
+
+    COWRIEValue *dec;
+    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
+    ASSERT(dec->type == COWRIE_NODE);
+    ASSERT(dec->as.node.label_count == 2);
+    ASSERT(dec->as.node.id_len == 4);
+
+    cowrie_free(v);
+    cowrie_free(dec);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* ============================================================
+ * Invariant Tests
+ * ============================================================ */
+
+/* NaN/Inf policy: allowed in cowrie binary */
+static int test_binary_nan_inf_roundtrip(void) {
+    /* NaN */
+    COWRIEValue *nan_val = cowrie_new_float64(NAN);
+    ASSERT(nan_val != NULL);
+    COWRIEBuf nan_buf;
+    ASSERT(cowrie_encode(nan_val, &nan_buf) == 0);
+    COWRIEValue *nan_dec;
+    ASSERT(cowrie_decode(nan_buf.data, nan_buf.len, &nan_dec) == 0);
+    ASSERT(nan_dec->type == COWRIE_FLOAT64);
+    ASSERT(isnan(nan_dec->as.f64));
+    cowrie_free(nan_val);
+    cowrie_free(nan_dec);
+    cowrie_buf_free(&nan_buf);
+
+    /* +Inf */
+    COWRIEValue *inf_val = cowrie_new_float64(INFINITY);
+    ASSERT(inf_val != NULL);
+    COWRIEBuf inf_buf;
+    ASSERT(cowrie_encode(inf_val, &inf_buf) == 0);
+    COWRIEValue *inf_dec;
+    ASSERT(cowrie_decode(inf_buf.data, inf_buf.len, &inf_dec) == 0);
+    ASSERT(inf_dec->type == COWRIE_FLOAT64);
+    ASSERT(isinf(inf_dec->as.f64) && inf_dec->as.f64 > 0);
+    cowrie_free(inf_val);
+    cowrie_free(inf_dec);
+    cowrie_buf_free(&inf_buf);
+
+    /* -Inf */
+    COWRIEValue *ninf_val = cowrie_new_float64(-INFINITY);
+    ASSERT(ninf_val != NULL);
+    COWRIEBuf ninf_buf;
+    ASSERT(cowrie_encode(ninf_val, &ninf_buf) == 0);
+    COWRIEValue *ninf_dec;
+    ASSERT(cowrie_decode(ninf_buf.data, ninf_buf.len, &ninf_dec) == 0);
+    ASSERT(ninf_dec->type == COWRIE_FLOAT64);
+    ASSERT(isinf(ninf_dec->as.f64) && ninf_dec->as.f64 < 0);
+    cowrie_free(ninf_val);
+    cowrie_free(ninf_dec);
+    cowrie_buf_free(&ninf_buf);
+
+    return 1;
+}
+
+/* Invariant #4: Trailing garbage must be rejected */
+static int test_decode_rejects_trailing_garbage(void) {
+    /* Encode a simple map {"a": 1} */
+    COWRIEValue *map = cowrie_new_object();
+    cowrie_object_set(map, "a", 1, cowrie_new_int64(1));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(map, &buf) == 0);
+
+    /* Append trailing garbage byte */
+    uint8_t *padded = malloc(buf.len + 1);
+    ASSERT(padded != NULL);
+    memcpy(padded, buf.data, buf.len);
+    padded[buf.len] = 0xFF;
+
+    COWRIEValue *decoded;
+    int result = cowrie_decode(padded, buf.len + 1, &decoded);
+    ASSERT(result == -1);
+
+    free(padded);
+    cowrie_free(map);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* Invariant #3: Truncated input must be rejected */
+static int test_decode_rejects_truncated(void) {
+    /* Encode a map {"a": 1} */
+    COWRIEValue *map = cowrie_new_object();
+    cowrie_object_set(map, "a", 1, cowrie_new_int64(1));
+
+    COWRIEBuf buf;
+    ASSERT(cowrie_encode(map, &buf) == 0);
+    ASSERT(buf.len > 4); /* Header is at least 4 bytes */
+
+    /* Try decoding at every truncation point from len-1 down to header */
+    for (size_t i = buf.len - 1; i > 4; i--) {
+        COWRIEValue *decoded = NULL;
+        int result = cowrie_decode(buf.data, i, &decoded);
+        ASSERT(result == -1);
+        /* decoded should be NULL on failure */
+    }
+
+    cowrie_free(map);
+    cowrie_buf_free(&buf);
+    return 1;
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -903,6 +2236,76 @@ int main(void) {
     TEST(oversized_adjlist_rejects);
     TEST(oversized_richtext_tokens_rejects);
     TEST(oversized_array_rejects);
+
+    printf("\nAdditional Type Tests:\n");
+    TEST(decimal128_roundtrip);
+    TEST(bigint_roundtrip);
+    TEST(ext_roundtrip);
+    TEST(bitmask_roundtrip);
+    TEST(empty_bitmask);
+    TEST(adjlist_construct_encode);
+    TEST(adjlist_int64_construct_encode);
+    TEST(rich_text_roundtrip);
+    TEST(rich_text_plain);
+    TEST(delta_roundtrip);
+
+    printf("\nv3 Inline Encoding Tests:\n");
+    TEST(fixint_encoding);
+    TEST(fixneg_encoding);
+    TEST(large_int64_roundtrip);
+    TEST(fixarray_encoding);
+    TEST(fixmap_encoding);
+    TEST(large_array_roundtrip);
+    TEST(large_object_roundtrip);
+
+    printf("\nEncoding Options Tests:\n");
+    TEST(omit_null_encoding);
+    TEST(framed_none);
+    TEST(framed_gzip);
+    TEST(decode_with_opts);
+
+    printf("\nEmpty Type Tests:\n");
+    TEST(empty_string_roundtrip);
+    TEST(empty_bytes_roundtrip);
+    TEST(empty_array_roundtrip);
+    TEST(empty_object_roundtrip);
+
+    printf("\nBatch Graph Tests:\n");
+    TEST(node_batch_roundtrip);
+    TEST(edge_batch_roundtrip);
+
+    printf("\nTensor Copy/View Tests:\n");
+    TEST(tensor_copy_float32);
+    TEST(tensor_copy_float64);
+    TEST(tensor_copy_int32);
+    TEST(tensor_copy_int64);
+    TEST(tensor_view_int32);
+    TEST(tensor_view_int64);
+    TEST(tensor_view_uint8);
+
+    printf("\nFramed Encode/Decode Tests:\n");
+    TEST(framed_gzip_roundtrip);
+    TEST(framed_none_roundtrip);
+
+    printf("\nAdditional Tests:\n");
+    TEST(encode_sorted_deterministic);
+    TEST(deterministic_omit_null);
+    TEST(node_multi_label);
+    TEST(schema_fingerprint_ext_types);
+    TEST(utf8_multibyte_string);
+    TEST(utf8_4byte_string);
+    TEST(graph_shard_with_props);
+    TEST(master_stream_with_crc);
+    TEST(invalid_magic_rejects);
+    TEST(mixed_type_array);
+    TEST(deeply_nested);
+
+    printf("\nNaN/Inf Binary Tests:\n");
+    TEST(binary_nan_inf_roundtrip);
+
+    printf("\nInvariant Tests:\n");
+    TEST(decode_rejects_trailing_garbage);
+    TEST(decode_rejects_truncated);
 
     printf("\n=====================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);

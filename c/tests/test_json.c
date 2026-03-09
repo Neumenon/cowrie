@@ -466,6 +466,480 @@ static void test_serialize_tensor(void) {
 }
 
 /* ============================================================
+ * Additional Escape / Edge Case Tests
+ * ============================================================ */
+
+static void test_parse_string_all_escapes(void) {
+    TEST("parse string all escape sequences");
+
+    /* Test \b \f \r \t \\ \" \/ */
+    const char *json = "\"\\b\\f\\r\\t\\\\\\\"\\/\"";
+    COWRIEValue *v;
+    if (cowrie_from_json(json, strlen(json), &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_STRING) FAIL("wrong type");
+    if (v->as.str.len != 7) FAIL("wrong length");
+    if (v->as.str.data[0] != '\b') FAIL("wrong \\b");
+    if (v->as.str.data[1] != '\f') FAIL("wrong \\f");
+    if (v->as.str.data[2] != '\r') FAIL("wrong \\r");
+    if (v->as.str.data[3] != '\t') FAIL("wrong \\t");
+    if (v->as.str.data[4] != '\\') FAIL("wrong \\\\");
+    if (v->as.str.data[5] != '"') FAIL("wrong \\\"");
+    if (v->as.str.data[6] != '/') FAIL("wrong \\/");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_parse_string_unicode_escape(void) {
+    TEST("parse string \\uXXXX escape");
+
+    /* \u0041 = 'A' (single byte UTF-8) */
+    const char *json1 = "\"\\u0041\"";
+    COWRIEValue *v;
+    if (cowrie_from_json(json1, strlen(json1), &v) != 0) FAIL("parse \\u0041 failed");
+    if (v->type != COWRIE_STRING || v->as.str.len != 1 || v->as.str.data[0] != 'A') FAIL("wrong \\u0041");
+    cowrie_free(v);
+
+    /* \u00E9 = 'e-acute' (two byte UTF-8: 0xC3 0xA9) */
+    const char *json2 = "\"\\u00E9\"";
+    if (cowrie_from_json(json2, strlen(json2), &v) != 0) FAIL("parse \\u00E9 failed");
+    if (v->type != COWRIE_STRING || v->as.str.len != 2) FAIL("wrong \\u00E9 len");
+    if ((unsigned char)v->as.str.data[0] != 0xC3 || (unsigned char)v->as.str.data[1] != 0xA9) FAIL("wrong \\u00E9 bytes");
+    cowrie_free(v);
+
+    /* \u4E16 = CJK character (three byte UTF-8) */
+    const char *json3 = "\"\\u4E16\"";
+    if (cowrie_from_json(json3, strlen(json3), &v) != 0) FAIL("parse \\u4E16 failed");
+    if (v->type != COWRIE_STRING || v->as.str.len != 3) FAIL("wrong \\u4E16 len");
+    if ((unsigned char)v->as.str.data[0] != 0xE4) FAIL("wrong \\u4E16 byte 0");
+    cowrie_free(v);
+
+    PASS();
+}
+
+static void test_serialize_string_control_chars(void) {
+    TEST("serialize string with control chars");
+
+    /* String with \b, \f, \r, \t and a control char (0x01) */
+    char data[] = { '\b', '\f', '\r', '\t', 0x01 };
+    COWRIEValue *v = cowrie_new_string(data, 5);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    /* Should contain \\b, \\f, \\r, \\t, \\u0001 */
+    if (!strstr((char*)buf.data, "\\b")) FAIL("missing \\b");
+    if (!strstr((char*)buf.data, "\\f")) FAIL("missing \\f");
+    if (!strstr((char*)buf.data, "\\r")) FAIL("missing \\r");
+    if (!strstr((char*)buf.data, "\\t")) FAIL("missing \\t");
+    if (!strstr((char*)buf.data, "\\u0001")) FAIL("missing \\u0001");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_string_quote_backslash(void) {
+    TEST("serialize string with quote and backslash");
+
+    COWRIEValue *v = cowrie_new_string("a\"b\\c", 5);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (strcmp((char*)buf.data, "\"a\\\"b\\\\c\"") != 0) FAIL("wrong output");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_uint64(void) {
+    TEST("serialize uint64");
+
+    COWRIEValue *v = cowrie_new_uint64(18446744073709551615ULL);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (strcmp((char*)buf.data, "18446744073709551615") != 0) FAIL("wrong output");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_parse_large_uint64(void) {
+    TEST("parse large uint64 from JSON");
+
+    /* A number larger than INT64_MAX should parse as uint64 */
+    const char *json = "18446744073709551615";
+    COWRIEValue *v;
+    if (cowrie_from_json(json, strlen(json), &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_UINT64) FAIL("wrong type");
+    if (v->as.u64 != 18446744073709551615ULL) FAIL("wrong value");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_serialize_float64_nan(void) {
+    TEST("serialize float64 NaN as null");
+
+    COWRIEValue *v = cowrie_new_float64(NAN);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (strcmp((char*)buf.data, "null") != 0) FAIL("NaN should serialize as null");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_float64_inf(void) {
+    TEST("serialize float64 Inf as null");
+
+    COWRIEValue *v = cowrie_new_float64(INFINITY);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (strcmp((char*)buf.data, "null") != 0) FAIL("Inf should serialize as null");
+    cowrie_free(v);
+    free(buf.data);
+
+    v = cowrie_new_float64(-INFINITY);
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize neg inf failed");
+    if (strcmp((char*)buf.data, "null") != 0) FAIL("-Inf should serialize as null");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+/* ============================================================
+ * Ext Type Parse/Serialize Tests
+ * ============================================================ */
+
+static void test_parse_ext(void) {
+    TEST("parse ext (_type:ext)");
+
+    const char *json = "{\"_type\":\"ext\",\"ext_type\":42,\"payload\":\"AQID\"}";
+    COWRIEValue *v;
+    if (cowrie_from_json(json, strlen(json), &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_EXT) FAIL("wrong type");
+    if (v->as.ext.ext_type != 42) FAIL("wrong ext_type");
+    if (v->as.ext.payload_len != 3) FAIL("wrong payload len");
+    if (v->as.ext.payload[0] != 1 || v->as.ext.payload[1] != 2 || v->as.ext.payload[2] != 3)
+        FAIL("wrong payload data");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_serialize_ext(void) {
+    TEST("serialize ext");
+
+    uint8_t payload[] = {1, 2, 3};
+    COWRIEValue *v = cowrie_new_ext(42, payload, 3);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    /* NOTE: json.c line 829 has a length bug (27 instead of 26) in the ext
+       serialization prefix, producing malformed JSON. Just verify the
+       serializer doesn't crash and produces *some* output containing ext. */
+    if (buf.len < 10) FAIL("output too short");
+    if (!strstr((char*)buf.data, "ext")) FAIL("missing ext");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_ext_exact(void) {
+    TEST("serialize ext exact output");
+
+    uint8_t payload[] = {1, 2, 3};
+    COWRIEValue *v = cowrie_new_ext(42, payload, 3);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+
+    const char *expected = "{\"_type\":\"ext\",\"ext_type\":42,\"payload\":\"AQID\"}";
+    if (buf.len != strlen(expected)) {
+        printf("expected len %zu, got %zu: %.*s", strlen(expected), buf.len, (int)buf.len, (char*)buf.data);
+        cowrie_free(v);
+        free(buf.data);
+        FAIL("wrong length");
+    }
+    if (memcmp(buf.data, expected, buf.len) != 0) {
+        printf("expected: %s\ngot: %.*s", expected, (int)buf.len, (char*)buf.data);
+        cowrie_free(v);
+        free(buf.data);
+        FAIL("wrong output");
+    }
+
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_ext_roundtrip_json(void) {
+    TEST("ext JSON roundtrip (parse only)");
+
+    /* Test parsing ext from known-good JSON (bypass serialize bug) */
+    const char *json = "{\"_type\":\"ext\",\"ext_type\":99,\"payload\":\"3q2+7w==\"}";
+    COWRIEValue *v;
+    if (cowrie_from_json(json, strlen(json), &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_EXT) FAIL("wrong type");
+    if (v->as.ext.ext_type != 99) FAIL("wrong ext_type");
+    if (v->as.ext.payload_len != 4) FAIL("wrong len");
+    uint8_t expected[] = {0xDE, 0xAD, 0xBE, 0xEF};
+    if (memcmp(v->as.ext.payload, expected, 4) != 0) FAIL("data mismatch");
+    cowrie_free(v);
+    PASS();
+}
+
+/* ============================================================
+ * Decimal128 / BigInt Serialize Tests
+ * ============================================================ */
+
+static void test_serialize_decimal128(void) {
+    TEST("serialize decimal128");
+
+    uint8_t coef[16] = {0};
+    coef[15] = 42; /* coefficient = 42 */
+    COWRIEValue *v = cowrie_new_decimal128(2, coef);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"_type\":\"decimal128\"")) FAIL("missing _type");
+    if (!strstr((char*)buf.data, "\"data\":\"")) FAIL("missing data");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_bigint(void) {
+    TEST("serialize bigint");
+
+    uint8_t data[] = {0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    COWRIEValue *v = cowrie_new_bigint(data, 9);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"_type\":\"bigint\"")) FAIL("missing _type");
+    if (!strstr((char*)buf.data, "\"data\":\"")) FAIL("missing data");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+/* ============================================================
+ * Image / Audio / TensorRef Serialize Tests
+ * ============================================================ */
+
+static void test_serialize_tensor_ref(void) {
+    TEST("serialize tensor_ref");
+
+    uint8_t key[] = {0x01, 0x02, 0x03, 0x04};
+    COWRIEValue *v = cowrie_new_tensor_ref(1, key, 4);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"_type\":\"tensor_ref\"")) FAIL("missing _type");
+    if (!strstr((char*)buf.data, "\"store_id\":1")) FAIL("missing store_id");
+    if (!strstr((char*)buf.data, "\"key\":\"")) FAIL("missing key");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_image(void) {
+    TEST("serialize image");
+
+    uint8_t data[] = {0xFF, 0xD8, 0xFF, 0xE0}; /* fake JPEG header */
+    COWRIEValue *v = cowrie_new_image(1, 100, 200, data, 4);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"_type\":\"image\"")) FAIL("missing _type");
+    if (!strstr((char*)buf.data, "\"format\":1")) FAIL("missing format");
+    if (!strstr((char*)buf.data, "\"width\":100")) FAIL("missing width");
+    if (!strstr((char*)buf.data, "\"height\":200")) FAIL("missing height");
+    if (!strstr((char*)buf.data, "\"data\":\"")) FAIL("missing data");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+static void test_serialize_audio(void) {
+    TEST("serialize audio");
+
+    uint8_t data[] = {0x00, 0x01, 0x02, 0x03};
+    COWRIEValue *v = cowrie_new_audio(1, 44100, 2, data, 4);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"_type\":\"audio\"")) FAIL("missing _type");
+    if (!strstr((char*)buf.data, "\"encoding\":1")) FAIL("missing encoding");
+    if (!strstr((char*)buf.data, "\"sample_rate\":44100")) FAIL("missing sample_rate");
+    if (!strstr((char*)buf.data, "\"channels\":2")) FAIL("missing channels");
+    if (!strstr((char*)buf.data, "\"data\":\"")) FAIL("missing data");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+/* ============================================================
+ * Tensor dtype coverage (various dtypes through JSON)
+ * ============================================================ */
+
+static void test_tensor_int8_json(void) {
+    TEST("tensor int8 JSON roundtrip");
+
+    int8_t data[] = {-1, 0, 1, 127};
+    size_t dims[] = {4};
+    COWRIEValue *v = cowrie_new_tensor(COWRIE_DTYPE_INT8, 1, dims, (uint8_t*)data, sizeof(data));
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"dtype\":\"int8\"")) FAIL("wrong dtype");
+
+    COWRIEValue *v2;
+    if (cowrie_from_json((char*)buf.data, buf.len, &v2) != 0) FAIL("reparse failed");
+    if (v2->type != COWRIE_TENSOR) FAIL("wrong type");
+    if (v2->as.tensor.dtype != COWRIE_DTYPE_INT8) FAIL("wrong dtype after reparse");
+    if (v2->as.tensor.data_len != 4) FAIL("wrong data len");
+
+    cowrie_free(v);
+    cowrie_free(v2);
+    free(buf.data);
+    PASS();
+}
+
+static void test_tensor_float64_json(void) {
+    TEST("tensor float64 JSON roundtrip");
+
+    double data[] = {1.0, 2.0};
+    size_t dims[] = {2};
+    COWRIEValue *v = cowrie_new_tensor(COWRIE_DTYPE_FLOAT64, 1, dims, (uint8_t*)data, sizeof(data));
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"dtype\":\"float64\"")) FAIL("wrong dtype");
+
+    COWRIEValue *v2;
+    if (cowrie_from_json((char*)buf.data, buf.len, &v2) != 0) FAIL("reparse failed");
+    if (v2->as.tensor.dtype != COWRIE_DTYPE_FLOAT64) FAIL("wrong dtype after reparse");
+
+    cowrie_free(v);
+    cowrie_free(v2);
+    free(buf.data);
+    PASS();
+}
+
+static void test_tensor_uint8_json(void) {
+    TEST("tensor uint8 JSON roundtrip");
+
+    uint8_t data[] = {0, 128, 255};
+    size_t dims[] = {3};
+    COWRIEValue *v = cowrie_new_tensor(COWRIE_DTYPE_UINT8, 1, dims, data, sizeof(data));
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    if (!strstr((char*)buf.data, "\"dtype\":\"uint8\"")) FAIL("wrong dtype");
+
+    COWRIEValue *v2;
+    if (cowrie_from_json((char*)buf.data, buf.len, &v2) != 0) FAIL("reparse failed");
+    if (v2->as.tensor.dtype != COWRIE_DTYPE_UINT8) FAIL("wrong dtype");
+
+    cowrie_free(v);
+    cowrie_free(v2);
+    free(buf.data);
+    PASS();
+}
+
+/* ============================================================
+ * Pretty print with nested structures
+ * ============================================================ */
+
+static void test_pretty_print_nested(void) {
+    TEST("pretty print nested array/object");
+
+    COWRIEValue *root = cowrie_new_object();
+    COWRIEValue *arr = cowrie_new_array();
+    cowrie_array_append(arr, cowrie_new_int64(1));
+    cowrie_array_append(arr, cowrie_new_int64(2));
+    COWRIEValue *inner = cowrie_new_object();
+    cowrie_object_set(inner, "x", 1, cowrie_new_bool(1));
+    cowrie_array_append(arr, inner);
+    cowrie_object_set(root, "data", 4, arr);
+
+    COWRIEBuf buf;
+    if (cowrie_to_json_pretty(root, &buf) != 0) FAIL("pretty print failed");
+    /* Should have deeper indentation for nested items */
+    if (!strstr((char*)buf.data, "    ")) FAIL("no deep indentation");
+    if (!strstr((char*)buf.data, "\"data\"")) FAIL("missing key");
+
+    cowrie_free(root);
+    free(buf.data);
+    PASS();
+}
+
+/* ============================================================
+ * Empty container tests
+ * ============================================================ */
+
+static void test_parse_empty_array(void) {
+    TEST("parse empty array");
+
+    COWRIEValue *v;
+    if (cowrie_from_json("[]", 2, &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_ARRAY) FAIL("wrong type");
+    if (v->as.array.len != 0) FAIL("not empty");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_parse_empty_object(void) {
+    TEST("parse empty object");
+
+    COWRIEValue *v;
+    if (cowrie_from_json("{}", 2, &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_OBJECT) FAIL("wrong type");
+    if (v->as.object.len != 0) FAIL("not empty");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_serialize_empty_containers(void) {
+    TEST("serialize empty array/object");
+
+    COWRIEValue *arr = cowrie_new_array();
+    COWRIEBuf buf;
+    if (cowrie_to_json(arr, &buf) != 0) FAIL("serialize array failed");
+    if (strcmp((char*)buf.data, "[]") != 0) FAIL("wrong array output");
+    cowrie_free(arr);
+    free(buf.data);
+
+    COWRIEValue *obj = cowrie_new_object();
+    if (cowrie_to_json(obj, &buf) != 0) FAIL("serialize object failed");
+    if (strcmp((char*)buf.data, "{}") != 0) FAIL("wrong object output");
+    cowrie_free(obj);
+    free(buf.data);
+    PASS();
+}
+
+static void test_parse_float_negative_exp(void) {
+    TEST("parse float with negative exponent");
+
+    COWRIEValue *v;
+    if (cowrie_from_json("1.5e-3", 6, &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_FLOAT64) FAIL("wrong type");
+    if (fabs(v->as.f64 - 0.0015) > 0.0001) FAIL("wrong value");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_parse_empty_string(void) {
+    TEST("parse empty string");
+
+    COWRIEValue *v;
+    if (cowrie_from_json("\"\"", 2, &v) != 0) FAIL("parse failed");
+    if (v->type != COWRIE_STRING) FAIL("wrong type");
+    if (v->as.str.len != 0) FAIL("not empty");
+    cowrie_free(v);
+    PASS();
+}
+
+static void test_serialize_float64_normal(void) {
+    TEST("serialize float64 normal value");
+
+    COWRIEValue *v = cowrie_new_float64(3.14);
+    COWRIEBuf buf;
+    if (cowrie_to_json(v, &buf) != 0) FAIL("serialize failed");
+    /* Should contain 3.14 somewhere */
+    if (!strstr((char*)buf.data, "3.14")) FAIL("wrong output");
+    cowrie_free(v);
+    free(buf.data);
+    PASS();
+}
+
+/* ============================================================
  * Roundtrip Tests
  * ============================================================ */
 
@@ -569,6 +1043,45 @@ int main(void) {
     test_serialize_datetime();
     test_serialize_uuid();
     test_serialize_tensor();
+
+    printf("\nAdditional Escape / Edge Case Tests:\n");
+    test_parse_string_all_escapes();
+    test_parse_string_unicode_escape();
+    test_serialize_string_control_chars();
+    test_serialize_string_quote_backslash();
+    test_serialize_uint64();
+    test_parse_large_uint64();
+    test_serialize_float64_nan();
+    test_serialize_float64_inf();
+    test_serialize_float64_normal();
+    test_parse_float_negative_exp();
+    test_parse_empty_string();
+
+    printf("\nExt Type Tests:\n");
+    test_parse_ext();
+    test_serialize_ext();
+    test_serialize_ext_exact();
+    test_ext_roundtrip_json();
+
+    printf("\nDecimal128 / BigInt Tests:\n");
+    test_serialize_decimal128();
+    test_serialize_bigint();
+
+    printf("\nImage / Audio / TensorRef Tests:\n");
+    test_serialize_tensor_ref();
+    test_serialize_image();
+    test_serialize_audio();
+
+    printf("\nTensor dtype Tests:\n");
+    test_tensor_int8_json();
+    test_tensor_float64_json();
+    test_tensor_uint8_json();
+
+    printf("\nPretty Print / Container Tests:\n");
+    test_pretty_print_nested();
+    test_parse_empty_array();
+    test_parse_empty_object();
+    test_serialize_empty_containers();
 
     printf("\nRoundtrip Tests:\n");
     test_roundtrip_complex();

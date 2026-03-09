@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"testing"
 	"time"
+
+	cowrie "github.com/Neumenon/cowrie/go"
 )
 
 // FuzzMasterStreamReader_Next fuzzes the master stream reader.
@@ -175,12 +177,19 @@ func FuzzTensorDecode(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, data []byte) {
-		// Try to decode as various tensor types
-		// These should not panic
-		DecodeFloat32Tensor(nil)
+		// Wrap fuzzed data as a cowrie document and try to decode
+		var decoded any
+		err := DecodeBytes(data, &decoded)
+		if err != nil {
+			return // errors expected for malformed input
+		}
 
-		// Create a fake Value with the data and try to decode
-		// This is a simplified test; full integration would need proper Cowrie wrapping
+		// If decode succeeded with a Value, try tensor extraction (should not panic)
+		val, ok := decoded.(*cowrie.Value)
+		if !ok {
+			return
+		}
+		DecodeFloat32Tensor(val)
 	})
 }
 

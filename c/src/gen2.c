@@ -2192,7 +2192,8 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         if (safe_add((size_t)node_count, 1, &ro_count) != 0) return -1;
         size_t ro_alloc;
         if (safe_mul(ro_count, sizeof(size_t), &ro_alloc) != 0) return -1;
-        if (ro_alloc > rd_remaining(r)) return -1;
+        /* Sanity check: nodeCount+1 offsets, each uvarint is at least 1 byte */
+        if (ro_count > rd_remaining(r)) return -1;
         size_t *row_offsets = malloc(ro_alloc);
         if (!row_offsets) return -1;
         for (size_t i = 0; i <= (size_t)node_count; i++) {
@@ -2900,6 +2901,13 @@ int cowrie_decode_with_opts(const uint8_t *data, size_t len,
         free(dict[i]);
     }
     free(dict);
+
+    /* Reject trailing garbage (Invariant #4) */
+    if (result == 0 && r.pos < r.len) {
+        cowrie_free(*out);
+        *out = NULL;
+        result = -1;
+    }
 
     return result;
 }
