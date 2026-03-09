@@ -34,6 +34,16 @@ mod tags {
     pub const NODE_BATCH: u8 = 0x37;
     pub const EDGE_BATCH: u8 = 0x38;
     pub const GRAPH_SHARD: u8 = 0x39;
+    pub const BITMASK: u8 = 0x24;
+    // v3 inline types
+    pub const FIXINT_BASE: u8 = 0x40;
+    pub const FIXINT_MAX: u8 = 0xBF;
+    pub const FIXARRAY_BASE: u8 = 0xC0;
+    pub const FIXARRAY_MAX: u8 = 0xCF;
+    pub const FIXMAP_BASE: u8 = 0xD0;
+    pub const FIXMAP_MAX: u8 = 0xDF;
+    pub const FIXNEG_BASE: u8 = 0xE0;
+    pub const FIXNEG_MAX: u8 = 0xEF;
 }
 
 /// Encoding options.
@@ -170,8 +180,15 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
             buf.push(tags::FALSE);
         }
         Value::Int(i) => {
-            buf.push(tags::INT64);
-            write_uvarint(buf, zigzag_encode(*i));
+            let v = *i;
+            if v >= 0 && v <= 127 {
+                buf.push(tags::FIXINT_BASE + v as u8);
+            } else if v >= -16 && v <= -1 {
+                buf.push(tags::FIXNEG_BASE + (-1 - v) as u8);
+            } else {
+                buf.push(tags::INT64);
+                write_uvarint(buf, zigzag_encode(v));
+            }
         }
         Value::Uint(u) => {
             buf.push(tags::UINT64);
@@ -208,8 +225,13 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
             buf.extend_from_slice(data);
         }
         Value::Array(arr) => {
-            buf.push(tags::ARRAY);
-            write_uvarint(buf, arr.len() as u64);
+            let len = arr.len();
+            if len <= 15 {
+                buf.push(tags::FIXARRAY_BASE + len as u8);
+            } else {
+                buf.push(tags::ARRAY);
+                write_uvarint(buf, len as u64);
+            }
             for item in arr {
                 encode_value(buf, item, dict, opts)?;
             }
@@ -224,8 +246,13 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
                 obj.iter().collect()
             };
 
-            buf.push(tags::OBJECT);
-            write_uvarint(buf, filtered.len() as u64);
+            let flen = filtered.len();
+            if flen <= 15 {
+                buf.push(tags::FIXMAP_BASE + flen as u8);
+            } else {
+                buf.push(tags::OBJECT);
+                write_uvarint(buf, flen as u64);
+            }
 
             for (key, val) in filtered {
                 // O(1) key index lookup
@@ -320,6 +347,11 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
             write_uvarint(buf, ext.type_id);
             write_uvarint(buf, ext.payload.len() as u64);
             buf.extend_from_slice(&ext.payload);
+        }
+        Value::Bitmask { count, bits } => {
+            buf.push(tags::BITMASK);
+            write_uvarint(buf, *count);
+            buf.extend_from_slice(bits);
         }
         // Graph types
         Value::Node(node) => {

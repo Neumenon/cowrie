@@ -1,11 +1,13 @@
 package cowrie
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math"
+	"unsafe"
 )
 
 // Errors
@@ -85,6 +87,24 @@ type DecodeOptions struct {
 	// OnUnknownExt controls behavior when an unknown TagExt is encountered.
 	// Default (zero value) is UnknownExtKeep.
 	OnUnknownExt UnknownExtBehavior
+
+	// UnsafeStrings enables zero-copy string decoding.
+	// When true, decoded strings point directly into the input buffer.
+	// The caller MUST NOT mutate the input []byte after decoding.
+	// Default false (safe copy).
+	UnsafeStrings bool
+
+	// TensorSink, when non-nil, receives tensor data via streaming callback
+	// instead of allocating a []byte for the tensor body.
+	// The sink MUST consume all bytes from the Reader.
+	TensorSink TensorSink
+}
+
+// TensorSink receives streamed tensor data during decode.
+// When set in DecodeOptions, tensor bodies are streamed to the sink
+// instead of being allocated as []byte.
+type TensorSink interface {
+	AcceptTensor(dtype DType, dims []uint64, data io.Reader) error
 }
 
 // DefaultDecodeOptions returns options with default security limits.
@@ -298,6 +318,9 @@ func (r *reader) readString() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if r.opts.UnsafeStrings {
+		return unsafe.String(&b[0], len(b)), nil
+	}
 	return string(b), nil
 }
 
@@ -318,6 +341,12 @@ func (r *reader) readStringWithLimit(maxLen int) (string, error) {
 	b, err := r.read(int(length))
 	if err != nil {
 		return "", err
+	}
+	if r.opts.UnsafeStrings {
+		if len(b) == 0 {
+			return "", nil
+		}
+		return unsafe.String(&b[0], len(b)), nil
 	}
 	return string(b), nil
 }
@@ -583,6 +612,14 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		copy(uuid[:], b)
 		return UUID128(uuid), nil
 
+	case TagFloat32:
+		b, err := r.read(4)
+		if err != nil {
+			return nil, err
+		}
+		bits := binary.LittleEndian.Uint32(b)
+		return Float64(float64(math.Float32frombits(bits))), nil
+
 	case TagBigInt:
 		length, err := r.readUvarint()
 		if err != nil {
@@ -703,6 +740,16 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		// Enforce MaxBytesLen for tensor data
 		if r.opts.MaxBytesLen > 0 && dataLen > uint64(r.opts.MaxBytesLen) {
 			return nil, ErrBytesTooLarge
+		}
+		// Streaming tensor decode via TensorSink
+		if r.opts.TensorSink != nil {
+			subslice := r.data[r.pos : r.pos+int(dataLen)]
+			r.pos += int(dataLen)
+			if err := r.opts.TensorSink.AcceptTensor(DType(dtype), dims, bytes.NewReader(subslice)); err != nil {
+				return nil, err
+			}
+			// Return a tensor with nil data (header only)
+			return Tensor(DType(dtype), dims, nil), nil
 		}
 		data, err := r.read(int(dataLen))
 		if err != nil {
@@ -1085,6 +1132,25 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		}
 		return GraphShard(nodes, edges, metadata), nil
 
+	case TagBitmask:
+		count, err := r.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		byteLen := (count + 7) / 8
+		// Sanity check
+		if byteLen > uint64(r.remaining()) {
+			return nil, ErrMalformedLength
+		}
+		if r.opts.MaxBytesLen > 0 && byteLen > uint64(r.opts.MaxBytesLen) {
+			return nil, ErrBytesTooLarge
+		}
+		bits, err := r.read(int(byteLen))
+		if err != nil {
+			return nil, err
+		}
+		return Bitmask(count, bits), nil
+
 	case TagExt:
 		// Extension envelope: ExtType:uvarint | Len:uvarint | Payload:Len bytes
 		extType, err := r.readUvarint()
@@ -1124,7 +1190,65 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		}
 
 	default:
-		return nil, &TagError{Tag: tag}
+		// v3 inline types
+		switch {
+		case tag >= TagFixintBase && tag <= TagFixintMax:
+			return Int64(int64(tag - TagFixintBase)), nil
+
+		case tag >= TagFixarrayBase && tag <= TagFixarrayMax:
+			count := int(tag - TagFixarrayBase)
+			// Limit check
+			if r.opts.MaxArrayLen > 0 && count > r.opts.MaxArrayLen {
+				return nil, ErrArrayTooLarge
+			}
+			if err := r.enterNested(); err != nil {
+				return nil, err
+			}
+			defer r.exitNested()
+			items := make([]*Value, count)
+			for i := 0; i < count; i++ {
+				v, err := decodeValue(r, dict)
+				if err != nil {
+					return nil, err
+				}
+				items[i] = v
+			}
+			return Array(items...), nil
+
+		case tag >= TagFixmapBase && tag <= TagFixmapMax:
+			count := int(tag - TagFixmapBase)
+			// Limit check
+			if r.opts.MaxObjectLen > 0 && count > r.opts.MaxObjectLen {
+				return nil, ErrObjectTooLarge
+			}
+			if err := r.enterNested(); err != nil {
+				return nil, err
+			}
+			defer r.exitNested()
+			members := make([]Member, count)
+			for i := 0; i < count; i++ {
+				fieldID, err := r.readUvarint()
+				if err != nil {
+					return nil, err
+				}
+				if fieldID >= uint64(len(dict)) {
+					return nil, ErrInvalidFieldID
+				}
+				v, err := decodeValue(r, dict)
+				if err != nil {
+					return nil, err
+				}
+				members[i] = Member{Key: dict[fieldID], Value: v}
+			}
+			return Object(members...), nil
+
+		case tag >= TagFixnegBase && tag <= TagFixnegMax:
+			// value = -1 - (tag - TagFixnegBase)
+			return Int64(int64(-1) - int64(tag-TagFixnegBase)), nil
+
+		default:
+			return nil, &TagError{Tag: tag}
+		}
 	}
 }
 
@@ -1316,6 +1440,8 @@ func valueToAny(v *Value) any {
 		return v.edgeBatchVal
 	case TypeGraphShard:
 		return v.graphShardVal
+	case TypeBitmask:
+		return v.bitmaskVal
 	case TypeUnknownExt:
 		return v.unknownExtVal
 	default:

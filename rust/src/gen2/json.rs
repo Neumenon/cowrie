@@ -379,6 +379,13 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
                 "metadata": serde_json::Value::Object(metadata?)
             }))
         }
+        Value::Bitmask { count, bits } => {
+            Ok(serde_json::json!({
+                "_type": "bitmask",
+                "count": count,
+                "bits": bits
+            }))
+        }
     }
 }
 

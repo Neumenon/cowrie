@@ -67,11 +67,15 @@ const (
 	// Unknown extensions can be preserved (UnknownExt) or skipped based on DecodeOptions.
 	TagExt = 0x0E
 
+	// Gen2 Float32 (0x0F)
+	TagFloat32 = 0x0F
+
 	// v2.1 ML/Multimodal extensions (0x20-0x2F)
 	TagTensor    = 0x20
 	TagTensorRef = 0x21
 	TagImage     = 0x22
 	TagAudio     = 0x23
+	TagBitmask   = 0x24 // v3: packed boolean bitmask
 
 	// v2.1 Graph/Delta extensions (0x30-0x3F)
 	TagAdjlist  = 0x30
@@ -84,6 +88,21 @@ const (
 	TagNodeBatch  = 0x37
 	TagEdgeBatch  = 0x38
 	TagGraphShard = 0x39
+
+	// v3 Inline types (0x40-0xFF)
+	// FIXINT: 0x40-0xBF → value = tag - 0x40 (0-127)
+	TagFixintBase = 0x40
+	TagFixintMax  = 0xBF
+	// FIXARRAY: 0xC0-0xCF → count = tag - 0xC0 (0-15)
+	TagFixarrayBase = 0xC0
+	TagFixarrayMax  = 0xCF
+	// FIXMAP: 0xD0-0xDF → count = tag - 0xD0 (0-15)
+	TagFixmapBase = 0xD0
+	TagFixmapMax  = 0xDF
+	// FIXNEG: 0xE0-0xEF → value = 0xDF - tag (-1 to -16)
+	TagFixnegBase = 0xE0
+	TagFixnegMax  = 0xEF
+	// RESERVED: 0xF0-0xFF
 )
 
 // Type represents the type of an Cowrie value.
@@ -117,6 +136,8 @@ const (
 	TypeNodeBatch
 	TypeEdgeBatch
 	TypeGraphShard
+	// v3 types
+	TypeBitmask // Packed boolean bitmask
 	// Forward compatibility
 	TypeUnknownExt // Preserved unknown extension (see UnknownExtData)
 )
@@ -174,6 +195,8 @@ func (t Type) String() string {
 		return "edge_batch"
 	case TypeGraphShard:
 		return "graph_shard"
+	case TypeBitmask:
+		return "bitmask"
 	case TypeUnknownExt:
 		return "unknown_ext"
 	default:
@@ -417,6 +440,21 @@ type DeltaData struct {
 	Ops    []DeltaOp // Operations
 }
 
+// BitmaskData represents a packed boolean bitmask.
+// Bit ordering: LSB-first within each byte. Bit i is at bytes[i/8] & (1 << (i%8)).
+type BitmaskData struct {
+	Count uint64 // Number of boolean values
+	Bits  []byte // Packed bits, ceil(Count/8) bytes
+}
+
+// Get returns the boolean value at index i. Panics if out of bounds.
+func (bm *BitmaskData) Get(i uint64) bool {
+	if i >= bm.Count {
+		panic("cowrie: bitmask index out of bounds")
+	}
+	return bm.Bits[i/8]&(1<<(i%8)) != 0
+}
+
 // UnknownExtData represents a preserved unknown extension.
 // When the decoder encounters a TagExt with an unrecognized ExtType,
 // and OnUnknownExt is set to Keep (default), the extension is preserved
@@ -501,8 +539,11 @@ type Value struct {
 	richTextVal  RichTextData
 	deltaVal     DeltaData
 
+	// v3 type fields
+	bitmaskVal BitmaskData
+
 	// v2.1 graph type fields
-	nodeVal       NodeData
+	nodeVal NodeData
 	edgeVal       EdgeData
 	nodeBatchVal  NodeBatchData
 	edgeBatchVal  EdgeBatchData
@@ -993,4 +1034,20 @@ func (v *Value) TryGraphShard() (GraphShardData, bool) {
 		return GraphShardData{}, false
 	}
 	return v.graphShardVal, true
+}
+
+// Bitmask returns the bitmask data. Panics if not a bitmask.
+func (v *Value) Bitmask() BitmaskData {
+	if v.typ != TypeBitmask {
+		panic("cowrie: not a bitmask")
+	}
+	return v.bitmaskVal
+}
+
+// TryBitmask returns the bitmask data and true if this is a bitmask, or (BitmaskData{}, false) otherwise.
+func (v *Value) TryBitmask() (BitmaskData, bool) {
+	if v == nil || v.typ != TypeBitmask {
+		return BitmaskData{}, false
+	}
+	return v.bitmaskVal, true
 }

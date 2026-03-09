@@ -160,6 +160,83 @@
       "kind": "decode",
       "input": "neg/invalid_tag.cowrie",
       "expect": {"ok": false, "error": "ERR_INVALID_TAG"}
+    },
+    {
+      "id": "v3_fixint_zero",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixint_zero.cowrie",
+      "expect": {"ok": true, "json": "v3/fixint_zero.json"}
+    },
+    {
+      "id": "v3_fixint_max",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixint_max.cowrie",
+      "expect": {"ok": true, "json": "v3/fixint_max.json"}
+    },
+    {
+      "id": "v3_fixint_fallback",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixint_fallback.cowrie",
+      "expect": {"ok": true, "json": "v3/fixint_fallback.json"}
+    },
+    {
+      "id": "v3_fixneg_minus1",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixneg_minus1.cowrie",
+      "expect": {"ok": true, "json": "v3/fixneg_minus1.json"}
+    },
+    {
+      "id": "v3_fixneg_minus16",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixneg_minus16.cowrie",
+      "expect": {"ok": true, "json": "v3/fixneg_minus16.json"}
+    },
+    {
+      "id": "v3_fixneg_fallback",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixneg_fallback.cowrie",
+      "expect": {"ok": true, "json": "v3/fixneg_fallback.json"}
+    },
+    {
+      "id": "v3_fixarray",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixarray.cowrie",
+      "expect": {"ok": true, "json": "v3/fixarray.json"}
+    },
+    {
+      "id": "v3_fixmap",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/fixmap.cowrie",
+      "expect": {"ok": true, "json": "v3/fixmap.json"}
+    },
+    {
+      "id": "v3_bitmask_empty",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/bitmask_empty.cowrie",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "v3_bitmask_8",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/bitmask_8.cowrie",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "v3_bitmask_2048",
+      "gen": 2,
+      "kind": "decode",
+      "input": "v3/bitmask_2048.cowrie",
+      "expect": {"ok": true}
     }
   ]
 }

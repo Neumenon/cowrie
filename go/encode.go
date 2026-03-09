@@ -250,6 +250,15 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		}
 
 	case TypeInt64:
+		// v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16
+		if v.int64Val >= 0 && v.int64Val <= 127 {
+			buf.writeByte(byte(TagFixintBase + v.int64Val))
+			return nil
+		}
+		if v.int64Val >= -16 && v.int64Val <= -1 {
+			buf.writeByte(byte(TagFixnegBase + (-1 - v.int64Val)))
+			return nil
+		}
 		buf.writeByte(TagInt64)
 		buf.writeUvarint(zigzagEncode(v.int64Val))
 
@@ -293,8 +302,14 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		buf.write(v.bigintVal)
 
 	case TypeArray:
-		buf.writeByte(TagArray)
-		buf.writeUvarint(uint64(len(v.arrayVal)))
+		// v3 inline encoding: FIXARRAY for length 0-15
+		n := len(v.arrayVal)
+		if n <= 15 {
+			buf.writeByte(byte(TagFixarrayBase + n))
+		} else {
+			buf.writeByte(TagArray)
+			buf.writeUvarint(uint64(n))
+		}
 		for _, item := range v.arrayVal {
 			if err := encodeValue(buf, item, d); err != nil {
 				return err
@@ -302,8 +317,14 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		}
 
 	case TypeObject:
-		buf.writeByte(TagObject)
-		buf.writeUvarint(uint64(len(v.objectVal)))
+		// v3 inline encoding: FIXMAP for count 0-15
+		n := len(v.objectVal)
+		if n <= 15 {
+			buf.writeByte(byte(TagFixmapBase + n))
+		} else {
+			buf.writeByte(TagObject)
+			buf.writeUvarint(uint64(n))
+		}
 		for _, m := range v.objectVal {
 			idx := d.get(m.Key)
 			buf.writeUvarint(uint64(idx))
@@ -475,6 +496,11 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 			}
 		}
 
+	case TypeBitmask:
+		buf.writeByte(TagBitmask)
+		buf.writeUvarint(v.bitmaskVal.Count)
+		buf.write(v.bitmaskVal.Bits)
+
 	case TypeUnknownExt:
 		// Re-encode unknown extensions to enable round-trip preservation
 		buf.writeByte(TagExt)
@@ -552,11 +578,23 @@ func encodeAny(buf *buffer, v any, d *dict) error {
 			buf.writeByte(TagFalse)
 		}
 	case int:
-		buf.writeByte(TagInt64)
-		buf.writeUvarint(zigzagEncode(int64(val)))
+		if val >= 0 && val <= 127 {
+			buf.writeByte(byte(TagFixintBase + val))
+		} else if val >= -16 && val <= -1 {
+			buf.writeByte(byte(TagFixnegBase + (-1 - val)))
+		} else {
+			buf.writeByte(TagInt64)
+			buf.writeUvarint(zigzagEncode(int64(val)))
+		}
 	case int64:
-		buf.writeByte(TagInt64)
-		buf.writeUvarint(zigzagEncode(val))
+		if val >= 0 && val <= 127 {
+			buf.writeByte(byte(TagFixintBase + int(val)))
+		} else if val >= -16 && val <= -1 {
+			buf.writeByte(byte(TagFixnegBase + int(-1-val)))
+		} else {
+			buf.writeByte(TagInt64)
+			buf.writeUvarint(zigzagEncode(val))
+		}
 	case uint:
 		buf.writeByte(TagUint64)
 		buf.writeUvarint(uint64(val))
@@ -576,16 +614,24 @@ func encodeAny(buf *buffer, v any, d *dict) error {
 		buf.writeUvarint(uint64(len(val)))
 		buf.write(val)
 	case []any:
-		buf.writeByte(TagArray)
-		buf.writeUvarint(uint64(len(val)))
+		if len(val) <= 15 {
+			buf.writeByte(byte(TagFixarrayBase + len(val)))
+		} else {
+			buf.writeByte(TagArray)
+			buf.writeUvarint(uint64(len(val)))
+		}
 		for _, item := range val {
 			if err := encodeAny(buf, item, d); err != nil {
 				return err
 			}
 		}
 	case map[string]any:
-		buf.writeByte(TagObject)
-		buf.writeUvarint(uint64(len(val)))
+		if len(val) <= 15 {
+			buf.writeByte(byte(TagFixmapBase + len(val)))
+		} else {
+			buf.writeByte(TagObject)
+			buf.writeUvarint(uint64(len(val)))
+		}
 		for k, v := range val {
 			buf.writeUvarint(uint64(d.get(k)))
 			if err := encodeAny(buf, v, d); err != nil {

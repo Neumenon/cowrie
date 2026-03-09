@@ -119,6 +119,7 @@ enum Tag {
   TENSOR_REF = 0x21,
   IMAGE = 0x22,
   AUDIO = 0x23,
+  BITMASK = 0x24, // v3: packed boolean bitmask
   // Graph/Delta extensions (0x30-0x3F)
   ADJLIST = 0x30,
   RICHTEXT = 0x31,
@@ -129,6 +130,15 @@ enum Tag {
   NODE_BATCH = 0x37,
   EDGE_BATCH = 0x38,
   GRAPH_SHARD = 0x39,
+  // v3 inline types (0x40-0xFF)
+  FIXINT_BASE = 0x40,
+  FIXINT_MAX = 0xbf,
+  FIXARRAY_BASE = 0xc0,
+  FIXARRAY_MAX = 0xcf,
+  FIXMAP_BASE = 0xd0,
+  FIXMAP_MAX = 0xdf,
+  FIXNEG_BASE = 0xe0,
+  FIXNEG_MAX = 0xef,
 }
 
 // Cowrie value types
@@ -159,6 +169,7 @@ export enum Type {
   NODE_BATCH,
   EDGE_BATCH,
   GRAPH_SHARD,
+  BITMASK,
   UNKNOWN_EXT,
 }
 
@@ -290,6 +301,13 @@ export interface GraphShardData {
   metadata: Record<string, Value>;
 }
 
+// Bitmask data type (v3: packed boolean bitmask)
+// Bit ordering: LSB-first within each byte. Bit i is at bytes[i/8] & (1 << (i%8)).
+export interface BitmaskData {
+  count: number; // Number of boolean values
+  bits: Uint8Array; // Packed bits, ceil(count/8) bytes
+}
+
 export interface UnknownExtData {
   extType: bigint;
   payload: Uint8Array;
@@ -391,6 +409,20 @@ export const SJ = {
   },
   graphShard(nodes: NodeData[], edges: EdgeData[], metadata: Record<string, Value>): Value {
     return { type: Type.GRAPH_SHARD, data: { nodes, edges, metadata } as GraphShardData };
+  },
+  bitmask(count: number, bits: Uint8Array): Value {
+    return { type: Type.BITMASK, data: { count, bits } as BitmaskData };
+  },
+  bitmaskFromBools(bools: boolean[]): Value {
+    const count = bools.length;
+    const byteLen = Math.ceil(count / 8);
+    const bits = new Uint8Array(byteLen);
+    for (let i = 0; i < count; i++) {
+      if (bools[i]) {
+        bits[Math.floor(i / 8)] |= 1 << (i % 8);
+      }
+    }
+    return { type: Type.BITMASK, data: { count, bits } as BitmaskData };
   },
   unknownExt(extType: bigint | number, payload: Uint8Array): Value {
     return { type: Type.UNKNOWN_EXT, data: { extType: BigInt(extType), payload } as UnknownExtData };
@@ -606,10 +638,21 @@ class Encoder {
       case Type.BOOL:
         this.writeByte(v.data ? Tag.TRUE : Tag.FALSE);
         break;
-      case Type.INT64:
+      case Type.INT64: {
+        const i64 = v.data as bigint;
+        // v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16
+        if (i64 >= 0n && i64 <= 127n) {
+          this.writeByte(Tag.FIXINT_BASE + Number(i64));
+          break;
+        }
+        if (i64 >= -16n && i64 <= -1n) {
+          this.writeByte(Tag.FIXNEG_BASE + Number(-1n - i64));
+          break;
+        }
         this.writeByte(Tag.INT64);
-        this.writeUvarint(zigzagEncode(v.data as bigint));
+        this.writeUvarint(zigzagEncode(i64));
         break;
+      }
       case Type.UINT64: {
         const u64 = v.data as bigint;
         if (u64 < 0n || u64 > 0xFFFFFFFFFFFFFFFFn) {
@@ -672,16 +715,26 @@ class Encoder {
       }
       case Type.ARRAY: {
         const arr = v.data as Value[];
-        this.writeByte(Tag.ARRAY);
-        this.writeUvarint(arr.length);
+        // v3 inline encoding: FIXARRAY for length 0-15
+        if (arr.length <= 15) {
+          this.writeByte(Tag.FIXARRAY_BASE + arr.length);
+        } else {
+          this.writeByte(Tag.ARRAY);
+          this.writeUvarint(arr.length);
+        }
         for (const item of arr) this.encodeValue(item);
         break;
       }
       case Type.OBJECT: {
         const obj = v.data as Record<string, Value>;
         const entries = Object.entries(obj);
-        this.writeByte(Tag.OBJECT);
-        this.writeUvarint(entries.length);
+        // v3 inline encoding: FIXMAP for count 0-15
+        if (entries.length <= 15) {
+          this.writeByte(Tag.FIXMAP_BASE + entries.length);
+        } else {
+          this.writeByte(Tag.OBJECT);
+          this.writeUvarint(entries.length);
+        }
         for (const [key, val] of entries) {
           const idx = this.dictLookup.get(key)!;
           this.writeUvarint(idx);
@@ -850,6 +903,13 @@ class Encoder {
         }
         // Encode metadata
         this.encodeProps(shard.metadata);
+        break;
+      }
+      case Type.BITMASK: {
+        const bm = v.data as BitmaskData;
+        this.writeByte(Tag.BITMASK);
+        this.writeUvarint(bm.count);
+        this.write(bm.bits);
         break;
       }
     }
@@ -1246,7 +1306,54 @@ class Decoder {
         const metadata = this.decodeProps();
         return SJ.graphShard(nodes, edges, metadata);
       }
+      case Tag.BITMASK: {
+        const count = this.readUvarintAsNumber();
+        const byteLen = Math.ceil(count / 8);
+        if (byteLen > this.limits.maxBytesLen) {
+          throw new SecurityLimitExceeded(`Bitmask data too large: ${byteLen} > ${this.limits.maxBytesLen}`);
+        }
+        const bits = count > 0 ? this.read(byteLen) : new Uint8Array(0);
+        return SJ.bitmask(count, bits);
+      }
       default:
+        // v3 inline types
+        if (tag >= Tag.FIXINT_BASE && tag <= Tag.FIXINT_MAX) {
+          return SJ.int64(BigInt(tag - Tag.FIXINT_BASE));
+        }
+        if (tag >= Tag.FIXARRAY_BASE && tag <= Tag.FIXARRAY_MAX) {
+          const count = tag - Tag.FIXARRAY_BASE;
+          if (count > this.limits.maxArrayLen) {
+            throw new SecurityLimitExceeded(`Array too large: ${count} > ${this.limits.maxArrayLen}`);
+          }
+          this.enterNested();
+          const items: Value[] = [];
+          for (let i = 0; i < count; i++) {
+            items.push(this.decodeValue());
+          }
+          this.exitNested();
+          return SJ.array(items);
+        }
+        if (tag >= Tag.FIXMAP_BASE && tag <= Tag.FIXMAP_MAX) {
+          const count = tag - Tag.FIXMAP_BASE;
+          if (count > this.limits.maxObjectLen) {
+            throw new SecurityLimitExceeded(`Object too large: ${count} > ${this.limits.maxObjectLen}`);
+          }
+          this.enterNested();
+          const members: Record<string, Value> = {};
+          for (let i = 0; i < count; i++) {
+            const fieldId = this.readUvarintAsNumber();
+            if (fieldId >= this.dict.length) {
+              throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
+            }
+            const key = this.dict[fieldId];
+            members[key] = this.decodeValue();
+          }
+          this.exitNested();
+          return SJ.object(members);
+        }
+        if (tag >= Tag.FIXNEG_BASE && tag <= Tag.FIXNEG_MAX) {
+          return SJ.int64(BigInt(-1 - (tag - Tag.FIXNEG_BASE)));
+        }
         throw new Error(`Invalid tag: ${tag}`);
     }
   }
@@ -1683,6 +1790,19 @@ export function toAny(v: Value): unknown {
         ),
       };
     }
+    case Type.BITMASK: {
+      const bm = v.data as BitmaskData;
+      // Return as array of booleans for JSON interop
+      const bools: boolean[] = [];
+      for (let i = 0; i < bm.count; i++) {
+        bools.push((bm.bits[Math.floor(i / 8)] & (1 << (i % 8))) !== 0);
+      }
+      return {
+        _type: "bitmask",
+        count: bm.count,
+        bits: bools,
+      };
+    }
     case Type.UNKNOWN_EXT: {
       const ext = v.data as UnknownExtData;
       let binary = "";
@@ -1790,10 +1910,21 @@ class DeterministicEncoder extends Encoder {
       case Type.BOOL:
         this.writeByteSorted(v.data ? Tag.TRUE : Tag.FALSE);
         break;
-      case Type.INT64:
+      case Type.INT64: {
+        const i64 = v.data as bigint;
+        // v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16
+        if (i64 >= 0n && i64 <= 127n) {
+          this.writeByteSorted(Tag.FIXINT_BASE + Number(i64));
+          break;
+        }
+        if (i64 >= -16n && i64 <= -1n) {
+          this.writeByteSorted(Tag.FIXNEG_BASE + Number(-1n - i64));
+          break;
+        }
         this.writeByteSorted(Tag.INT64);
-        this.writeUvarintSorted(zigzagEncode(v.data as bigint));
+        this.writeUvarintSorted(zigzagEncode(i64));
         break;
+      }
       case Type.UINT64: {
         const u64 = v.data as bigint;
         if (u64 < 0n || u64 > 0xFFFFFFFFFFFFFFFFn) {
@@ -1848,8 +1979,13 @@ class DeterministicEncoder extends Encoder {
       }
       case Type.ARRAY: {
         const arr = v.data as Value[];
-        this.writeByteSorted(Tag.ARRAY);
-        this.writeUvarintSorted(arr.length);
+        // v3 inline encoding: FIXARRAY for length 0-15
+        if (arr.length <= 15) {
+          this.writeByteSorted(Tag.FIXARRAY_BASE + arr.length);
+        } else {
+          this.writeByteSorted(Tag.ARRAY);
+          this.writeUvarintSorted(arr.length);
+        }
         for (const item of arr) this.encodeValueSorted(item);
         break;
       }
@@ -1861,8 +1997,13 @@ class DeterministicEncoder extends Encoder {
         if (this.opts.omitNull) {
           entries = entries.filter(([_, val]) => val.type !== Type.NULL);
         }
-        this.writeByteSorted(Tag.OBJECT);
-        this.writeUvarintSorted(entries.length);
+        // v3 inline encoding: FIXMAP for count 0-15
+        if (entries.length <= 15) {
+          this.writeByteSorted(Tag.FIXMAP_BASE + entries.length);
+        } else {
+          this.writeByteSorted(Tag.OBJECT);
+          this.writeUvarintSorted(entries.length);
+        }
         for (const [key, val] of entries) {
           const idx = this.sortedDictLookup.get(key)!;
           this.writeUvarintSorted(idx);
@@ -1974,6 +2115,13 @@ class DeterministicEncoder extends Encoder {
             }
           }
         }
+        break;
+      }
+      case Type.BITMASK: {
+        const bm = v.data as BitmaskData;
+        this.writeByteSorted(Tag.BITMASK);
+        this.writeUvarintSorted(bm.count);
+        this.writeSorted(bm.bits);
         break;
       }
     }

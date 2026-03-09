@@ -83,11 +83,13 @@ func TestSpecCoreTags(t *testing.T) {
 		{"null", Null(), 0x00},
 		{"false", Bool(false), 0x01},
 		{"true", Bool(true), 0x02},
-		{"int64", Int64(42), 0x03},
+		{"int64", Int64(200), 0x03},         // 200 > 127, falls back to TagInt64
+		{"int64_fixint", Int64(42), 0x6A},   // v3: fixint 42 = 0x40 + 42
+		{"int64_fixneg", Int64(-1), 0xE0},   // v3: fixneg -1 = 0xE0
 		{"float64", Float64(3.14), 0x04},
 		{"string", String("test"), 0x05},
-		{"array", Array(Int64(1)), 0x06},
-		{"object", Object(Member{Key: "k", Value: Int64(1)}), 0x07},
+		{"array_fixarray", Array(Int64(1)), 0xC1}, // v3: fixarray len=1
+		{"object_fixmap", Object(Member{Key: "k", Value: Int64(1)}), 0xD1}, // v3: fixmap count=1
 		{"bytes", Bytes([]byte{1, 2, 3}), 0x08},
 		{"uint64", Uint64(42), 0x09},
 		{"decimal128", NewDecimal128(2, [16]byte{}), 0x0A},
@@ -149,11 +151,12 @@ func TestSpecUnknownTagRejection(t *testing.T) {
 	// Test reserved/unknown tags
 	// Note: 0x0E is TagExt (extension envelope), not unknown
 	unknownTags := []byte{
-		0x0F, 0x10, // Reserved after BIGINT/TagExt
+		0x10, // Reserved in 0x10 range
 		0x13, 0x14, 0x15, // Reserved in 0x10 range (except LD tags 0x11, 0x12)
-		0x24, 0x25, 0x2F, // Reserved after audio, before 0x30
+		0x25, 0x2F, // Reserved after bitmask (0x24), before 0x30
 		0x33, 0x34, 0x3F, // Reserved after delta
-		0x40, 0x50, 0xFF, // Higher ranges
+		// 0x40-0xEF are now valid inline types (fixint/fixarray/fixmap/fixneg)
+		0xF0, 0xF5, 0xFF, // 0xF0-0xFF reserved
 	}
 
 	for _, tag := range unknownTags {

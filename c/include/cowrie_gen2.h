@@ -73,8 +73,20 @@ typedef enum {
     SJT_EDGE        = 0x36,   /* srcId:string + dstId:string + type:string + propCount:uvarint + (dictIdx:uvarint + value)* */
     SJT_NODE_BATCH  = 0x37,   /* count:uvarint + Node[count] */
     SJT_EDGE_BATCH  = 0x38,   /* count:uvarint + Edge[count] */
-    SJT_GRAPH_SHARD = 0x39    /* nodeCount:uvarint + Node* + edgeCount:uvarint + Edge* + metaCount:uvarint + (dictIdx:uvarint + value)* */
+    SJT_GRAPH_SHARD = 0x39,   /* nodeCount:uvarint + Node* + edgeCount:uvarint + Edge* + metaCount:uvarint + (dictIdx:uvarint + value)* */
+    /* v3 types */
+    SJT_BITMASK     = 0x24    /* count:uvarint + ceil(count/8) packed bytes */
 } COWRIETag;
+
+/* v3 Inline type tag ranges */
+#define SJT_FIXINT_BASE   0x40
+#define SJT_FIXINT_MAX    0xBF
+#define SJT_FIXARRAY_BASE 0xC0
+#define SJT_FIXARRAY_MAX  0xCF
+#define SJT_FIXMAP_BASE   0xD0
+#define SJT_FIXMAP_MAX    0xDF
+#define SJT_FIXNEG_BASE   0xE0
+#define SJT_FIXNEG_MAX    0xEF
 
 /* DType enum for TENSOR - aligned with Go reference implementation */
 typedef enum {
@@ -158,7 +170,9 @@ typedef enum {
     COWRIE_EDGE,
     COWRIE_NODE_BATCH,
     COWRIE_EDGE_BATCH,
-    COWRIE_GRAPH_SHARD
+    COWRIE_GRAPH_SHARD,
+    /* v3 types */
+    COWRIE_BITMASK
 } COWRIEType;
 
 /* Forward declarations */
@@ -307,6 +321,13 @@ typedef struct {
     size_t meta_count;
 } COWRIEGraphShard;
 
+/* Bitmask: packed boolean array (v3) */
+typedef struct {
+    uint64_t count;        /* number of boolean values */
+    uint8_t *bits;         /* packed bits, ceil(count/8) bytes, LSB-first */
+    size_t bits_len;       /* byte length of bits array */
+} COWRIEBitmask;
+
 /* Object member (key-value pair) */
 struct COWRIEMember {
     char *key;
@@ -360,6 +381,8 @@ struct COWRIEValue {
         COWRIENodeBatch node_batch;      /* COWRIE_NODE_BATCH */
         COWRIEEdgeBatch edge_batch;      /* COWRIE_EDGE_BATCH */
         COWRIEGraphShard graph_shard;    /* COWRIE_GRAPH_SHARD */
+        /* v3 types */
+        COWRIEBitmask bitmask;           /* COWRIE_BITMASK */
     } as;
 };
 
@@ -436,6 +459,9 @@ COWRIEValue *cowrie_new_bigint(const uint8_t *data, size_t len);
 COWRIEValue *cowrie_new_ext(uint64_t ext_type, const uint8_t *payload, size_t payload_len);
 COWRIEValue *cowrie_new_array(void);
 COWRIEValue *cowrie_new_object(void);
+
+/* v3 Constructors */
+COWRIEValue *cowrie_new_bitmask(uint64_t count, const uint8_t *bits);
 
 /* v2.1 Extension Constructors */
 COWRIEValue *cowrie_new_tensor(uint8_t dtype, uint8_t rank, const size_t *dims,

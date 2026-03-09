@@ -113,6 +113,7 @@ class Tag(IntEnum):
     TENSOR_REF = 0x21
     IMAGE = 0x22
     AUDIO = 0x23
+    BITMASK = 0x24     # v3: packed boolean bitmask
     # Graph/Delta extensions (0x30-0x3F)
     ADJLIST = 0x30
     RICHTEXT = 0x31
@@ -123,6 +124,15 @@ class Tag(IntEnum):
     NODE_BATCH = 0x37
     EDGE_BATCH = 0x38
     GRAPH_SHARD = 0x39
+    # v3 inline types
+    FIXINT_BASE = 0x40
+    FIXINT_MAX = 0xBF
+    FIXARRAY_BASE = 0xC0
+    FIXARRAY_MAX = 0xCF
+    FIXMAP_BASE = 0xD0
+    FIXMAP_MAX = 0xDF
+    FIXNEG_BASE = 0xE0
+    FIXNEG_MAX = 0xEF
 
 
 # Tensor data types - aligned with Go reference implementation
@@ -206,7 +216,8 @@ class Type(IntEnum):
     NODE_BATCH = 22
     EDGE_BATCH = 23
     GRAPH_SHARD = 24
-    UNKNOWN_EXT = 25
+    BITMASK = 25
+    UNKNOWN_EXT = 26
 
 
 class UnknownExtBehavior(IntEnum):
@@ -698,6 +709,26 @@ class GraphShardData:
 
 
 @dataclass
+class BitmaskData:
+    """Packed boolean bitmask.
+
+    Bit ordering: LSB-first within each byte. Bit i is at bits[i//8] & (1 << (i%8)).
+    """
+    count: int   # Number of boolean values
+    bits: bytes  # Packed bits, ceil(count/8) bytes
+
+    def get(self, i: int) -> bool:
+        """Return the boolean value at index i."""
+        if i < 0 or i >= self.count:
+            raise IndexError(f"bitmask index {i} out of bounds (count={self.count})")
+        return (self.bits[i // 8] & (1 << (i % 8))) != 0
+
+    def to_bools(self) -> List[bool]:
+        """Convert to a list of booleans."""
+        return [self.get(i) for i in range(self.count)]
+
+
+@dataclass
 class UnknownExtData:
     """Unknown extension payload preserved for round-trip."""
     ext_type: int
@@ -845,6 +876,22 @@ class Value:
     def graph_shard(nodes: List[NodeData], edges: List[EdgeData], metadata: Dict[str, 'Value']) -> 'Value':
         """Create a graph shard containing nodes, edges, and metadata."""
         return Value(Type.GRAPH_SHARD, GraphShardData(nodes=nodes, edges=edges, metadata=metadata))
+
+    @staticmethod
+    def bitmask(count: int, bits: bytes) -> 'Value':
+        """Create a bitmask value from count and packed bits."""
+        return Value(Type.BITMASK, BitmaskData(count=count, bits=bits))
+
+    @staticmethod
+    def bitmask_from_bools(bools: List[bool]) -> 'Value':
+        """Create a bitmask value from a list of booleans."""
+        count = len(bools)
+        byte_len = (count + 7) // 8
+        bits = bytearray(byte_len)
+        for i, b in enumerate(bools):
+            if b:
+                bits[i // 8] |= 1 << (i % 8)
+        return Value(Type.BITMASK, BitmaskData(count=count, bits=bytes(bits)))
 
     @staticmethod
     def unknown_ext(ext_type: int, payload: bytes) -> 'Value':
@@ -1001,6 +1048,13 @@ class Encoder:
         elif v.type == Type.BOOL:
             self._write_byte(Tag.TRUE if v.data else Tag.FALSE)
         elif v.type == Type.INT64:
+            # v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16
+            if 0 <= v.data <= 127:
+                self._write_byte(Tag.FIXINT_BASE + v.data)
+                return
+            if -16 <= v.data <= -1:
+                self._write_byte(Tag.FIXNEG_BASE + (-1 - v.data))
+                return
             self._write_byte(Tag.INT64)
             self._write_uvarint(zigzag_encode(v.data))
         elif v.type == Type.UINT64:
@@ -1039,17 +1093,32 @@ class Encoder:
             self._write_uvarint(len(ext.payload))
             self._write(ext.payload)
         elif v.type == Type.ARRAY:
-            self._write_byte(Tag.ARRAY)
-            self._write_uvarint(len(v.data))
+            # v3 inline encoding: FIXARRAY for length 0-15
+            n = len(v.data)
+            if n <= 15:
+                self._write_byte(Tag.FIXARRAY_BASE + n)
+            else:
+                self._write_byte(Tag.ARRAY)
+                self._write_uvarint(n)
             for item in v.data:
                 self._encode_value(item)
         elif v.type == Type.OBJECT:
-            self._write_byte(Tag.OBJECT)
-            self._write_uvarint(len(v.data))
+            # v3 inline encoding: FIXMAP for count 0-15
+            n = len(v.data)
+            if n <= 15:
+                self._write_byte(Tag.FIXMAP_BASE + n)
+            else:
+                self._write_byte(Tag.OBJECT)
+                self._write_uvarint(n)
             for key, val in v.data.items():
                 idx = self.dict_lookup[key]
                 self._write_uvarint(idx)
                 self._encode_value(val)
+        elif v.type == Type.BITMASK:
+            bm = v.data  # BitmaskData
+            self._write_byte(Tag.BITMASK)
+            self._write_uvarint(bm.count)
+            self._write(bm.bits)
         elif v.type == Type.TENSOR:
             t = v.data  # TensorData
             rank = len(t.shape)
@@ -1457,8 +1526,44 @@ class Decoder:
             # Decode metadata
             metadata = self._decode_props()
             return Value.graph_shard(nodes, edges, metadata)
+        elif tag == Tag.BITMASK:
+            count = self._read_uvarint()
+            byte_len = (count + 7) // 8
+            if self.opts.max_bytes_len > 0 and byte_len > self.opts.max_bytes_len:
+                raise SecurityLimitExceeded(f"Bitmask data too large: {byte_len} > {self.opts.max_bytes_len}")
+            bits = self._read(byte_len)
+            return Value.bitmask(count, bits)
         else:
-            raise ValueError(f"Invalid tag: {tag}")
+            # v3 inline types
+            if Tag.FIXINT_BASE <= tag <= Tag.FIXINT_MAX:
+                return Value.int64(tag - Tag.FIXINT_BASE)
+            elif Tag.FIXARRAY_BASE <= tag <= Tag.FIXARRAY_MAX:
+                count = tag - Tag.FIXARRAY_BASE
+                if count > self.opts.max_array_len:
+                    raise SecurityLimitExceeded(f"Array too large: {count} > {self.opts.max_array_len}")
+                self._enter_nested()
+                items = [self._decode_value() for _ in range(count)]
+                self._exit_nested()
+                return Value.array(items)
+            elif Tag.FIXMAP_BASE <= tag <= Tag.FIXMAP_MAX:
+                count = tag - Tag.FIXMAP_BASE
+                if count > self.opts.max_object_len:
+                    raise SecurityLimitExceeded(f"Object too large: {count} > {self.opts.max_object_len}")
+                self._enter_nested()
+                members = {}
+                for _ in range(count):
+                    field_id = self._read_uvarint()
+                    if field_id >= len(self.dict):
+                        raise ValueError(f"Invalid dictionary index: {field_id} >= {len(self.dict)}")
+                    key = self.dict[field_id]
+                    val = self._decode_value()
+                    members[key] = val
+                self._exit_nested()
+                return Value.object(members)
+            elif Tag.FIXNEG_BASE <= tag <= Tag.FIXNEG_MAX:
+                return Value.int64(-1 - (tag - Tag.FIXNEG_BASE))
+            else:
+                raise ValueError(f"Invalid tag: 0x{tag:02x}")
 
     def _decode_node(self) -> NodeData:
         """Decode a node without tag byte."""
@@ -1923,6 +2028,13 @@ def to_any(v: Value) -> Any:
             ],
             "metadata": {k: to_any(val) for k, val in shard.metadata.items()},
         }
+    elif v.type == Type.BITMASK:
+        bm = v.data  # BitmaskData
+        return {
+            "_type": "bitmask",
+            "count": bm.count,
+            "bits": bm.to_bools(),
+        }
     elif v.type == Type.UNKNOWN_EXT:
         ext = v.data  # UnknownExtData
         return {
@@ -2000,6 +2112,13 @@ class DeterministicEncoder(Encoder):
         elif v.type == Type.BOOL:
             self._write_byte(Tag.TRUE if v.data else Tag.FALSE)
         elif v.type == Type.INT64:
+            # v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16
+            if 0 <= v.data <= 127:
+                self._write_byte(Tag.FIXINT_BASE + v.data)
+                return
+            if -16 <= v.data <= -1:
+                self._write_byte(Tag.FIXNEG_BASE + (-1 - v.data))
+                return
             self._write_byte(Tag.INT64)
             self._write_uvarint(zigzag_encode(v.data))
         elif v.type == Type.UINT64:
@@ -2032,8 +2151,13 @@ class DeterministicEncoder(Encoder):
             self._write_uvarint(len(v.data))
             self._write(v.data)
         elif v.type == Type.ARRAY:
-            self._write_byte(Tag.ARRAY)
-            self._write_uvarint(len(v.data))
+            # v3 inline encoding: FIXARRAY for length 0-15
+            n = len(v.data)
+            if n <= 15:
+                self._write_byte(Tag.FIXARRAY_BASE + n)
+            else:
+                self._write_byte(Tag.ARRAY)
+                self._write_uvarint(n)
             for item in v.data:
                 self._encode_value_sorted(item)
         elif v.type == Type.OBJECT:
@@ -2042,12 +2166,22 @@ class DeterministicEncoder(Encoder):
                 items = [(k, v.data[k]) for k in sorted(v.data.keys()) if v.data[k].type != Type.NULL]
             else:
                 items = [(k, v.data[k]) for k in sorted(v.data.keys())]
-            self._write_byte(Tag.OBJECT)
-            self._write_uvarint(len(items))
+            # v3 inline encoding: FIXMAP for count 0-15
+            n = len(items)
+            if n <= 15:
+                self._write_byte(Tag.FIXMAP_BASE + n)
+            else:
+                self._write_byte(Tag.OBJECT)
+                self._write_uvarint(n)
             for key, val in items:
                 idx = self.dict_lookup[key]
                 self._write_uvarint(idx)
                 self._encode_value_sorted(val)
+        elif v.type == Type.BITMASK:
+            bm = v.data  # BitmaskData
+            self._write_byte(Tag.BITMASK)
+            self._write_uvarint(bm.count)
+            self._write(bm.bits)
         elif v.type == Type.TENSOR:
             t = v.data  # TensorData
             self._write_byte(Tag.TENSOR)

@@ -204,6 +204,45 @@ func Delta(baseID uint64, ops []DeltaOp) *Value {
 	}
 }
 
+// Bitmask returns a bitmask value from a count and packed bits.
+// Bits should be ceil(count/8) bytes, LSB-first within each byte.
+func Bitmask(count uint64, bits []byte) *Value {
+	expected := int((count + 7) / 8)
+	bitsCopy := make([]byte, expected)
+	copy(bitsCopy, bits)
+	// Clear trailing bits beyond count
+	if count%8 != 0 && expected > 0 {
+		mask := byte((1 << (count % 8)) - 1)
+		bitsCopy[expected-1] &= mask
+	}
+	return &Value{
+		typ: TypeBitmask,
+		bitmaskVal: BitmaskData{
+			Count: count,
+			Bits:  bitsCopy,
+		},
+	}
+}
+
+// BitmaskFromBools creates a bitmask from a slice of booleans.
+func BitmaskFromBools(bools []bool) *Value {
+	count := uint64(len(bools))
+	byteLen := (count + 7) / 8
+	bits := make([]byte, byteLen)
+	for i, b := range bools {
+		if b {
+			bits[i/8] |= 1 << (uint(i) % 8)
+		}
+	}
+	return &Value{
+		typ: TypeBitmask,
+		bitmaskVal: BitmaskData{
+			Count: count,
+			Bits:  bits,
+		},
+	}
+}
+
 // UnknownExtension returns an unknown extension value.
 // This is typically created by the decoder when it encounters a TagExt
 // with an unrecognized ExtType and OnUnknownExt is set to Keep.

@@ -33,20 +33,20 @@ typedef enum {
     COWRIE_G1_TAG_INT64        = 0x03,
     COWRIE_G1_TAG_FLOAT64      = 0x04,
     COWRIE_G1_TAG_STRING       = 0x05,
-    COWRIE_G1_TAG_BYTES        = 0x06,
-    COWRIE_G1_TAG_ARRAY        = 0x07,
-    COWRIE_G1_TAG_OBJECT       = 0x08,
+    COWRIE_G1_TAG_ARRAY        = 0x06, /* v3: aligned with Gen2 */
+    COWRIE_G1_TAG_OBJECT       = 0x07, /* v3: aligned with Gen2 */
+    COWRIE_G1_TAG_BYTES        = 0x08, /* v3: aligned with Gen2 */
     /* Proto-tensor types */
     COWRIE_G1_TAG_INT64_ARRAY  = 0x09,
     COWRIE_G1_TAG_FLOAT64_ARRAY = 0x0A,
     COWRIE_G1_TAG_STRING_ARRAY = 0x0B,
-    /* Graph types */
-    COWRIE_G1_TAG_NODE         = 0x10,
-    COWRIE_G1_TAG_EDGE         = 0x11,
-    COWRIE_G1_TAG_ADJLIST      = 0x12,
-    COWRIE_G1_TAG_NODE_BATCH   = 0x13,
-    COWRIE_G1_TAG_EDGE_BATCH   = 0x14,
-    COWRIE_G1_TAG_GRAPH_SHARD  = 0x15,
+    /* Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39) */
+    COWRIE_G1_TAG_ADJLIST      = 0x30,
+    COWRIE_G1_TAG_NODE         = 0x35,
+    COWRIE_G1_TAG_EDGE         = 0x36,
+    COWRIE_G1_TAG_NODE_BATCH   = 0x37,
+    COWRIE_G1_TAG_EDGE_BATCH   = 0x38,
+    COWRIE_G1_TAG_GRAPH_SHARD  = 0x39,
 } cowrie_g1_tag_t;
 
 /* ============================================================

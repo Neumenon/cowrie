@@ -68,6 +68,7 @@ fn value_type_ord(value: &Value) -> u8 {
         Value::NodeBatch(_) => 23,
         Value::EdgeBatch(_) => 24,
         Value::GraphShard(_) => 25,
+        Value::Bitmask { .. } => 26,
     }
 }
 
@@ -167,6 +168,9 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
             h = fnv_hash_u64(h, shard.edges.len() as u64);
             h = fnv_hash_u64(h, shard.metadata.len() as u64);
         }
+        Value::Bitmask { count, .. } => {
+            h = fnv_hash_u64(h, *count);
+        }
     }
 
     h
@@ -244,6 +248,7 @@ pub fn schema_descriptor(value: &Value) -> String {
         Value::NodeBatch(_) => "node_batch".to_string(),
         Value::EdgeBatch(_) => "edge_batch".to_string(),
         Value::GraphShard(_) => "graph_shard".to_string(),
+        Value::Bitmask { .. } => "bitmask".to_string(),
     }
 }
 

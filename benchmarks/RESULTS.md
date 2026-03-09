@@ -103,3 +103,77 @@ Across C (1.6x), Rust (2.0x), and Go (3.0x), Gen2 decode is roughly 2x slower th
 | Storage / network transfer | Gen2 | Consistently 30-54% smaller |
 | TypeScript-heavy stack | Gen1 or JSON | Can't beat V8's native JSON.parse for speed |
 | Cross-language interop | Gen1 | Simplest, widest parity, fastest everywhere |
+
+---
+
+## V3 Inline Types & Performance Optimizations
+
+**Date**: 2026-03-08
+**Hardware**: AMD Ryzen 7 7700X 8-Core, Linux 6.17
+
+### Wire Size Improvements (v3 vs v2)
+
+| Fixture | V2 | V3 | Savings |
+|---------|----|----|---------|
+| small.gen2 | 43 B | 41 B | -5% |
+| medium.gen2 | 172 B | 168 B | -2% |
+| large.gen2 (1000 objects) | 22,958 B | 21,766 B | **-5.2%** |
+| floats.gen2 (tensor) | 40,013 B | 40,013 B | 0% (tensor unchanged) |
+
+Wire savings come from FIXINT (0-127 → 1 byte), FIXNEG (-1..-16 → 1 byte), FIXARRAY (≤15 → 1 byte), FIXMAP (≤15 → 1 byte).
+
+### BITMASK vs Bool/Int Arrays (2048 elements)
+
+| Encoding | Wire Size | Encode (ns/op) | Decode (ns/op) |
+|----------|-----------|----------------|----------------|
+| **Bitmask** | **264 B** | **65** | **113** |
+| Bool array | 2,056 B | 8,850 | 163,000 |
+| Int array | 2,056 B | — | — |
+
+**Bitmask is 7.8x smaller, 135x faster encode, 1,400x faster decode.**
+
+### Unsafe Strings (zero-copy decode, Go only)
+
+| Mode | ops/s | Allocs/op | MB/s |
+|------|-------|-----------|------|
+| Safe strings | ~4,100 | 5,007 | ~113 |
+| Unsafe strings | ~4,900 | 3,003 | ~131 |
+
+**16% faster, 40% fewer allocations** on string-heavy payloads (500 objects × 4 string fields).
+
+### Scatter-Gather EncodeToWriter (Go only, 1MB tensor)
+
+| Method | ns/op | Alloc |
+|--------|-------|-------|
+| Encode() | 121,000 | 2.1 MB |
+| EncodeToWriter() | 64,000 | 1.0 MB |
+
+**1.9x faster, 50% less memory** — avoids copying tensor data into intermediate buffer.
+
+### TensorSink Streaming Decode (Go only, 1MB tensor)
+
+| Method | ns/op | Alloc | Throughput |
+|--------|-------|-------|------------|
+| Standard decode | 47,000 | 1.0 MB | ~22 GB/s |
+| TensorSink | 10,700 | 5 KB | ~98 GB/s |
+
+**4.4x faster, 207x less memory** — streams tensor body to callback without allocation.
+
+### Large Payload Decode (1000 objects, safe vs unsafe)
+
+| Mode | ns/op | Allocs/op | MB/s |
+|------|-------|-----------|------|
+| Decode (safe) | ~404,000 | 6,006 | ~54 |
+| Decode (unsafe) | ~399,000 | 5,003 | ~55 |
+
+Modest 3% speed gain on mixed payloads (fewer string fields than pure-string benchmark).
+
+### V3 Cowrie vs JSON (raw wire size)
+
+| Payload | JSON | Cowrie V3 | Savings |
+|---------|------|-----------|---------|
+| Small API (5 fields) | 140 B | 108 B | 22.9% |
+| Nested objects (20×4 fields) | 1,044 B | 518 B | 50.4% |
+| Large log (100 records) | 14,218 B | 6,454 B | 54.6% |
+| Telemetry (200 records) | 25,864 B | 10,127 B | **60.8%** |
+| Float tensor (256×256) | 713 KB | 256 KB | **64.1%** |

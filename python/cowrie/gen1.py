@@ -27,20 +27,20 @@ TAG_TRUE = 0x02
 TAG_INT64 = 0x03
 TAG_FLOAT64 = 0x04
 TAG_STRING = 0x05
-TAG_BYTES = 0x06
-TAG_ARRAY = 0x07
-TAG_OBJECT = 0x08
+TAG_ARRAY = 0x06   # v3: aligned with Gen2
+TAG_OBJECT = 0x07  # v3: aligned with Gen2
+TAG_BYTES = 0x08   # v3: aligned with Gen2
 # Proto-tensor types
 TAG_INT64_ARRAY = 0x09
 TAG_FLOAT64_ARRAY = 0x0A
 TAG_STRING_ARRAY = 0x0B
-# Graph types
-TAG_NODE = 0x10
-TAG_EDGE = 0x11
-TAG_ADJLIST = 0x12
-TAG_NODE_BATCH = 0x13
-TAG_EDGE_BATCH = 0x14
-TAG_GRAPH_SHARD = 0x15
+# Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
+TAG_ADJLIST = 0x30
+TAG_NODE = 0x35
+TAG_EDGE = 0x36
+TAG_NODE_BATCH = 0x37
+TAG_EDGE_BATCH = 0x38
+TAG_GRAPH_SHARD = 0x39
 
 # Security limits - prevent DoS from malicious input
 MAX_DEPTH = 1000

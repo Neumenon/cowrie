@@ -231,6 +231,32 @@ COWRIEValue *cowrie_new_object(void) {
 }
 
 /* ============================================================
+ * v3 Constructors
+ * ============================================================ */
+
+COWRIEValue *cowrie_new_bitmask(uint64_t count, const uint8_t *bits) {
+    COWRIEValue *v = alloc_value(COWRIE_BITMASK);
+    if (!v) return NULL;
+
+    v->as.bitmask.count = count;
+    size_t byte_len = (size_t)((count + 7) / 8);
+    v->as.bitmask.bits_len = byte_len;
+    if (byte_len > 0) {
+        v->as.bitmask.bits = malloc(byte_len);
+        if (!v->as.bitmask.bits) { free(v); return NULL; }
+        memcpy(v->as.bitmask.bits, bits, byte_len);
+        /* Mask off unused high bits in last byte */
+        uint64_t tail = count % 8;
+        if (tail != 0) {
+            v->as.bitmask.bits[byte_len - 1] &= (uint8_t)((1u << tail) - 1);
+        }
+    } else {
+        v->as.bitmask.bits = NULL;
+    }
+    return v;
+}
+
+/* ============================================================
  * v2.1 Extension Constructors
  * ============================================================ */
 
@@ -790,6 +816,10 @@ void cowrie_free(COWRIEValue *v) {
         }
         free(v->as.object.members);
         break;
+    /* v3 types */
+    case COWRIE_BITMASK:
+        free(v->as.bitmask.bits);
+        break;
     /* v2.1 extension types */
     case COWRIE_TENSOR:
         free(v->as.tensor.dims);
@@ -1092,6 +1122,12 @@ static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict) 
         return buf_put_byte(buf, v->as.boolean ? SJT_TRUE : SJT_FALSE);
 
     case COWRIE_INT64:
+        /* v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16 */
+        if (v->as.i64 >= 0 && v->as.i64 <= 127) {
+            return buf_put_byte(buf, (uint8_t)(SJT_FIXINT_BASE + v->as.i64));
+        } else if (v->as.i64 >= -16 && v->as.i64 <= -1) {
+            return buf_put_byte(buf, (uint8_t)(SJT_FIXNEG_BASE + (-1 - v->as.i64)));
+        }
         if (buf_put_byte(buf, SJT_INT64) != 0) return -1;
         return cowrie_put_uvarint(buf, cowrie_zigzag_encode(v->as.i64));
 
@@ -1140,16 +1176,26 @@ static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict) 
         return buf_put(buf, v->as.ext.payload, v->as.ext.payload_len);
 
     case COWRIE_ARRAY:
-        if (buf_put_byte(buf, SJT_ARRAY) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.array.len) != 0) return -1;
+        /* v3 inline encoding: FIXARRAY for length 0-15 */
+        if (v->as.array.len <= 15) {
+            if (buf_put_byte(buf, (uint8_t)(SJT_FIXARRAY_BASE + v->as.array.len)) != 0) return -1;
+        } else {
+            if (buf_put_byte(buf, SJT_ARRAY) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.array.len) != 0) return -1;
+        }
         for (size_t i = 0; i < v->as.array.len; i++) {
             if (encode_value(buf, v->as.array.items[i], dict) != 0) return -1;
         }
         return 0;
 
     case COWRIE_OBJECT:
-        if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.object.len) != 0) return -1;
+        /* v3 inline encoding: FIXMAP for length 0-15 */
+        if (v->as.object.len <= 15) {
+            if (buf_put_byte(buf, (uint8_t)(SJT_FIXMAP_BASE + v->as.object.len)) != 0) return -1;
+        } else {
+            if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.object.len) != 0) return -1;
+        }
         for (size_t i = 0; i < v->as.object.len; i++) {
             int idx = dict_find(dict, v->as.object.members[i].key, v->as.object.members[i].key_len);
             if (idx < 0) return -1;
@@ -1381,6 +1427,15 @@ static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict) 
         }
         return 0;
     }
+
+    /* v3 types */
+    case COWRIE_BITMASK:
+        if (buf_put_byte(buf, SJT_BITMASK) != 0) return -1;
+        if (cowrie_put_uvarint(buf, v->as.bitmask.count) != 0) return -1;
+        if (v->as.bitmask.bits_len > 0) {
+            return buf_put(buf, v->as.bitmask.bits, v->as.bitmask.bits_len);
+        }
+        return 0;
     }
 
     return -1;
@@ -1419,6 +1474,12 @@ static int encode_value_deterministic(COWRIEBuf *buf, const COWRIEValue *v, cons
         return buf_put_byte(buf, v->as.boolean ? SJT_TRUE : SJT_FALSE);
 
     case COWRIE_INT64: {
+        /* v3 inline encoding: FIXINT for 0-127, FIXNEG for -1 to -16 */
+        if (v->as.i64 >= 0 && v->as.i64 <= 127) {
+            return buf_put_byte(buf, (uint8_t)(SJT_FIXINT_BASE + v->as.i64));
+        } else if (v->as.i64 >= -16 && v->as.i64 <= -1) {
+            return buf_put_byte(buf, (uint8_t)(SJT_FIXNEG_BASE + (-1 - v->as.i64)));
+        }
         if (buf_put_byte(buf, SJT_INT64) != 0) return -1;
         return cowrie_put_uvarint(buf, cowrie_zigzag_encode(v->as.i64));
     }
@@ -1443,8 +1504,13 @@ static int encode_value_deterministic(COWRIEBuf *buf, const COWRIEValue *v, cons
         return buf_put(buf, v->as.bytes.data, v->as.bytes.len);
 
     case COWRIE_ARRAY:
-        if (buf_put_byte(buf, SJT_ARRAY) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.array.len) != 0) return -1;
+        /* v3 inline encoding: FIXARRAY for length 0-15 */
+        if (v->as.array.len <= 15) {
+            if (buf_put_byte(buf, (uint8_t)(SJT_FIXARRAY_BASE + v->as.array.len)) != 0) return -1;
+        } else {
+            if (buf_put_byte(buf, SJT_ARRAY) != 0) return -1;
+            if (cowrie_put_uvarint(buf, v->as.array.len) != 0) return -1;
+        }
         for (size_t i = 0; i < v->as.array.len; i++) {
             if (encode_value_deterministic(buf, v->as.array.items[i], dict, opts) != 0) return -1;
         }
@@ -1457,8 +1523,13 @@ static int encode_value_deterministic(COWRIEBuf *buf, const COWRIEValue *v, cons
         /* Count members to encode (filter nulls if omit_null) */
         size_t encode_count = (opts && opts->omit_null) ? count_non_null_members(v) : n;
 
-        if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
-        if (cowrie_put_uvarint(buf, encode_count) != 0) return -1;
+        /* v3 inline encoding: FIXMAP for length 0-15 */
+        if (encode_count <= 15) {
+            if (buf_put_byte(buf, (uint8_t)(SJT_FIXMAP_BASE + encode_count)) != 0) return -1;
+        } else {
+            if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
+            if (cowrie_put_uvarint(buf, encode_count) != 0) return -1;
+        }
 
         if (n == 0) return 0;
 
@@ -2661,12 +2732,105 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         return -1;
     }
 
+    case SJT_BITMASK: {
+        uint64_t count;
+        if (rd_get_uvarint(r, &count) != 0) return -1;
+        uint64_t byte_len = (count + 7) / 8;
+        if (byte_len > rd_remaining(r)) return -1;
+        if (r->opts.max_bytes_len > 0 && byte_len > r->opts.max_bytes_len) return -1;
+        uint8_t *bits = NULL;
+        if (byte_len > 0) {
+            bits = malloc((size_t)byte_len);
+            if (!bits) return -1;
+            if (rd_get(r, bits, (size_t)byte_len) != 0) { free(bits); return -1; }
+        }
+        *out = cowrie_new_bitmask(count, bits);
+        free(bits);
+        return *out ? 0 : -1;
+    }
+
     default:
+        /* v3 inline types */
+        if (tag >= SJT_FIXINT_BASE && tag <= SJT_FIXINT_MAX) {
+            *out = cowrie_new_int64((int64_t)(tag - SJT_FIXINT_BASE));
+            return *out ? 0 : -1;
+        }
+        if (tag >= SJT_FIXARRAY_BASE && tag <= SJT_FIXARRAY_MAX) {
+            uint64_t count = (uint64_t)(tag - SJT_FIXARRAY_BASE);
+            r->depth++;
+            if (r->opts.max_depth > 0 && r->depth > r->opts.max_depth) {
+                r->depth--;
+                return -1;
+            }
+            COWRIEValue *arr = cowrie_new_array();
+            if (!arr) { r->depth--; return -1; }
+            for (uint64_t i = 0; i < count; i++) {
+                COWRIEValue *item;
+                if (decode_value(r, dict, dict_len, &item) != 0) {
+                    cowrie_free(arr);
+                    r->depth--;
+                    return -1;
+                }
+                if (cowrie_array_append(arr, item) != 0) {
+                    cowrie_free(item);
+                    cowrie_free(arr);
+                    r->depth--;
+                    return -1;
+                }
+            }
+            r->depth--;
+            *out = arr;
+            return 0;
+        }
+        if (tag >= SJT_FIXMAP_BASE && tag <= SJT_FIXMAP_MAX) {
+            uint64_t count = (uint64_t)(tag - SJT_FIXMAP_BASE);
+            r->depth++;
+            if (r->opts.max_depth > 0 && r->depth > r->opts.max_depth) {
+                r->depth--;
+                return -1;
+            }
+            COWRIEValue *obj = cowrie_new_object();
+            if (!obj) { r->depth--; return -1; }
+            for (uint64_t i = 0; i < count; i++) {
+                uint64_t field_id;
+                if (rd_get_uvarint(r, &field_id) != 0) {
+                    cowrie_free(obj);
+                    r->depth--;
+                    return -1;
+                }
+                if (field_id >= dict_len) {
+                    cowrie_free(obj);
+                    r->depth--;
+                    return -1;
+                }
+                COWRIEValue *val;
+                if (decode_value(r, dict, dict_len, &val) != 0) {
+                    cowrie_free(obj);
+                    r->depth--;
+                    return -1;
+                }
+                size_t key_len = strlen(dict[field_id]);
+                if (cowrie_object_set(obj, dict[field_id], key_len, val) != 0) {
+                    cowrie_free(val);
+                    cowrie_free(obj);
+                    r->depth--;
+                    return -1;
+                }
+            }
+            r->depth--;
+            *out = obj;
+            return 0;
+        }
+        if (tag >= SJT_FIXNEG_BASE && tag <= SJT_FIXNEG_MAX) {
+            *out = cowrie_new_int64((int64_t)(-1) - (int64_t)(tag - SJT_FIXNEG_BASE));
+            return *out ? 0 : -1;
+        }
+        /* Tags 0xF0-0xFF and anything else: invalid */
         return -1;
     }
 }
 
-int cowrie_decode_with_opts(const uint8_t *data, size_t len, 
+int cowrie_decode_with_opts(const uint8_t *data, size_t len,
                            const COWRIEDecodeOpts *opts, COWRIEValue **out) {
     Reader r;
     r.data = data;
@@ -2867,6 +3031,7 @@ static uint64_t schema_fingerprint_impl(const COWRIEValue *v, uint64_t hash) {
     case COWRIE_DATETIME64:
     case COWRIE_UUID128:
     case COWRIE_BIGINT:
+    case COWRIE_BITMASK:
         /* Scalar types: just the type ordinal */
         break;
 

@@ -33,20 +33,20 @@ pub mod tags {
     pub const INT64: u8 = 0x03;
     pub const FLOAT64: u8 = 0x04;
     pub const STRING: u8 = 0x05;
-    pub const BYTES: u8 = 0x06;
-    pub const ARRAY: u8 = 0x07;
-    pub const OBJECT: u8 = 0x08;
+    pub const ARRAY: u8 = 0x06;   // v3: aligned with Gen2
+    pub const OBJECT: u8 = 0x07;  // v3: aligned with Gen2
+    pub const BYTES: u8 = 0x08;   // v3: aligned with Gen2
     // Proto-tensor types
     pub const INT64_ARRAY: u8 = 0x09;
     pub const FLOAT64_ARRAY: u8 = 0x0A;
     pub const STRING_ARRAY: u8 = 0x0B;
-    // Graph types
-    pub const NODE: u8 = 0x10;
-    pub const EDGE: u8 = 0x11;
-    pub const ADJLIST: u8 = 0x12;
-    pub const NODE_BATCH: u8 = 0x13;
-    pub const EDGE_BATCH: u8 = 0x14;
-    pub const GRAPH_SHARD: u8 = 0x15;
+    // Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
+    pub const ADJLIST: u8 = 0x30;
+    pub const NODE: u8 = 0x35;
+    pub const EDGE: u8 = 0x36;
+    pub const NODE_BATCH: u8 = 0x37;
+    pub const EDGE_BATCH: u8 = 0x38;
+    pub const GRAPH_SHARD: u8 = 0x39;
 }
 
 /// Security limits - prevent DoS from malicious input

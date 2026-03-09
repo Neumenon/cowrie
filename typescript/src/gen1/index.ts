@@ -24,20 +24,20 @@ export const Tags = {
   INT64: 0x03,
   FLOAT64: 0x04,
   STRING: 0x05,
-  BYTES: 0x06,
-  ARRAY: 0x07,
-  OBJECT: 0x08,
+  ARRAY: 0x06,    // v3: aligned with Gen2
+  OBJECT: 0x07,   // v3: aligned with Gen2
+  BYTES: 0x08,    // v3: aligned with Gen2
   // Proto-tensor types
   INT64_ARRAY: 0x09,
   FLOAT64_ARRAY: 0x0a,
   STRING_ARRAY: 0x0b,
-  // Graph types
-  NODE: 0x10,
-  EDGE: 0x11,
-  ADJLIST: 0x12,
-  NODE_BATCH: 0x13,
-  EDGE_BATCH: 0x14,
-  GRAPH_SHARD: 0x15,
+  // Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
+  ADJLIST: 0x30,
+  NODE: 0x35,
+  EDGE: 0x36,
+  NODE_BATCH: 0x37,
+  EDGE_BATCH: 0x38,
+  GRAPH_SHARD: 0x39,
 } as const;
 
 // Security limits - prevent DoS from malicious input

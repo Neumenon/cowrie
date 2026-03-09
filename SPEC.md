@@ -92,23 +92,29 @@ Object: Tag(0x08) | count:varint | (keyLen:varint | keyBytes | value)*
 
 ## Gen1 vs Gen2 Compatibility
 
-**IMPORTANT**: Gen1 and Gen2 use different tag assignments for several types.
+**IMPORTANT**: As of v3, Gen1 and Gen2 share tag assignments for core types 0x00-0x08.
 A decoder MUST check for the Gen2 magic header ("SJ") before decoding.
 
-| Tag | Gen1 Type | Gen2 Type |
-|-----|-----------|-----------|
-| 0x00-0x05 | Same | Same |
-| 0x06 | **Bytes** | **Array** |
-| 0x07 | **Array** | **Object** (dict-coded) |
-| 0x08 | **Object** | **Bytes** |
-| 0x09 | **Int64Array** | Uint64 |
-| 0x0A | **Float64Array** | Decimal128 |
-| 0x0B | **StringArray** | Datetime64 |
+| Tag | Gen1 (pre-v3) | Gen1 v3 | Gen2/v3 |
+|-----|---------------|---------|---------|
+| 0x00-0x05 | Same | Same | Same |
+| 0x06 | Bytes | **Array** (aligned) | **Array** |
+| 0x07 | Array | **Object** (aligned) | **Object** (dict-coded) |
+| 0x08 | Object | **Bytes** (aligned) | **Bytes** |
+| 0x09 | Int64Array | Int64Array | Uint64 |
+| 0x0A | Float64Array | Float64Array | Decimal128 |
+| 0x0B | StringArray | StringArray | Datetime64 |
+
+Gen1 graph types moved from 0x10-0x15 to 0x30+0x35-0x39 (matching Gen2).
 
 To distinguish between formats:
-1. Check first two bytes for "SJ" (0x53 0x4A)
-2. If present → Gen2 format (version in byte 3)
+1. Check first **three** bytes: `bytes[0:2] == "SJ" && bytes[2] == 0x02`
+2. If all three match → Gen2/v3 format
 3. If absent → Gen1 format (first byte is root value tag)
+
+**Why 3 bytes**: With v3 FIXINT, Gen1 value 19 encodes as 0x53 ('S') and value 10
+as 0x4A ('J'), so two bytes alone could collide. The third byte (version 0x02)
+is unambiguous since Gen1 root tags in that position would be 0x00-0x0D.
 
 ## Gen2 Wire Format
 
@@ -186,6 +192,18 @@ Malformed hints MUST result in a decode error.
 | 0x21 | TensorRef | storeId:u8 + keyLen:varint + key |
 | 0x22 | Image | format:u8 + width:u16 LE + height:u16 LE + dataLen:varint + data |
 | 0x23 | Audio | encoding:u8 + sampleRate:u32 LE + channels:u8 + dataLen:varint + data |
+| 0x24 | Bitmask | count:uvarint + ceil(count/8) packed bytes (v3) |
+
+#### Bitmask (0x24)
+
+```
+Tag(0x24) | count:uvarint | packed_bytes:ceil(count/8) bytes
+```
+
+Bit ordering: LSB-first within each byte. Bit `i` is at `bytes[i/8] & (1 << (i%8))`.
+
+Use cases: attention masks, padding masks, train/val/test splits, boolean selections.
+A 2048-element mask encodes in 259 bytes vs ~4000+ bytes as an int array.
 
 ### Delta/RichText Tags (0x30-0x34)
 
@@ -204,6 +222,38 @@ Malformed hints MUST result in a decode error.
 | 0x37 | NodeBatch | count:varint + Node[count] |
 | 0x38 | EdgeBatch | count:varint + Edge[count] |
 | 0x39 | GraphShard | nodeCount:varint + Node* + edgeCount:varint + Edge* + metaCount:varint + (dictIdx:varint + value)* |
+
+### v3 Inline Types (0x40-0xEF)
+
+v3 adds inline encoding for small integers, arrays, objects, and negative integers.
+These tags encode the value directly in the tag byte, saving 1-2 bytes per value.
+
+| Tag Range | Type | Decoding |
+|-----------|------|----------|
+| 0x40-0xBF | FIXINT | value = tag - 0x40 (0 to 127) |
+| 0xC0-0xCF | FIXARRAY | count = tag - 0xC0 (0 to 15), followed by count values |
+| 0xD0-0xDF | FIXMAP | count = tag - 0xD0 (0 to 15), followed by count (dictIdx + value) pairs |
+| 0xE0-0xEF | FIXNEG | value = -1 - (tag - 0xE0) (-1 to -16) |
+| 0xF0-0xFF | RESERVED | Must be rejected as invalid |
+
+#### Encoding Rules
+
+- **Integers 0-127**: MUST use FIXINT (single byte) instead of TagInt64
+- **Integers -1 to -16**: MUST use FIXNEG (single byte) instead of TagInt64
+- **Integers outside [-16, 127]**: Use TagInt64 with zigzag varint as before
+- **Arrays with 0-15 elements**: MUST use FIXARRAY instead of TagArray
+- **Arrays with 16+ elements**: Use TagArray with uvarint count as before
+- **Objects with 0-15 fields**: MUST use FIXMAP instead of TagObject
+- **Objects with 16+ fields**: Use TagObject with uvarint count as before
+
+#### Wire Savings
+
+| Scenario | Before (v2) | After (v3) | Savings |
+|----------|------------|------------|---------|
+| Int 42 | 2 bytes (tag + varint) | 1 byte (fixint) | 50% |
+| Int -1 | 2 bytes (tag + varint) | 1 byte (fixneg) | 50% |
+| Array [1,2,3] | 5 bytes (tag + count + 3×2) | 4 bytes (fixarray + 3×1) | 20% |
+| Object {"a":1} | 4 bytes (tag + count + idx + 2) | 3 bytes (fixmap + idx + 1) | 25% |
 
 ### TagExt (Extension Envelope)
 

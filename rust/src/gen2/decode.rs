@@ -35,6 +35,16 @@ mod tags {
     pub const NODE_BATCH: u8 = 0x37;
     pub const EDGE_BATCH: u8 = 0x38;
     pub const GRAPH_SHARD: u8 = 0x39;
+    pub const BITMASK: u8 = 0x24;
+    // v3 inline types
+    pub const FIXINT_BASE: u8 = 0x40;
+    pub const FIXINT_MAX: u8 = 0xBF;
+    pub const FIXARRAY_BASE: u8 = 0xC0;
+    pub const FIXARRAY_MAX: u8 = 0xCF;
+    pub const FIXMAP_BASE: u8 = 0xD0;
+    pub const FIXMAP_MAX: u8 = 0xDF;
+    pub const FIXNEG_BASE: u8 = 0xE0;
+    pub const FIXNEG_MAX: u8 = 0xEF;
 }
 
 const FLAG_HAS_COLUMN_HINTS: u8 = 0x08;
@@ -459,6 +469,52 @@ impl<'a> Reader<'a> {
                 // Decode metadata
                 let metadata = self.decode_props()?;
                 Value::GraphShard(GraphShardData { nodes, edges, metadata })
+            }
+            tags::BITMASK => {
+                let count = self.read_uvarint()?;
+                let byte_len = ((count + 7) / 8) as usize;
+                if byte_len > self.opts.max_bytes_len {
+                    return Err(CowrieError::TooLarge);
+                }
+                let bits = self.read_bytes(byte_len)?;
+                Value::Bitmask { count, bits }
+            }
+            t if t >= tags::FIXINT_BASE && t <= tags::FIXINT_MAX => {
+                Value::Int((t - tags::FIXINT_BASE) as i64)
+            }
+            t if t >= tags::FIXARRAY_BASE && t <= tags::FIXARRAY_MAX => {
+                let len = (t - tags::FIXARRAY_BASE) as usize;
+                if len > self.opts.max_array_len {
+                    return Err(CowrieError::TooLarge);
+                }
+                let mut arr = Vec::with_capacity(len);
+                for _ in 0..len {
+                    arr.push(self.decode_value()?);
+                }
+                Value::Array(arr)
+            }
+            t if t >= tags::FIXMAP_BASE && t <= tags::FIXMAP_MAX => {
+                let len = (t - tags::FIXMAP_BASE) as usize;
+                if len > self.opts.max_object_len {
+                    return Err(CowrieError::TooLarge);
+                }
+                let mut obj = BTreeMap::new();
+                for _ in 0..len {
+                    let key_idx = self.read_uvarint()? as usize;
+                    if key_idx >= self.dict.len() {
+                        return Err(CowrieError::InvalidDictIndex {
+                            index: key_idx,
+                            dict_len: self.dict.len(),
+                        });
+                    }
+                    let key = self.dict[key_idx].clone();
+                    let val = self.decode_value()?;
+                    obj.insert(key, val);
+                }
+                Value::Object(obj)
+            }
+            t if t >= tags::FIXNEG_BASE && t <= tags::FIXNEG_MAX => {
+                Value::Int(-1 - (t - tags::FIXNEG_BASE) as i64)
             }
             _ => return Err(CowrieError::InvalidTag(tag)),
         };

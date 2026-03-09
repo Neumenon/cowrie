@@ -503,6 +503,7 @@ pub enum Value {
     RichText(RichTextData),
     Delta(DeltaData),
     Ext(ExtData),
+    Bitmask { count: u64, bits: Vec<u8> },
     // Graph types (v2.1)
     Node(NodeData),
     Edge(EdgeData),

@@ -26,22 +26,22 @@ const (
 	tagInt64        = 0x03
 	tagFloat64      = 0x04
 	tagString       = 0x05
-	tagBytes        = 0x06 // binary bytes
-	tagArrayGeneric = 0x07 // heterogeneous array
-	tagObject       = 0x08 // object/map
+	tagArrayGeneric = 0x06 // heterogeneous array (v3: aligned with Gen2)
+	tagObject       = 0x07 // object/map (v3: aligned with Gen2)
+	tagBytes        = 0x08 // binary bytes (v3: aligned with Gen2)
 	tagArrayInt64   = 0x09 // homogeneous int64 array (proto-tensor)
 	tagArrayFloat64 = 0x0A // homogeneous float64 array (proto-tensor)
 	tagArrayString  = 0x0B // homogeneous string array
 	tagArrayFloat32 = 0x0C // homogeneous float32 array (Go extension, 4 bytes/float)
 	tagFloat32      = 0x0D // scalar float32 (compact float, 4 bytes vs 8)
 
-	// Graph types (0x10-0x1F reserved for graph)
-	tagNode       = 0x10 // Graph node: id + labels + props
-	tagEdge       = 0x11 // Graph edge: id + type + from + to + props
-	tagAdjList    = 0x12 // Adjacency list: nodeID + neighbors (int64 array)
-	tagNodeBatch  = 0x13 // Batch of nodes (for streaming)
-	tagEdgeBatch  = 0x14 // Batch of edges (COO format)
-	tagGraphShard = 0x15 // Graph container: nodes + edges + adjacency + features
+	// Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
+	tagAdjList    = 0x30 // Adjacency list: nodeID + neighbors (int64 array)
+	tagNode       = 0x35 // Graph node: id + labels + props
+	tagEdge       = 0x36 // Graph edge: id + type + from + to + props
+	tagNodeBatch  = 0x37 // Batch of nodes (for streaming)
+	tagEdgeBatch  = 0x38 // Batch of edges (COO format)
+	tagGraphShard = 0x39 // Graph container: nodes + edges + adjacency + features
 )
 
 // NumericArrayMin is the threshold for promoting arrays to proto-tensors.
