@@ -15,16 +15,23 @@ var bufferPool = sync.Pool{
 	},
 }
 
+// maxPoolBufSize is the cap above which buffers are not returned to the pool.
+const maxPoolBufSize = 1 << 20 // 1MB
+
+// putBuf returns a buffer to the pool if it's not oversized.
+func putBuf(buf *buffer) {
+	if cap(buf.data) <= maxPoolBufSize {
+		bufferPool.Put(buf)
+	}
+}
+
 // Encode encodes a value to Cowrie v2 binary format.
 func Encode(v *Value) ([]byte, error) {
 	buf := bufferPool.Get().(*buffer)
 	buf.data = buf.data[:0] // reset length, keep capacity
 
 	if err := encode(buf, v); err != nil {
-		// Don't pool buffers > 1MB to prevent memory bloat (matches Gen1)
-		if cap(buf.data) <= 1<<20 {
-			bufferPool.Put(buf)
-		}
+		putBuf(buf)
 		return nil, err
 	}
 
@@ -32,10 +39,7 @@ func Encode(v *Value) ([]byte, error) {
 	out := make([]byte, len(buf.data))
 	copy(out, buf.data)
 
-	// Don't pool buffers > 1MB to prevent memory bloat (matches Gen1)
-	if cap(buf.data) <= 1<<20 {
-		bufferPool.Put(buf)
-	}
+	putBuf(buf)
 	return out, nil
 }
 

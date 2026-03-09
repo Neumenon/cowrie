@@ -125,12 +125,12 @@ func toCowrieValueWithOpts(v any, highPrecision bool) *cowrie.Value {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
-		members := make([]cowrie.Member, 0, len(x))
-		for _, key := range keys {
-			members = append(members, cowrie.Member{
+		members := make([]cowrie.Member, len(keys))
+		for i, key := range keys {
+			members[i] = cowrie.Member{
 				Key:   key,
 				Value: toCowrieValueWithOpts(x[key], highPrecision),
-			})
+			}
 		}
 		return cowrie.Object(members...)
 
