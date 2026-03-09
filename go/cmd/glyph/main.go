@@ -242,12 +242,8 @@ func cmdToJSON(r io.Reader) {
 
 	input := strings.TrimSpace(string(data))
 
-	// Try to parse as GLYPH canonical form
-	registry := glyph.NewSchemaRegistry()
-	poolRegistry := glyph.NewPoolRegistry()
-
-	// Handle pool definitions first
-	gv, err := parseGlyphWithPools(input, registry, poolRegistry)
+	// Parse using the library's high-level ParseDocument API
+	gv, err := glyph.ParseDocument(input)
 	if err != nil {
 		// Fallback: try as JSON
 		gv, err = glyph.FromJSONLoose(data)
@@ -344,7 +340,8 @@ func cmdStreamDemo() {
 		glyph.MapEntry{Key: "items", Value: glyph.List()},
 	)
 
-	stateHash := stream.StateHashLoose(initialState)
+	currentState := initialState
+	stateHash := stream.StateHashLoose(currentState)
 
 	seq++
 	writeFrame(&stream.Frame{
@@ -352,7 +349,7 @@ func cmdStreamDemo() {
 		SID:     sid,
 		Seq:     seq,
 		Kind:    stream.KindDoc,
-		Payload: []byte(glyph.Emit(initialState)),
+		Payload: []byte(glyph.Emit(currentState)),
 	})
 
 	fmt.Fprintln(os.Stderr, "[demo] Sent initial state")
@@ -384,8 +381,8 @@ func cmdStreamDemo() {
 
 		// Patch: Update state
 		patchPayload := fmt.Sprintf(`@patch
-set .step %d
-append .items[+] Item@(id %d name "item_%d")
+= .step %d
++ .items {id=%d name="item_%d"}
 @end`, step, step, step)
 
 		seq++
@@ -398,14 +395,16 @@ append .items[+] Item@(id %d name "item_%d")
 			Base:    &stateHash,
 		})
 
-		// Update state hash for next patch (simulate applying patch)
-		// In real usage, you'd parse and apply the patch, then hash the result
-		newState := glyph.Struct("AgentState",
-			glyph.MapEntry{Key: "task", Value: glyph.Str("process_data")},
-			glyph.MapEntry{Key: "step", Value: glyph.Int(int64(step))},
-			glyph.MapEntry{Key: "total_steps", Value: glyph.Int(10)},
-		)
-		stateHash = stream.StateHashLoose(newState)
+		// Apply the patch to update state (real parse + apply, not simulated)
+		parsed, err := glyph.ParsePatch(patchPayload, nil)
+		if err != nil {
+			fatal("parse patch: %v", err)
+		}
+		currentState, err = glyph.ApplyPatch(currentState, parsed)
+		if err != nil {
+			fatal("apply patch: %v", err)
+		}
+		stateHash = stream.StateHashLoose(currentState)
 
 		// UI: Metric every 3 steps
 		if step%3 == 0 {
@@ -477,333 +476,6 @@ func parseIntArg(arg, prefix string) (int, error) {
 		return 0, err
 	}
 	return n, nil
-}
-
-// parseGlyphWithPools parses GLYPH input that may contain pool definitions, @tab blocks, and pool references.
-// Format:
-//
-//	@pool.str id=S1 [...]
-//
-//	{key=@tab _ [...] ... ^S1:0 ...}
-func parseGlyphWithPools(input string, schemaReg *glyph.SchemaRegistry, poolReg *glyph.PoolRegistry) (*glyph.GValue, error) {
-	lines := strings.Split(input, "\n")
-
-	// Collect pool definitions and find the value start
-	var valueLines []string
-	inPool := false
-	var poolBuf strings.Builder
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		// Check for pool definition start
-		if strings.HasPrefix(trimmed, "@pool.") {
-			inPool = true
-			poolBuf.Reset()
-			poolBuf.WriteString(trimmed)
-
-			// Check if it's a single-line pool
-			if strings.Contains(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
-				pool, err := glyph.ParsePool(poolBuf.String())
-				if err != nil {
-					return nil, fmt.Errorf("parse pool: %w", err)
-				}
-				poolReg.Define(pool)
-				inPool = false
-			}
-			continue
-		}
-
-		if inPool {
-			// Continue collecting pool definition
-			poolBuf.WriteString("\n")
-			poolBuf.WriteString(line)
-
-			// Check if pool ends (closing bracket)
-			if strings.HasSuffix(trimmed, "]") {
-				pool, err := glyph.ParsePool(poolBuf.String())
-				if err != nil {
-					return nil, fmt.Errorf("parse pool: %w", err)
-				}
-				poolReg.Define(pool)
-				inPool = false
-			}
-			continue
-		}
-
-		// Skip empty lines between pools and value
-		if trimmed == "" {
-			continue
-		}
-
-		// Everything else is part of the value
-		valueLines = append(valueLines, line)
-	}
-
-	if len(valueLines) == 0 {
-		return nil, fmt.Errorf("no value found in input")
-	}
-
-	valueStr := strings.Join(valueLines, "\n")
-
-	// Check if this is a top-level @tab block
-	if strings.HasPrefix(strings.TrimSpace(valueStr), "@tab _") {
-		gv, err := glyph.ParseTabularLoose(valueStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse tabular: %w", err)
-		}
-		// Resolve pool references
-		return resolvePoolRefs(gv, poolReg)
-	}
-
-	// For maps with embedded @tab, we need custom parsing
-	// The structure is: {key1=@tab _ [...] rows... key2=value}
-	if strings.Contains(valueStr, "=@tab _") {
-		gv, err := parseMapWithEmbeddedTab(valueStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse embedded tab: %w", err)
-		}
-		return resolvePoolRefs(gv, poolReg)
-	}
-
-	// Parse the value with schema registry (standard parsing)
-	gv, _, err := glyph.ParseLoosePayload(valueStr, schemaReg)
-	if err != nil {
-		return nil, fmt.Errorf("parse value: %w", err)
-	}
-
-	// Resolve pool references in the parsed value
-	resolved, err := resolvePoolRefs(gv, poolReg)
-	if err != nil {
-		return nil, fmt.Errorf("resolve pool refs: %w", err)
-	}
-
-	return resolved, nil
-}
-
-// parseMapWithEmbeddedTab parses a map that contains embedded @tab blocks.
-// Example: {messages=@tab _ rows=4 cols=2 [content role]\n|...|...|... system="value"}
-func parseMapWithEmbeddedTab(input string) (*glyph.GValue, error) {
-	input = strings.TrimSpace(input)
-
-	// Must start with {
-	if !strings.HasPrefix(input, "{") {
-		return nil, fmt.Errorf("expected { at start of map")
-	}
-
-	// Find where the map ends (matching closing brace)
-	// This is tricky because we have embedded @tab blocks
-	input = input[1:] // Remove leading {
-
-	// Find trailing } - it should be at the end after the @tab block(s)
-	// The format is: key=@tab _ [...]\n|row1|\n...\n otherkey=value}
-	if !strings.HasSuffix(strings.TrimSpace(input), "}") {
-		return nil, fmt.Errorf("expected } at end of map")
-	}
-	input = strings.TrimSpace(input)
-	input = input[:len(input)-1] // Remove trailing }
-
-	entries := []glyph.MapEntry{}
-
-	// Split into key=value pairs, handling @tab blocks specially
-	// Look for patterns like: key=@tab _ ... @end or key=@tab _ rows=N cols=M [...]\n|...|\n
-	remaining := input
-
-	for len(remaining) > 0 {
-		remaining = strings.TrimSpace(remaining)
-		if remaining == "" {
-			break
-		}
-
-		// Find key=
-		eqIdx := strings.Index(remaining, "=")
-		if eqIdx < 0 {
-			break
-		}
-
-		key := strings.TrimSpace(remaining[:eqIdx])
-		remaining = remaining[eqIdx+1:]
-
-		// Check if value is @tab
-		if strings.HasPrefix(strings.TrimSpace(remaining), "@tab _") {
-			// Find the end of the @tab block
-			// It ends with either @end or when we hit another key=
-			tabStart := strings.Index(remaining, "@tab _")
-			tabContent := remaining[tabStart:]
-
-			// Find where the tab block ends
-			var tabEnd int
-			if endIdx := strings.Index(tabContent, "@end"); endIdx >= 0 {
-				tabEnd = endIdx + 4 // Include @end
-			} else {
-				// Look for the next key= pattern (not inside |...|)
-				// The tab ends when we see " key=" pattern after rows
-				lines := strings.Split(tabContent, "\n")
-				var tabLines []string
-				foundEnd := false
-				for i, line := range lines {
-					// Check if this line starts a new key (space + alphanumeric + =)
-					trimmed := strings.TrimLeft(line, " \t")
-					if i > 0 && !strings.HasPrefix(trimmed, "|") && strings.Contains(trimmed, "=") {
-						// This is likely the next key
-						tabEnd = strings.Index(tabContent, "\n"+line)
-						if tabEnd < 0 {
-							tabEnd = len(tabContent)
-						}
-						foundEnd = true
-						break
-					}
-					tabLines = append(tabLines, line)
-				}
-				if !foundEnd {
-					tabEnd = len(tabContent)
-				}
-			}
-
-			tabBlock := strings.TrimSpace(tabContent[:tabEnd])
-			remaining = strings.TrimSpace(tabContent[tabEnd:])
-
-			// Parse the @tab block
-			tabValue, err := glyph.ParseTabularLoose(tabBlock)
-			if err != nil {
-				return nil, fmt.Errorf("parse @tab for key %s: %w", key, err)
-			}
-
-			entries = append(entries, glyph.MapEntry{Key: key, Value: tabValue})
-		} else {
-			// Regular value - find where it ends (space before next key= or end of input)
-			var valueEnd int
-			found := false
-
-			// Look for space followed by alphanumeric=
-			for i := 0; i < len(remaining); i++ {
-				if remaining[i] == ' ' || remaining[i] == '\n' {
-					// Check if next non-space is key=
-					rest := strings.TrimLeft(remaining[i:], " \t\n")
-					if len(rest) > 0 && isKeyStart(rest) {
-						valueEnd = i
-						found = true
-						break
-					}
-				}
-			}
-			if !found {
-				valueEnd = len(remaining)
-			}
-
-			valueStr := strings.TrimSpace(remaining[:valueEnd])
-			remaining = strings.TrimSpace(remaining[valueEnd:])
-
-			// Parse the value
-			val, _, err := glyph.ParseLoosePayload(valueStr, nil)
-			if err != nil {
-				// Try parsing as a simple string
-				val = glyph.Str(valueStr)
-			}
-
-			entries = append(entries, glyph.MapEntry{Key: key, Value: val})
-		}
-	}
-
-	return glyph.Map(entries...), nil
-}
-
-// isKeyStart checks if a string looks like it starts with "key="
-func isKeyStart(s string) bool {
-	for i, c := range s {
-		if c == '=' {
-			return i > 0
-		}
-		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
-			if c == '"' && i == 0 {
-				// Quoted key
-				continue
-			}
-			return false
-		}
-	}
-	return false
-}
-
-// resolvePoolRefs recursively resolves ^S1:N references to their pooled values.
-func resolvePoolRefs(gv *glyph.GValue, poolReg *glyph.PoolRegistry) (*glyph.GValue, error) {
-	if gv == nil {
-		return nil, nil
-	}
-
-	// Check if this is a pool reference (stored as a string starting with ^)
-	if gv.Type() == glyph.TypeStr {
-		s, err := gv.AsStr()
-		if err != nil {
-			return nil, err
-		}
-		if strings.HasPrefix(s, "^") && strings.Contains(s, ":") {
-			// Parse pool reference
-			ref, err := glyph.ParsePoolRef(s)
-			if err == nil && ref != nil {
-				// Resolve from registry
-				resolved, err := poolReg.Resolve(*ref)
-				if err == nil && resolved != nil {
-					return resolved, nil
-				}
-				// If not found or error, keep as-is (string)
-			}
-		}
-		return gv, nil
-	}
-
-	// Recursively resolve containers
-	switch gv.Type() {
-	case glyph.TypeList:
-		items, err := gv.AsList()
-		if err != nil {
-			return nil, err
-		}
-		resolved := make([]*glyph.GValue, len(items))
-		for i, item := range items {
-			r, err := resolvePoolRefs(item, poolReg)
-			if err != nil {
-				return nil, err
-			}
-			resolved[i] = r
-		}
-		return glyph.List(resolved...), nil
-
-	case glyph.TypeMap:
-		entries, err := gv.AsMap()
-		if err != nil {
-			return nil, err
-		}
-		resolvedEntries := make([]glyph.MapEntry, len(entries))
-		for i, e := range entries {
-			r, err := resolvePoolRefs(e.Value, poolReg)
-			if err != nil {
-				return nil, err
-			}
-			resolvedEntries[i] = glyph.MapEntry{Key: e.Key, Value: r}
-		}
-		return glyph.Map(resolvedEntries...), nil
-
-	case glyph.TypeStruct:
-		sv, err := gv.AsStruct()
-		if err != nil {
-			return nil, err
-		}
-		if sv == nil {
-			return gv, nil
-		}
-		resolvedFields := make([]glyph.MapEntry, len(sv.Fields))
-		for i, f := range sv.Fields {
-			r, err := resolvePoolRefs(f.Value, poolReg)
-			if err != nil {
-				return nil, err
-			}
-			resolvedFields[i] = glyph.MapEntry{Key: f.Key, Value: r}
-		}
-		return glyph.Struct(sv.TypeName, resolvedFields...), nil
-	}
-
-	return gv, nil
 }
 
 // cmdFmtLooseWithPool: JSON -> canonical GLYPH-Loose with automatic string pooling

@@ -18,6 +18,21 @@ import (
 	"sync"
 )
 
+const (
+	invalidStreamDictIndex = ^uint16(0)
+	maxStreamStringLen     = 1<<16 - 1
+)
+
+func uint16FromInt(v int) uint16 {
+	// #nosec G115 -- callers check that v fits within uint16 before converting.
+	return uint16(v)
+}
+
+func uint64FromPositiveInt(v int) uint64 {
+	// #nosec G115 -- callers only pass validated non-negative values.
+	return uint64(v)
+}
+
 // StreamDict is a streaming-optimized dictionary for multi-frame sessions.
 type StreamDict struct {
 	mu         sync.RWMutex
@@ -126,13 +141,17 @@ func (d *StreamDict) Add(key string) uint16 {
 		return idx
 	}
 
+	if len(key) > maxStreamStringLen {
+		return invalidStreamDictIndex
+	}
+
 	// Cannot add if frozen or full
-	if d.frozen || uint16(len(d.idxToKey)) >= d.maxEntries {
-		return 0xFFFF
+	if d.frozen || len(d.idxToKey) >= int(d.maxEntries) {
+		return invalidStreamDictIndex
 	}
 
 	// Add new entry
-	idx := uint16(len(d.idxToKey))
+	idx := uint16FromInt(len(d.idxToKey))
 	d.keyToIdx[key] = idx
 	d.idxToKey = append(d.idxToKey, key)
 	d.frequency = append(d.frequency, 1)
@@ -165,7 +184,7 @@ func (d *StreamDict) Get(idx uint16) string {
 
 // Encode encodes a key using the dictionary.
 // Returns (index, true) if found and increments frequency.
-// Returns (0xFFFF, false) if not found.
+// Returns (invalidStreamDictIndex, false) if not found.
 func (d *StreamDict) Encode(key string) (uint16, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -174,11 +193,11 @@ func (d *StreamDict) Encode(key string) (uint16, bool) {
 		d.frequency[idx]++
 		return idx, true
 	}
-	return 0xFFFF, false
+	return invalidStreamDictIndex, false
 }
 
 // EncodeOrAdd encodes a key, adding it if not present.
-// Returns (index, true) if encoded, (0xFFFF, false) if full/frozen.
+// Returns (index, true) if encoded, (invalidStreamDictIndex, false) if full/frozen.
 func (d *StreamDict) EncodeOrAdd(key string) (uint16, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -189,9 +208,13 @@ func (d *StreamDict) EncodeOrAdd(key string) (uint16, bool) {
 		return idx, true
 	}
 
+	if len(key) > maxStreamStringLen {
+		return invalidStreamDictIndex, false
+	}
+
 	// Cannot add if frozen or full
-	if d.frozen || uint16(len(d.idxToKey)) >= d.maxEntries {
-		return 0xFFFF, false
+	if d.frozen || len(d.idxToKey) >= int(d.maxEntries) {
+		return invalidStreamDictIndex, false
 	}
 
 	// Add new entry

@@ -308,10 +308,18 @@ func (v *StreamingValidator) PushToken(token string) *StreamValidationResult {
 func (v *StreamingValidator) processChar(char rune) {
 	// Check hard limits before processing
 	if v.buffer.Len() >= v.maxBufferSize {
+		v.errors = append(v.errors, StreamValidationError{
+			Code:    ErrCodeLimitExceeded,
+			Message: "Buffer size limit exceeded",
+		})
 		v.state = StateError
 		return
 	}
 	if len(v.parsedFields) >= v.maxFieldCount {
+		v.errors = append(v.errors, StreamValidationError{
+			Code:    ErrCodeLimitExceeded,
+			Message: "Field count limit exceeded",
+		})
 		v.state = StateError
 		return
 	}
@@ -470,6 +478,11 @@ func (v *StreamingValidator) validateField(key string, value interface{}) {
 
 	argSchema, exists := schema.Args[key]
 	if !exists {
+		v.errors = append(v.errors, StreamValidationError{
+			Code:    ErrCodeUnknownTool,
+			Message: fmt.Sprintf("Unknown argument: %s", key),
+			Field:   key,
+		})
 		return
 	}
 
