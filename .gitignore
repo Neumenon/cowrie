@@ -21,3 +21,15 @@ Thumbs.db
 
 # Test artifacts
 *.log
+
+# Coverage artifacts
+go/coverage.out
+python/.coverage
+typescript/coverage/
+js/coverage/
+
+# Coverage artifacts
+go/coverage.out
+python/.coverage
+typescript/coverage/
+js/coverage/
