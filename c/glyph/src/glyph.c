@@ -38,27 +38,34 @@ static void strbuf_init(strbuf_t *buf) {
     if (buf->data) buf->data[0] = '\0';
 }
 
-static void strbuf_grow(strbuf_t *buf, size_t need) {
-    if (buf->len + need >= buf->cap) {
-        size_t new_cap = buf->cap * 2;
-        while (buf->len + need >= new_cap) new_cap *= 2;
-        char *new_data = realloc(buf->data, new_cap);
-        if (new_data) {
-            buf->data = new_data;
-            buf->cap = new_cap;
-        }
+static int strbuf_grow(strbuf_t *buf, size_t need) {
+    /* Overflow check: buf->len + need */
+    if (need > SIZE_MAX - buf->len) return -1;
+    size_t required = buf->len + need;
+    if (required < buf->cap) return 0;  /* already big enough */
+
+    size_t new_cap = buf->cap ? buf->cap : 64;
+    while (new_cap < required) {
+        if (new_cap > SIZE_MAX / 2) return -1;  /* overflow check */
+        new_cap *= 2;
     }
+
+    char *new_data = realloc(buf->data, new_cap);
+    if (!new_data) return -1;
+    buf->data = new_data;
+    buf->cap = new_cap;
+    return 0;
 }
 
 static void strbuf_append(strbuf_t *buf, const char *s) {
     size_t len = strlen(s);
-    strbuf_grow(buf, len + 1);
+    if (strbuf_grow(buf, len + 1) != 0) return;
     memcpy(buf->data + buf->len, s, len + 1);
     buf->len += len;
 }
 
 static void strbuf_append_char(strbuf_t *buf, char c) {
-    strbuf_grow(buf, 2);
+    if (strbuf_grow(buf, 2) != 0) return;
     buf->data[buf->len++] = c;
     buf->data[buf->len] = '\0';
 }
@@ -146,17 +153,19 @@ glyph_value_t *glyph_list_new(void) {
     return v;
 }
 
-void glyph_list_append(glyph_value_t *list, glyph_value_t *item) {
-    if (!list || list->type != GLYPH_LIST || !item) return;
+int glyph_list_append(glyph_value_t *list, glyph_value_t *item) {
+    if (!list || list->type != GLYPH_LIST || !item) return -1;
 
     size_t new_count = list->list_val.count + 1;
+    if (new_count == 0) return -1;  /* overflow check */
+    if (new_count > SIZE_MAX / sizeof(glyph_value_t *)) return -1;  /* mul overflow */
     glyph_value_t **new_items = realloc(list->list_val.items,
                                         new_count * sizeof(glyph_value_t *));
-    if (new_items) {
-        new_items[list->list_val.count] = item;
-        list->list_val.items = new_items;
-        list->list_val.count = new_count;
-    }
+    if (!new_items) return -1;
+    new_items[list->list_val.count] = item;
+    list->list_val.items = new_items;
+    list->list_val.count = new_count;
+    return 0;
 }
 
 glyph_value_t *glyph_map_new(void) {
@@ -169,18 +178,20 @@ glyph_value_t *glyph_map_new(void) {
     return v;
 }
 
-void glyph_map_set(glyph_value_t *map, const char *key, glyph_value_t *value) {
-    if (!map || map->type != GLYPH_MAP || !key || !value) return;
+int glyph_map_set(glyph_value_t *map, const char *key, glyph_value_t *value) {
+    if (!map || map->type != GLYPH_MAP || !key || !value) return -1;
 
     size_t new_count = map->map_val.count + 1;
+    if (new_count == 0) return -1;  /* overflow check */
+    if (new_count > SIZE_MAX / sizeof(glyph_map_entry_t)) return -1;  /* mul overflow */
     glyph_map_entry_t *new_entries = realloc(map->map_val.entries,
                                               new_count * sizeof(glyph_map_entry_t));
-    if (new_entries) {
-        new_entries[map->map_val.count].key = strdup_safe(key);
-        new_entries[map->map_val.count].value = value;
-        map->map_val.entries = new_entries;
-        map->map_val.count = new_count;
-    }
+    if (!new_entries) return -1;
+    new_entries[map->map_val.count].key = strdup_safe(key);
+    new_entries[map->map_val.count].value = value;
+    map->map_val.entries = new_entries;
+    map->map_val.count = new_count;
+    return 0;
 }
 
 glyph_value_t *glyph_struct_new(const char *type_name) {
@@ -194,18 +205,20 @@ glyph_value_t *glyph_struct_new(const char *type_name) {
     return v;
 }
 
-void glyph_struct_set(glyph_value_t *s, const char *key, glyph_value_t *value) {
-    if (!s || s->type != GLYPH_STRUCT || !key || !value) return;
+int glyph_struct_set(glyph_value_t *s, const char *key, glyph_value_t *value) {
+    if (!s || s->type != GLYPH_STRUCT || !key || !value) return -1;
 
     size_t new_count = s->struct_val.fields_count + 1;
+    if (new_count == 0) return -1;  /* overflow check */
+    if (new_count > SIZE_MAX / sizeof(glyph_map_entry_t)) return -1;  /* mul overflow */
     glyph_map_entry_t *new_fields = realloc(s->struct_val.fields,
                                              new_count * sizeof(glyph_map_entry_t));
-    if (new_fields) {
-        new_fields[s->struct_val.fields_count].key = strdup_safe(key);
-        new_fields[s->struct_val.fields_count].value = value;
-        s->struct_val.fields = new_fields;
-        s->struct_val.fields_count = new_count;
-    }
+    if (!new_fields) return -1;
+    new_fields[s->struct_val.fields_count].key = strdup_safe(key);
+    new_fields[s->struct_val.fields_count].value = value;
+    s->struct_val.fields = new_fields;
+    s->struct_val.fields_count = new_count;
+    return 0;
 }
 
 glyph_value_t *glyph_sum(const char *tag, glyph_value_t *value) {
@@ -384,7 +397,7 @@ static void write_canon_value(strbuf_t *buf, const glyph_value_t *v,
 /* Return the canonical form of a key string (caller must free) */
 static char *canon_key_string(const char *s) {
     if (is_bare_safe(s)) {
-        return strdup(s);
+        return strdup_safe(s);
     }
     strbuf_t buf;
     strbuf_init(&buf);

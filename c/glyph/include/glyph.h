@@ -145,20 +145,20 @@ glyph_value_t *glyph_id(const char *prefix, const char *value);
 /** Create an empty list */
 glyph_value_t *glyph_list_new(void);
 
-/** Append to a list (takes ownership of item) */
-void glyph_list_append(glyph_value_t *list, glyph_value_t *item);
+/** Append to a list (takes ownership of item). Returns 0 on success, -1 on error. */
+int glyph_list_append(glyph_value_t *list, glyph_value_t *item);
 
 /** Create an empty map */
 glyph_value_t *glyph_map_new(void);
 
-/** Add to a map (copies key, takes ownership of value) */
-void glyph_map_set(glyph_value_t *map, const char *key, glyph_value_t *value);
+/** Add to a map (copies key, takes ownership of value). Returns 0 on success, -1 on error. */
+int glyph_map_set(glyph_value_t *map, const char *key, glyph_value_t *value);
 
 /** Create a struct */
 glyph_value_t *glyph_struct_new(const char *type_name);
 
-/** Add a field to a struct */
-void glyph_struct_set(glyph_value_t *s, const char *key, glyph_value_t *value);
+/** Add a field to a struct. Returns 0 on success, -1 on error. */
+int glyph_struct_set(glyph_value_t *s, const char *key, glyph_value_t *value);
 
 /** Create a sum type */
 glyph_value_t *glyph_sum(const char *tag, glyph_value_t *value);
