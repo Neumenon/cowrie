@@ -22,7 +22,7 @@
  * - Opt-in via LooseCanonOpts.autoTabular
  */
 
-import { GValue, MapEntry } from './types';
+import { GValue, MapEntry, StructValue, SumValue } from './types';
 
 // ============================================================
 // Loose Canonicalization Options
@@ -177,6 +177,9 @@ function canonInt(n: number): string {
 }
 
 function canonFloat(f: number): string {
+  if (Number.isNaN(f)) return '"NaN"';
+  if (f === Infinity) return '"Inf"';
+  if (f === -Infinity) return '"-Inf"';
   if (f === 0) return '0';
   if (Object.is(f, -0)) return '0'; // Negative zero -> 0
   
@@ -403,14 +406,9 @@ function canonicalizeLooseImpl(v: GValue, opts: LooseCanonOpts): string {
     case 'map':
       return canonMapLooseWithOpts(v.asMap(), opts);
     case 'struct':
-      // Treat struct as map for loose canonicalization
-      return canonMapLooseWithOpts(v.asStruct().fields, opts);
-    case 'sum': {
-      // Treat sum as {tag: value}
-      const sum = v.asSum();
-      const entry: MapEntry = { key: sum.tag, value: sum.value ?? GValue.null() };
-      return canonMapLooseWithOpts([entry], opts);
-    }
+      return canonStructLooseWithOpts(v.asStruct(), opts);
+    case 'sum':
+      return canonSumLoose(v.asSum(), opts);
   }
 }
 
@@ -574,18 +572,43 @@ function emitTabularLoose(items: GValue[], cols: string[], opts: LooseCanonOpts)
 }
 
 /**
- * Escape pipe characters in a tabular cell.
- * Only | needs escaping (as \|). Backslashes are NOT escaped - they're part of GLYPH string escapes.
+ * Escape special characters in a tabular cell.
+ * Order matters: backslashes first, then pipes, then newlines.
  */
 function escapeTabularCell(s: string): string {
-  return s.replace(/\|/g, '\\|');
+  return s.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, '\\n');
 }
 
 /**
- * Unescape pipe characters in a tabular cell.
+ * Unescape special characters in a tabular cell.
+ * Reverse order of escaping: pipes first, then newlines, then backslashes.
  */
 export function unescapeTabularCell(s: string): string {
-  return s.replace(/\\\|/g, '|');
+  // Process character by character to handle escape sequences correctly
+  let result = '';
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] === '\\' && i + 1 < s.length) {
+      const next = s[i + 1];
+      if (next === '|') {
+        result += '|';
+        i += 2;
+      } else if (next === '\\') {
+        result += '\\';
+        i += 2;
+      } else if (next === 'n') {
+        result += '\n';
+        i += 2;
+      } else {
+        result += s[i];
+        i++;
+      }
+    } else {
+      result += s[i];
+      i++;
+    }
+  }
+  return result;
 }
 
 // ============================================================
@@ -739,16 +762,17 @@ function parseTabularLooseRow(line: string, cols: string[]): Record<string, unkn
 }
 
 /**
- * Split a row by | respecting \| escapes.
+ * Split a row by | respecting escape sequences (\| and \\).
  */
 function splitTabularCells(s: string): string[] {
   const cells: string[] = [];
   let current = '';
   let i = 0;
-  
+
   while (i < s.length) {
-    if (s[i] === '\\' && i + 1 < s.length && s[i + 1] === '|') {
-      current += '\\|';
+    if (s[i] === '\\' && i + 1 < s.length) {
+      // Any escape sequence: preserve both characters and skip past them
+      current += s[i] + s[i + 1];
       i += 2;
     } else if (s[i] === '|') {
       cells.push(current);
@@ -760,7 +784,7 @@ function splitTabularCells(s: string): string[] {
     }
   }
   cells.push(current);
-  
+
   return cells;
 }
 
@@ -1052,6 +1076,50 @@ function canonMapLooseWithOpts(entries: MapEntry[], opts: LooseCanonOpts): strin
     return `${keyStr}=${canonicalizeLooseImpl(e.value, opts)}`;
   });
   return '{' + parts.join(' ') + '}';
+}
+
+/**
+ * Canonical struct form: "TypeName{" + sorted key=value pairs + "}"
+ * Preserves the type name, unlike plain map canonicalization.
+ */
+function canonStructLooseWithOpts(s: StructValue, opts: LooseCanonOpts): string {
+  if (s.fields.length === 0) {
+    return s.typeName + '{}';
+  }
+
+  // Create sorted copy of fields
+  const sorted = [...s.fields].sort((a, b) => {
+    const ka = canonString(a.key);
+    const kb = canonString(b.key);
+    return ka < kb ? -1 : ka > kb ? 1 : 0;
+  });
+
+  const parts = sorted.map(e => {
+    let keyStr: string;
+    if (opts.useCompactKeys && opts.keyDict) {
+      const idx = opts.keyDict.indexOf(e.key);
+      if (idx >= 0) {
+        keyStr = `#${idx}`;
+      } else {
+        keyStr = canonString(e.key);
+      }
+    } else {
+      keyStr = canonString(e.key);
+    }
+    return `${keyStr}=${canonicalizeLooseImpl(e.value, opts)}`;
+  });
+  return s.typeName + '{' + parts.join(' ') + '}';
+}
+
+/**
+ * Canonical sum form: "Tag(value)" or "Tag()" for null.
+ * Preserves the sum/union semantics instead of flattening to a map.
+ */
+function canonSumLoose(s: SumValue, opts: LooseCanonOpts): string {
+  if (s.value === null || s.value.type === 'null') {
+    return s.tag + '()';
+  }
+  return s.tag + '(' + canonicalizeLooseImpl(s.value, opts) + ')';
 }
 
 // ============================================================

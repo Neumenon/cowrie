@@ -320,7 +320,8 @@ static bool is_bare_safe(const char *s) {
     /* Reserved words */
     if (strcmp(s, "t") == 0 || strcmp(s, "f") == 0 ||
         strcmp(s, "true") == 0 || strcmp(s, "false") == 0 ||
-        strcmp(s, "null") == 0 || strcmp(s, "_") == 0) {
+        strcmp(s, "null") == 0 || strcmp(s, "none") == 0 ||
+        strcmp(s, "nil") == 0 || strcmp(s, "_") == 0) {
         return false;
     }
 
@@ -380,11 +381,27 @@ static void write_canon_string(strbuf_t *buf, const char *s) {
 static void write_canon_value(strbuf_t *buf, const glyph_value_t *v,
                               const glyph_canon_opts_t *opts);
 
+/* Return the canonical form of a key string (caller must free) */
+static char *canon_key_string(const char *s) {
+    if (is_bare_safe(s)) {
+        return strdup(s);
+    }
+    strbuf_t buf;
+    strbuf_init(&buf);
+    write_quoted_string(&buf, s);
+    return buf.data;  /* caller frees */
+}
+
 /* Compare entries by canonical key for sorting */
 static int compare_entries(const void *a, const void *b) {
     const glyph_map_entry_t *ea = a;
     const glyph_map_entry_t *eb = b;
-    return strcmp(ea->key, eb->key);
+    char *ca = canon_key_string(ea->key);
+    char *cb = canon_key_string(eb->key);
+    int result = strcmp(ca, cb);
+    free(ca);
+    free(cb);
+    return result;
 }
 
 static void write_canon_map(strbuf_t *buf, const glyph_map_entry_t *entries,
@@ -607,6 +624,17 @@ static void write_canon_value(strbuf_t *buf, const glyph_value_t *v,
 
         case GLYPH_FLOAT: {
             double f = v->float_val;
+
+            /* NaN/Inf: emit as quoted strings matching Go */
+            if (isnan(f)) {
+                strbuf_append(buf, "\"NaN\"");
+                break;
+            }
+            if (isinf(f)) {
+                strbuf_append(buf, f < 0 ? "\"-Inf\"" : "\"Inf\"");
+                break;
+            }
+
             /* Handle negative zero */
             if (f == 0.0) f = 0.0;
 

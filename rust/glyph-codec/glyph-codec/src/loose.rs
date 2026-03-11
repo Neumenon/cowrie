@@ -137,8 +137,15 @@ fn canon_int(n: i64) -> String {
 }
 
 fn canon_float(f: f64) -> String {
-    if f.is_nan() || f.is_infinite() {
-        panic!("Cannot canonicalize NaN or Infinity");
+    if f.is_nan() {
+        return "\"NaN\"".to_string();
+    }
+    if f.is_infinite() {
+        return if f.is_sign_negative() {
+            "\"-Inf\"".to_string()
+        } else {
+            "\"Inf\"".to_string()
+        };
     }
 
     // Handle negative zero
@@ -190,7 +197,7 @@ fn is_bare_safe(s: &str) -> bool {
     }
 
     // Reserved words
-    let reserved = ["t", "f", "true", "false", "null", "_"];
+    let reserved = ["t", "f", "true", "false", "null", "none", "nil", "_"];
     if reserved.contains(&s) {
         return false;
     }
@@ -396,7 +403,7 @@ fn try_emit_tabular(items: &[GValue], opts: &LooseCanonOpts) -> Option<String> {
             let cell = values.get(col).map(|v| {
                 let mut cell_buf = String::new();
                 write_canon_loose(&mut cell_buf, v, opts);
-                cell_buf.replace('|', "\\|")
+                cell_buf.replace('\\', "\\\\").replace('|', "\\|").replace('\n', "\\n")
             }).unwrap_or_else(|| canon_null(opts.null_style).to_string());
             buf.push_str(&cell);
             buf.push('|');
