@@ -20,27 +20,69 @@ var (
 	ErrInvalidIRIID    = errors.New("cowrie-ld: invalid IRI ID")
 	ErrMalformedLength = errors.New("cowrie-ld: malformed length exceeds remaining data")
 	ErrInvalidVarint   = errors.New("cowrie-ld: invalid varint (overflow)")
+	ErrDepthExceeded   = errors.New("cowrie-ld: maximum nesting depth exceeded")
+	ErrStringTooLarge  = errors.New("cowrie-ld: string exceeds maximum length")
+	ErrArrayTooLarge   = errors.New("cowrie-ld: array exceeds maximum length")
+	ErrInputTooLarge   = errors.New("cowrie-ld: input exceeds size limit")
+)
+
+// Default security limits for the LD decoder.
+const (
+	defaultMaxDepth     = 1000
+	defaultMaxStringLen = 10_000_000 // 10MB
+	defaultMaxArrayLen  = 1_000_000  // 1M elements
+	defaultMaxInputSize = 50_000_000 // 50MB (matches cowrie DefaultMaxBytesLen)
 )
 
 // Decode decodes Cowrie-LD binary data into an LDDocument.
 func Decode(data []byte) (*LDDocument, error) {
-	r := &reader{data: data}
+	r := &reader{
+		data:         data,
+		maxDepth:     defaultMaxDepth,
+		maxStringLen: defaultMaxStringLen,
+		maxArrayLen:  defaultMaxArrayLen,
+	}
 	return decode(r)
 }
 
 // DecodeFrom decodes from an io.Reader.
+// Applies defaultMaxInputSize (50MB) as an input size limit to prevent
+// resource exhaustion. Use DecodeFromLimited for a custom limit.
 func DecodeFrom(rd io.Reader) (*LDDocument, error) {
-	data, err := io.ReadAll(rd)
+	maxBytes := int64(defaultMaxInputSize)
+	lr := io.LimitReader(rd, maxBytes+1)
+	data, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, ErrInputTooLarge
 	}
 	return Decode(data)
 }
 
-// reader wraps a byte slice for reading.
+// DecodeFromLimited decodes from an io.Reader with a custom size limit.
+// Returns ErrInputTooLarge if the input exceeds maxBytes.
+func DecodeFromLimited(rd io.Reader, maxBytes int64) (*LDDocument, error) {
+	lr := io.LimitReader(rd, maxBytes+1)
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, ErrInputTooLarge
+	}
+	return Decode(data)
+}
+
+// reader wraps a byte slice for reading with security limits.
 type reader struct {
-	data []byte
-	pos  int
+	data        []byte
+	pos         int
+	depth       int // Current nesting depth
+	maxDepth    int // Maximum allowed nesting depth
+	maxStringLen int // Maximum string byte length
+	maxArrayLen int // Maximum array/object element count
 }
 
 // remaining returns bytes left to read.
@@ -88,6 +130,36 @@ func (r *reader) readString() (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// readStringWithLimit reads a string with an explicit length limit.
+func (r *reader) readStringWithLimit() (string, error) {
+	length, err := r.readLength()
+	if err != nil {
+		return "", err
+	}
+	if r.maxStringLen > 0 && length > r.maxStringLen {
+		return "", ErrStringTooLarge
+	}
+	b, err := r.read(length)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// enterNested increments depth and checks limit.
+func (r *reader) enterNested() error {
+	r.depth++
+	if r.maxDepth > 0 && r.depth > r.maxDepth {
+		return ErrDepthExceeded
+	}
+	return nil
+}
+
+// exitNested decrements depth.
+func (r *reader) exitNested() {
+	r.depth--
 }
 
 func uint64ToInt(v uint64) (int, error) {
@@ -185,7 +257,7 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 	doc.FieldDict = make([]string, fieldDictLen)
 	for i := 0; i < fieldDictLen; i++ {
-		s, err := r.readString()
+		s, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
@@ -199,11 +271,11 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 	doc.Terms = make([]TermEntry, termCount)
 	for i := 0; i < termCount; i++ {
-		term, err := r.readString()
+		term, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
-		iri, err := r.readString()
+		iri, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
@@ -225,7 +297,7 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 	doc.IRIs = make([]IRI, iriCount)
 	for i := 0; i < iriCount; i++ {
-		s, err := r.readString()
+		s, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
@@ -239,7 +311,7 @@ func decode(r *reader) (*LDDocument, error) {
 	}
 	doc.Datatypes = make([]IRI, dtCount)
 	for i := 0; i < dtCount; i++ {
-		s, err := r.readString()
+		s, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
@@ -313,7 +385,7 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		return cowrie.NewDecimal128(int8(scaleInt), coef), nil
 
 	case cowrie.TagString:
-		s, err := r.readString()
+		s, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
@@ -364,9 +436,17 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		return cowrie.BigInt(b), nil
 
 	case cowrie.TagArray:
+		if err := r.enterNested(); err != nil {
+			return nil, err
+		}
+		defer r.exitNested()
+
 		count, err := r.readCount(1)
 		if err != nil {
 			return nil, err
+		}
+		if r.maxArrayLen > 0 && count > r.maxArrayLen {
+			return nil, ErrArrayTooLarge
 		}
 		items := make([]*cowrie.Value, count)
 		for i := 0; i < count; i++ {
@@ -379,9 +459,17 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 		return cowrie.Array(items...), nil
 
 	case cowrie.TagObject:
+		if err := r.enterNested(); err != nil {
+			return nil, err
+		}
+		defer r.exitNested()
+
 		count, err := r.readCount(2)
 		if err != nil {
 			return nil, err
+		}
+		if r.maxArrayLen > 0 && count > r.maxArrayLen {
+			return nil, ErrArrayTooLarge
 		}
 		members := make([]cowrie.Member, count)
 		for i := 0; i < count; i++ {
@@ -423,7 +511,7 @@ func decodeValue(r *reader, doc *LDDocument) (*cowrie.Value, error) {
 
 	case TagBNode:
 		// Blank node - decode ID string
-		id, err := r.readString()
+		id, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}
@@ -464,7 +552,7 @@ func DecodeLDValue(r *reader, doc *LDDocument) (*LDValue, error) {
 		}, nil
 
 	case TagBNode:
-		id, err := r.readString()
+		id, err := r.readStringWithLimit()
 		if err != nil {
 			return nil, err
 		}

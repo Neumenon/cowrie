@@ -27,7 +27,7 @@ type ColumnReader struct {
 // NewColumnReader creates a reader from Cowrie data.
 // Returns an error if the data has no column hints.
 func NewColumnReader(data []byte) (*ColumnReader, error) {
-	r := &reader{data: data}
+	r := &reader{data: data, opts: DefaultDecodeOptions()}
 
 	// Read header
 	magic0, err := r.readByte()
@@ -71,9 +71,15 @@ func NewColumnReader(data []byte) (*ColumnReader, error) {
 	if err != nil {
 		return nil, err
 	}
+	if r.opts.MaxDictLen > 0 && dictLen > uint64(r.opts.MaxDictLen) {
+		return nil, ErrDictTooLarge
+	}
+	if dictLen > uint64(r.remaining()) {
+		return nil, ErrMalformedLength
+	}
 	cr.dict = make([]string, dictLen)
 	for i := uint64(0); i < dictLen; i++ {
-		s, err := r.readString()
+		s, err := r.readStringWithLimit(r.opts.MaxStringLen)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +110,7 @@ func (cr *ColumnReader) decodeRoot() error {
 	if cr.root != nil {
 		return nil
 	}
-	r := &reader{data: cr.data, pos: cr.offset}
+	r := &reader{data: cr.data, pos: cr.offset, opts: DefaultDecodeOptions()}
 	root, err := decodeValue(r, cr.dict)
 	if err != nil {
 		return err

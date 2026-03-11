@@ -1671,6 +1671,14 @@ func readNode(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	}
 	off += n
 
+	maxArr := opts.MaxArrayLen
+	if maxArr <= 0 {
+		maxArr = DefaultMaxArrayLen
+	}
+	if labelCount > uint64(maxArr) {
+		return nil, 0, ErrMaxArrayLen
+	}
+
 	labels := make([]string, labelCount)
 	for i := uint64(0); i < labelCount; i++ {
 		lLen, n, err := readUvarint(data, off)
@@ -1719,6 +1727,14 @@ func readNodeInline(data []byte, off int, opts DecodeOptions) (Node, int, error)
 		return Node{}, 0, err
 	}
 	off += n
+
+	maxArr := opts.MaxArrayLen
+	if maxArr <= 0 {
+		maxArr = DefaultMaxArrayLen
+	}
+	if labelCount > uint64(maxArr) {
+		return Node{}, 0, ErrMaxArrayLen
+	}
 
 	labels := make([]string, labelCount)
 	for i := uint64(0); i < labelCount; i++ {
@@ -1829,6 +1845,14 @@ func readAdjList(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	off += n
 
 	// Neighbors
+	maxArr := opts.MaxArrayLen
+	if maxArr <= 0 {
+		maxArr = DefaultMaxArrayLen
+	}
+	if count > uint64(maxArr) {
+		return nil, 0, ErrMaxArrayLen
+	}
+
 	neighbors := make([]int64, count)
 	for i := uint64(0); i < count; i++ {
 		v, n, err := readVarint(data, off)
@@ -1852,6 +1876,14 @@ func readNodeBatch(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	off += n
 
 	// Nodes (inline, without tags)
+	maxArr := opts.MaxArrayLen
+	if maxArr <= 0 {
+		maxArr = DefaultMaxArrayLen
+	}
+	if count > uint64(maxArr) {
+		return nil, 0, ErrMaxArrayLen
+	}
+
 	nodes := make([]Node, count)
 	for i := uint64(0); i < count; i++ {
 		node, newOff, err := readNodeInline(data, off, opts)
@@ -1881,6 +1913,14 @@ func readEdgeBatch(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	hasTypes := data[off] == 1
 	hasProps := data[off+1] == 1
 	off += 2
+
+	maxArr := opts.MaxArrayLen
+	if maxArr <= 0 {
+		maxArr = DefaultMaxArrayLen
+	}
+	if edgeCount > uint64(maxArr) {
+		return nil, 0, ErrMaxArrayLen
+	}
 
 	// Sources
 	sources := make([]int64, edgeCount)
@@ -1956,6 +1996,11 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 	gs := GraphShard{}
 	var err error
 
+	maxArr := opts.MaxArrayLen
+	if maxArr <= 0 {
+		maxArr = DefaultMaxArrayLen
+	}
+
 	// Name
 	if flags1&gsHasName != 0 {
 		nameLen, n, err := readUvarint(data, off)
@@ -1991,6 +2036,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 			return nil, 0, err
 		}
 		off += n
+		if nodeCount > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.Nodes = make([]Node, nodeCount)
 		for i := uint64(0); i < nodeCount; i++ {
 			node, newOff, err := readNodeInline(data, off, opts)
@@ -2009,6 +2057,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 			return nil, 0, err
 		}
 		off += n
+		if edgeCount > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.Edges = make([]Edge, edgeCount)
 		for i := uint64(0); i < edgeCount; i++ {
 			edge, newOff, err := readEdgeInline(data, off, opts)
@@ -2028,6 +2079,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 		}
 		off += n
 
+		if edgeCount > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		sources := make([]int64, edgeCount)
 		targets := make([]int64, edgeCount)
 
@@ -2058,6 +2112,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 		}
 		off += n
 
+		if adjCount > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.AdjLists = make([]AdjList, adjCount)
 		for i := uint64(0); i < adjCount; i++ {
 			nodeID, n, err := readVarint(data, off)
@@ -2072,6 +2129,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 			}
 			off += n
 
+			if neighborCount > uint64(maxArr) {
+				return nil, 0, ErrMaxArrayLen
+			}
 			neighbors := make([]int64, neighborCount)
 			for j := uint64(0); j < neighborCount; j++ {
 				v, n, err := readVarint(data, off)
@@ -2099,6 +2159,12 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 		}
 		off += n
 
+		if numNodes > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
+		if featureDim > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.NodeFeatures = make([][]float64, numNodes)
 		for i := uint64(0); i < numNodes; i++ {
 			gs.NodeFeatures[i] = make([]float64, featureDim)
@@ -2127,6 +2193,12 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 		}
 		off += n
 
+		if numEdges > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
+		if featureDim > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.EdgeFeatures = make([][]float64, numEdges)
 		for i := uint64(0); i < numEdges; i++ {
 			gs.EdgeFeatures[i] = make([]float64, featureDim)
@@ -2149,6 +2221,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 		}
 		off += n
 
+		if labelCount > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.NodeLabels = make([]int64, labelCount)
 		for i := uint64(0); i < labelCount; i++ {
 			v, n, err := readVarint(data, off)
@@ -2168,6 +2243,9 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 		}
 		off += n
 
+		if labelCount > uint64(maxArr) {
+			return nil, 0, ErrMaxArrayLen
+		}
 		gs.EdgeLabels = make([]int64, labelCount)
 		for i := uint64(0); i < labelCount; i++ {
 			v, n, err := readVarint(data, off)

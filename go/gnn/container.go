@@ -18,9 +18,22 @@ var (
 	ErrInvalidVersion  = errors.New("gnn: unsupported version")
 	ErrUnexpectedEOF   = errors.New("gnn: unexpected end of data")
 	ErrInvalidSection  = errors.New("gnn: invalid section")
-	ErrMalformedLength = errors.New("gnn: malformed length exceeds remaining data")
-	ErrInvalidVarint   = errors.New("gnn: invalid varint (overflow)")
+	ErrMalformedLength      = errors.New("gnn: malformed length exceeds remaining data")
+	ErrInvalidVarint        = errors.New("gnn: invalid varint (overflow)")
+	ErrDecompressedTooLarge = errors.New("gnn: decompressed size exceeds limit")
+	ErrInputTooLarge        = errors.New("gnn: input exceeds size limit")
+	ErrStringTooLarge       = errors.New("gnn: string exceeds maximum length")
 )
+
+// DefaultMaxDecompressedSize is the maximum allowed decompressed payload size (256 MB),
+// matching C's COWRIE_MAX_DECOMPRESSED_SIZE.
+const DefaultMaxDecompressedSize = 256 * 1024 * 1024
+
+// defaultMaxInputSize is the default limit for DecodeFrom (50MB).
+const defaultMaxInputSize = 50_000_000
+
+// defaultMaxStringLen is the default max string length in the GNN reader (10MB).
+const defaultMaxStringLen = 10_000_000
 
 // Encode writes the container to bytes.
 // Uses v1.1 format if container.Version >= Version11, otherwise v1.0.
@@ -270,7 +283,14 @@ func (c *Container) EncodeCompressed() ([]byte, error) {
 
 // DecodeCompressed decodes a zstd-compressed container.
 // Automatically detects if the data is compressed (SJGZ magic) or not (SJGN magic).
+// Enforces DefaultMaxDecompressedSize (256MB) to prevent decompression bombs.
 func DecodeCompressed(data []byte) (*Container, error) {
+	return DecodeCompressedWithLimit(data, DefaultMaxDecompressedSize)
+}
+
+// DecodeCompressedWithLimit decodes a zstd-compressed container with a custom
+// decompression size limit. Pass 0 for unlimited (not recommended).
+func DecodeCompressedWithLimit(data []byte, maxDecompressedSize int) (*Container, error) {
 	if len(data) < 8 {
 		return nil, ErrUnexpectedEOF
 	}
@@ -278,8 +298,18 @@ func DecodeCompressed(data []byte) (*Container, error) {
 	// Check magic
 	if data[0] == 'S' && data[1] == 'J' && data[2] == 'G' && data[3] == 'Z' {
 		// Compressed format
-		// originalSize := binary.LittleEndian.Uint32(data[4:8]) // For validation
-		dec, err := zstd.NewReader(nil)
+		originalSize := binary.LittleEndian.Uint32(data[4:8])
+
+		// Check declared original size against limit before decompression
+		if maxDecompressedSize > 0 && int(originalSize) > maxDecompressedSize {
+			return nil, ErrDecompressedTooLarge
+		}
+
+		var opts []zstd.DOption
+		if maxDecompressedSize > 0 {
+			opts = append(opts, zstd.WithDecoderMaxMemory(uint64(maxDecompressedSize)))
+		}
+		dec, err := zstd.NewReader(nil, opts...)
 		if err != nil {
 			return nil, err
 		}
@@ -289,6 +319,12 @@ func DecodeCompressed(data []byte) (*Container, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		// Double-check actual decompressed size
+		if maxDecompressedSize > 0 && len(decompressed) > maxDecompressedSize {
+			return nil, ErrDecompressedTooLarge
+		}
+
 		return Decode(decompressed)
 	}
 
@@ -682,10 +718,22 @@ func decodeMetaCowrie(data []byte, m *Meta) error {
 }
 
 // DecodeFrom decodes a container from an io.Reader.
+// Applies defaultMaxInputSize (50MB) as an input size limit.
+// Use DecodeFromLimited for a custom limit.
 func DecodeFrom(rd io.Reader) (*Container, error) {
-	data, err := io.ReadAll(rd)
+	return DecodeFromLimited(rd, int64(defaultMaxInputSize))
+}
+
+// DecodeFromLimited decodes a container from an io.Reader with a custom size limit.
+// Returns ErrInputTooLarge if the input exceeds maxBytes.
+func DecodeFromLimited(rd io.Reader, maxBytes int64) (*Container, error) {
+	lr := io.LimitReader(rd, maxBytes+1)
+	data, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, ErrInputTooLarge
 	}
 	return Decode(data)
 }
@@ -783,6 +831,10 @@ func (r *reader) readString() (string, error) {
 	// Sanity check: length can't exceed remaining data
 	if length > uint64(r.remaining()) {
 		return "", ErrMalformedLength
+	}
+	// Enforce string length limit
+	if length > uint64(defaultMaxStringLen) {
+		return "", ErrStringTooLarge
 	}
 	b, err := r.read(int(length))
 	if err != nil {

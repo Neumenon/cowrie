@@ -45,9 +45,14 @@ func (c CowrieCodec) Encode(w io.Writer, v any) error {
 //  2. Exact natural-type assignment - direct set when the decoded Go type matches
 //  3. Typed reflection unmarshal - for structs, typed maps/slices, pointers, etc.
 func (c CowrieCodec) Decode(r io.Reader, v any) error {
-	data, err := io.ReadAll(r)
+	const maxInputSize = 50_000_000 // 50MB — matches cowrie.DefaultMaxBytesLen
+	lr := io.LimitReader(r, maxInputSize+1)
+	data, err := io.ReadAll(lr)
 	if err != nil {
 		return fmt.Errorf("cowrie read: %w", err)
+	}
+	if int64(len(data)) > maxInputSize {
+		return fmt.Errorf("cowrie read: input exceeds %d byte limit", maxInputSize)
 	}
 
 	cowrieVal, err := cowrie.Decode(data)

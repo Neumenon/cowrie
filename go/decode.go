@@ -214,12 +214,17 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (*Value, error) {
 }
 
 // DecodeFrom decodes from an io.Reader.
-// Warning: This reads the entire input into memory. For untrusted input,
-// use DecodeFromLimited to prevent OOM attacks.
+// Applies DefaultMaxBytesLen (50MB) as an input size limit to prevent
+// resource exhaustion. Use DecodeFromLimited for a custom limit.
 func DecodeFrom(rd io.Reader) (*Value, error) {
-	data, err := io.ReadAll(rd)
+	maxBytes := int64(DefaultMaxBytesLen)
+	lr := io.LimitReader(rd, maxBytes+1)
+	data, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, ErrInputTooLarge
 	}
 	return Decode(data)
 }
@@ -251,12 +256,20 @@ func DecodeFromLimited(rd io.Reader, maxBytes int64) (*Value, error) {
 }
 
 // DecodeFromWithOptions decodes from an io.Reader with custom security limits.
-// Warning: This reads the entire input into memory. For untrusted input,
-// combine with io.LimitReader or use DecodeFromLimited.
+// Applies opts.MaxBytesLen (or DefaultMaxBytesLen) as an input size limit
+// to prevent resource exhaustion.
 func DecodeFromWithOptions(rd io.Reader, opts DecodeOptions) (*Value, error) {
-	data, err := io.ReadAll(rd)
+	maxBytes := int64(opts.MaxBytesLen)
+	if maxBytes <= 0 {
+		maxBytes = int64(DefaultMaxBytesLen)
+	}
+	lr := io.LimitReader(rd, maxBytes+1)
+	data, err := io.ReadAll(lr)
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, ErrInputTooLarge
 	}
 	return DecodeWithOptions(data, opts)
 }

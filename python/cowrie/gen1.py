@@ -343,12 +343,18 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
         return result
     elif tag == TAG_INT64_ARRAY:
         count = _read_uvarint(r)
+        if count > MAX_ARRAY_LEN:
+            raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
         return [struct.unpack('<q', r.read(8))[0] for _ in range(count)]
     elif tag == TAG_FLOAT64_ARRAY:
         count = _read_uvarint(r)
+        if count > MAX_ARRAY_LEN:
+            raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
         return [struct.unpack('<d', r.read(8))[0] for _ in range(count)]
     elif tag == TAG_STRING_ARRAY:
         count = _read_uvarint(r)
+        if count > MAX_ARRAY_LEN:
+            raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
         result = []
         for _ in range(count):
             length = _read_uvarint(r)
@@ -384,7 +390,11 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
     elif tag == TAG_ADJLIST:
         id_width = r.read(1)[0]
         node_count = _read_uvarint(r)
+        if node_count > MAX_ARRAY_LEN:
+            raise SecurityLimitExceeded(f"AdjList node_count too large: {node_count} > {MAX_ARRAY_LEN}")
         edge_count = _read_uvarint(r)
+        if edge_count > MAX_ARRAY_LEN:
+            raise SecurityLimitExceeded(f"AdjList edge_count too large: {edge_count} > {MAX_ARRAY_LEN}")
         row_offsets = [_read_uvarint(r) for _ in range(node_count + 1)]
         col_bytes_len = edge_count * (4 if id_width == 1 else 8)
         col_indices = r.read(col_bytes_len)

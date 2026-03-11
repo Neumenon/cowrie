@@ -164,6 +164,15 @@ func decodeHints(r *reader) ([]ColumnHint, error) {
 		return nil, err
 	}
 
+	// Enforce hint count limit
+	if r.opts.MaxHintCount > 0 && count > uint64(r.opts.MaxHintCount) {
+		return nil, ErrTooManyHints
+	}
+	// Sanity check: each hint is at least 3 bytes (1 field name len + 1 type + 1 flags)
+	if count*3 > uint64(r.remaining()) {
+		return nil, ErrMalformedLength
+	}
+
 	hints := make([]ColumnHint, count)
 	for i := uint64(0); i < count; i++ {
 		h, err := decodeHint(r)
@@ -267,10 +276,18 @@ func DecodeWithHints(data []byte) (*HintResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Enforce dictionary size limit before allocation (DoS prevention)
+	if r.opts.MaxDictLen > 0 && dictLen > uint64(r.opts.MaxDictLen) {
+		return nil, ErrDictTooLarge
+	}
+	// Sanity check: each dict entry needs at least 1 byte (length prefix)
+	if dictLen > uint64(r.remaining()) {
+		return nil, ErrMalformedLength
+	}
 
 	dict := make([]string, dictLen)
 	for i := uint64(0); i < dictLen; i++ {
-		s, err := r.readString()
+		s, err := r.readStringWithLimit(r.opts.MaxStringLen)
 		if err != nil {
 			return nil, err
 		}
