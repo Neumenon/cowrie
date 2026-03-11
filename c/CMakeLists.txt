@@ -79,4 +79,15 @@ if(BUILD_TESTS)
     add_executable(test_json tests/test_json.c)
     target_link_libraries(test_json cowrie_gen2)
     add_test(NAME test_json COMMAND test_json)
+
+    # Truth table tests
+    add_executable(test_truth_table tests/test_truth_table.c)
+    target_link_libraries(test_truth_table cowrie_gen2)
+    target_link_libraries(test_truth_table m)
+    add_test(NAME test_truth_table COMMAND test_truth_table)
+
+    # Mutation tests
+    add_executable(test_mutation tests/test_mutation.c)
+    target_link_libraries(test_mutation cowrie_gen2)
+    add_test(NAME test_mutation COMMAND test_mutation)
 endif()

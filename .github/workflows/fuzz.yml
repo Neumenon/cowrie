@@ -1,0 +1,86 @@
+name: Fuzz
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 0'  # Weekly: Sunday 4am UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─── Go Fuzz ──────────────────────────────────────────────────────
+  go-fuzz:
+    name: Go Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Fuzz MasterStreamReader
+        run: cd go && go test -fuzz=FuzzMasterStreamReader_Next -fuzztime=5m ./codec/
+        continue-on-error: true
+
+      - name: Fuzz DecodeBytes
+        run: cd go && go test -fuzz=FuzzDecodeBytes -fuzztime=5m ./codec/
+        continue-on-error: true
+
+      - name: Fuzz FastEncode
+        run: cd go && go test -fuzz=FuzzFastEncode -fuzztime=5m ./codec/
+        continue-on-error: true
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-fuzz-crashes
+          path: |
+            go/codec/testdata/fuzz/
+
+  # ─── Rust Fuzz ────────────────────────────────────────────────────
+  rust-fuzz:
+    name: Rust Fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Fuzz decode
+        run: cd rust && cargo fuzz run fuzz_decode -- -max_total_time=300
+        continue-on-error: true
+
+      - name: Fuzz roundtrip
+        run: cd rust && cargo fuzz run fuzz_roundtrip -- -max_total_time=300
+        continue-on-error: true
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-fuzz-crashes
+          path: |
+            rust/fuzz/artifacts/
+
+  # ─── Python Hypothesis ───────────────────────────────────────────
+  python-hypothesis:
+    name: Python Hypothesis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: |
+          cd python && pip install -e ".[dev]"
+          pip install hypothesis
+
+      - name: Run hypothesis tests
+        run: cd python && pytest tests/test_hypothesis.py -v --tb=short -x

@@ -33,3 +33,6 @@ go/coverage.out
 python/.coverage
 typescript/coverage/
 js/coverage/
+
+# Hypothesis test database
+.hypothesis/
