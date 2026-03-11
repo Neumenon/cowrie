@@ -1,5 +1,9 @@
 # Cowrie Project Instructions
 
+## Testing Philosophy (VITAL)
+
+**`../../docs/TESTING_PHILOSOPHY.md`** is the canonical testing guide for all projects in this workspace. Read it before writing or reviewing tests. Covers 10 bug classes (overflow, resource exhaustion, parity drift, type conversions, C memory safety, parser edge cases, limits bypass), 7 test shapes, 9 quality rules, and false-negative hunting with LSPs/mutation testing.
+
 ## System Environment
 - RTX 3090 (24GB VRAM). Check `nvidia-smi` before loading models.
 - Wayland system. Qt apps need `QT_QPA_PLATFORM=xcb`.
