@@ -105,6 +105,18 @@ cowrie_g1_value_t *cowrie_g1_float64(double val) {
     return v;
 }
 
+cowrie_g1_value_t *cowrie_g1_uint64(uint64_t val) {
+    cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_UINT64);
+    if (v) v->uint64_val = val;
+    return v;
+}
+
+cowrie_g1_value_t *cowrie_g1_float32(float val) {
+    cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_FLOAT32);
+    if (v) v->float32_val = val;
+    return v;
+}
+
 cowrie_g1_value_t *cowrie_g1_string(const char *str, size_t len) {
     cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_STRING);
     if (!v) return NULL;
@@ -313,6 +325,12 @@ void cowrie_g1_value_free(cowrie_g1_value_t *val) {
             free(val->string_array_val.data[i]);
         }
         free(val->string_array_val.data);
+        break;
+    case COWRIE_G1_TYPE_BIGINT:
+        free(val->bigint_val.data);
+        break;
+    case COWRIE_G1_TYPE_EXTENSION:
+        free(val->extension_val.data);
         break;
     default:
         break;
@@ -694,6 +712,49 @@ static int encode_value(const cowrie_g1_value_t *val, cowrie_g1_buf_t *buf) {
         if (is_adjlist_object(val)) return encode_adjlist_object(val, buf);
         return encode_object_default(val, buf);
 
+    case COWRIE_G1_TYPE_UINT64:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_UINT64);
+        if (err) return err;
+        return cowrie_g1_buf_write_uvarint(buf, val->uint64_val);
+
+    case COWRIE_G1_TYPE_FLOAT32:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_FLOAT32);
+        if (err) return err;
+        return cowrie_g1_buf_write(buf, &val->float32_val, 4);
+
+    case COWRIE_G1_TYPE_DECIMAL128:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_DECIMAL128);
+        if (err) return err;
+        err = cowrie_g1_buf_write_byte(buf, (uint8_t)val->decimal128_val.scale);
+        if (err) return err;
+        return cowrie_g1_buf_write(buf, val->decimal128_val.coefficient, 16);
+
+    case COWRIE_G1_TYPE_DATETIME64:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_DATETIME64);
+        if (err) return err;
+        return cowrie_g1_buf_write(buf, &val->datetime64_val, 8);
+
+    case COWRIE_G1_TYPE_UUID128:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_UUID128);
+        if (err) return err;
+        return cowrie_g1_buf_write(buf, val->uuid128_val, 16);
+
+    case COWRIE_G1_TYPE_BIGINT:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_BIGINT);
+        if (err) return err;
+        err = cowrie_g1_buf_write_uvarint(buf, val->bigint_val.len);
+        if (err) return err;
+        return cowrie_g1_buf_write(buf, val->bigint_val.data, val->bigint_val.len);
+
+    case COWRIE_G1_TYPE_EXTENSION:
+        err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_EXTENSION);
+        if (err) return err;
+        err = cowrie_g1_buf_write_uvarint(buf, val->extension_val.ext_type);
+        if (err) return err;
+        err = cowrie_g1_buf_write_uvarint(buf, val->extension_val.len);
+        if (err) return err;
+        return cowrie_g1_buf_write(buf, val->extension_val.data, val->extension_val.len);
+
     case COWRIE_G1_TYPE_INT64_ARRAY:
         err = cowrie_g1_buf_write_byte(buf, COWRIE_G1_TAG_INT64_ARRAY);
         if (err) return err;
@@ -994,6 +1055,91 @@ static int decode_value_depth(reader_t *r, cowrie_g1_value_t **out, int depth) {
         }
         v->string_array_val.data = strings;
         v->string_array_val.len = count;
+        *out = v;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_UINT64: {
+        uint64_t uval;
+        err = read_uvarint(r, &uval);
+        if (err) return err;
+        *out = cowrie_g1_uint64(uval);
+        return *out ? COWRIE_G1_OK : COWRIE_G1_ERR_NOMEM;
+    }
+
+    case COWRIE_G1_TAG_FLOAT32: {
+        float fval;
+        err = read_bytes(r, &fval, 4);
+        if (err) return err;
+        *out = cowrie_g1_float32(fval);
+        return *out ? COWRIE_G1_OK : COWRIE_G1_ERR_NOMEM;
+    }
+
+    case COWRIE_G1_TAG_DECIMAL128: {
+        cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_DECIMAL128);
+        if (!v) return COWRIE_G1_ERR_NOMEM;
+        uint8_t scale_byte;
+        err = read_byte(r, &scale_byte);
+        if (err) { free(v); return err; }
+        v->decimal128_val.scale = (int8_t)scale_byte;
+        err = read_bytes(r, v->decimal128_val.coefficient, 16);
+        if (err) { free(v); return err; }
+        *out = v;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_DATETIME64: {
+        cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_DATETIME64);
+        if (!v) return COWRIE_G1_ERR_NOMEM;
+        err = read_bytes(r, &v->datetime64_val, 8);
+        if (err) { free(v); return err; }
+        *out = v;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_UUID128: {
+        cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_UUID128);
+        if (!v) return COWRIE_G1_ERR_NOMEM;
+        err = read_bytes(r, v->uuid128_val, 16);
+        if (err) { free(v); return err; }
+        *out = v;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_BIGINT: {
+        uint64_t blen;
+        err = read_uvarint(r, &blen);
+        if (err) return err;
+        if (blen > COWRIE_G1_MAX_BYTES_LEN) return COWRIE_G1_ERR_BYTES_LEN;
+        if (r->pos + blen > r->len) return COWRIE_G1_ERR_EOF;
+        cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_BIGINT);
+        if (!v) return COWRIE_G1_ERR_NOMEM;
+        v->bigint_val.data = malloc((size_t)blen);
+        if (!v->bigint_val.data) { free(v); return COWRIE_G1_ERR_NOMEM; }
+        memcpy(v->bigint_val.data, r->data + r->pos, (size_t)blen);
+        v->bigint_val.len = (size_t)blen;
+        r->pos += (size_t)blen;
+        *out = v;
+        return COWRIE_G1_OK;
+    }
+
+    case COWRIE_G1_TAG_EXTENSION: {
+        uint64_t etype;
+        err = read_uvarint(r, &etype);
+        if (err) return err;
+        uint64_t elen;
+        err = read_uvarint(r, &elen);
+        if (err) return err;
+        if (elen > COWRIE_G1_MAX_BYTES_LEN) return COWRIE_G1_ERR_BYTES_LEN;
+        if (r->pos + elen > r->len) return COWRIE_G1_ERR_EOF;
+        cowrie_g1_value_t *v = alloc_value(COWRIE_G1_TYPE_EXTENSION);
+        if (!v) return COWRIE_G1_ERR_NOMEM;
+        v->extension_val.ext_type = etype;
+        v->extension_val.data = malloc((size_t)elen);
+        if (!v->extension_val.data) { free(v); return COWRIE_G1_ERR_NOMEM; }
+        memcpy(v->extension_val.data, r->data + r->pos, (size_t)elen);
+        v->extension_val.len = (size_t)elen;
+        r->pos += (size_t)elen;
         *out = v;
         return COWRIE_G1_OK;
     }

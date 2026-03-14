@@ -36,10 +36,18 @@ typedef enum {
     COWRIE_G1_TAG_ARRAY        = 0x06, /* v3: aligned with Gen2 */
     COWRIE_G1_TAG_OBJECT       = 0x07, /* v3: aligned with Gen2 */
     COWRIE_G1_TAG_BYTES        = 0x08, /* v3: aligned with Gen2 */
-    /* Proto-tensor types */
-    COWRIE_G1_TAG_INT64_ARRAY  = 0x09,
-    COWRIE_G1_TAG_FLOAT64_ARRAY = 0x0A,
-    COWRIE_G1_TAG_STRING_ARRAY = 0x0B,
+    /* Gen2 unified types */
+    COWRIE_G1_TAG_UINT64       = 0x09,
+    COWRIE_G1_TAG_DECIMAL128   = 0x0A,
+    COWRIE_G1_TAG_DATETIME64   = 0x0B,
+    COWRIE_G1_TAG_UUID128      = 0x0C,
+    COWRIE_G1_TAG_BIGINT       = 0x0D,
+    COWRIE_G1_TAG_EXTENSION    = 0x0E,
+    COWRIE_G1_TAG_FLOAT32      = 0x0F,
+    /* Proto-tensor types (moved for Gen2 alignment) */
+    COWRIE_G1_TAG_INT64_ARRAY  = 0x16,
+    COWRIE_G1_TAG_FLOAT64_ARRAY = 0x17,
+    COWRIE_G1_TAG_STRING_ARRAY = 0x19,
     /* Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39) */
     COWRIE_G1_TAG_ADJLIST      = 0x30,
     COWRIE_G1_TAG_NODE         = 0x35,
@@ -62,6 +70,13 @@ typedef enum {
     COWRIE_G1_TYPE_BYTES,
     COWRIE_G1_TYPE_ARRAY,
     COWRIE_G1_TYPE_OBJECT,
+    COWRIE_G1_TYPE_UINT64,
+    COWRIE_G1_TYPE_FLOAT32,
+    COWRIE_G1_TYPE_DECIMAL128,
+    COWRIE_G1_TYPE_DATETIME64,
+    COWRIE_G1_TYPE_UUID128,
+    COWRIE_G1_TYPE_BIGINT,
+    COWRIE_G1_TYPE_EXTENSION,
     COWRIE_G1_TYPE_INT64_ARRAY,
     COWRIE_G1_TYPE_FLOAT64_ARRAY,
     COWRIE_G1_TYPE_STRING_ARRAY,
@@ -132,7 +147,24 @@ struct cowrie_g1_value {
     union {
         bool            bool_val;
         int64_t         int64_val;
+        uint64_t        uint64_val;
         double          float64_val;
+        float           float32_val;
+        struct {
+            int8_t   scale;
+            uint8_t  coefficient[16];
+        } decimal128_val;
+        int64_t         datetime64_val;
+        uint8_t         uuid128_val[16];
+        struct {
+            uint8_t *data;
+            size_t   len;
+        } bigint_val;
+        struct {
+            uint64_t ext_type;
+            uint8_t *data;
+            size_t   len;
+        } extension_val;
         struct {
             char   *data;
             size_t  len;
@@ -178,6 +210,8 @@ cowrie_g1_value_t *cowrie_g1_string(const char *str, size_t len);
 cowrie_g1_value_t *cowrie_g1_bytes(const uint8_t *data, size_t len);
 cowrie_g1_value_t *cowrie_g1_array(size_t capacity);
 cowrie_g1_value_t *cowrie_g1_object(size_t capacity);
+cowrie_g1_value_t *cowrie_g1_uint64(uint64_t val);
+cowrie_g1_value_t *cowrie_g1_float32(float val);
 cowrie_g1_value_t *cowrie_g1_int64_array(const int64_t *data, size_t len);
 cowrie_g1_value_t *cowrie_g1_float64_array(const double *data, size_t len);
 cowrie_g1_value_t *cowrie_g1_string_array(const char **strings, size_t count);

@@ -27,10 +27,18 @@ export const Tags = {
   ARRAY: 0x06,    // v3: aligned with Gen2
   OBJECT: 0x07,   // v3: aligned with Gen2
   BYTES: 0x08,    // v3: aligned with Gen2
-  // Proto-tensor types
-  INT64_ARRAY: 0x09,
-  FLOAT64_ARRAY: 0x0a,
-  STRING_ARRAY: 0x0b,
+  // Gen2 scalar types
+  UINT64: 0x09,
+  DECIMAL128: 0x0a,
+  DATETIME64: 0x0b,
+  UUID128: 0x0c,
+  BIGINT: 0x0d,
+  EXTENSION: 0x0e,
+  FLOAT32: 0x0f,
+  // Proto-tensor types (v3: moved to 0x16+)
+  INT64_ARRAY: 0x16,
+  FLOAT64_ARRAY: 0x17,
+  STRING_ARRAY: 0x19,
   // Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
   ADJLIST: 0x30,
   NODE: 0x35,
@@ -544,6 +552,60 @@ function decodeValue(r: Reader, depth: number): JsonValue {
         throw new SecurityLimitExceeded(`Bytes too long: ${len} > ${Limits.MAX_STRING_LEN}`);
       }
       return Array.from(readBytes(r, len));
+    }
+    case Tags.UINT64: {
+      // Unsigned varint, return as number
+      const val = readUvarintBigInt(r);
+      if (val <= 9007199254740991n) {
+        return Number(val);
+      }
+      return val;
+    }
+    case Tags.DECIMAL128: {
+      const scale = readByte(r);
+      const coeffBytes = readBytes(r, 16);
+      const coefficient = Array.from(coeffBytes);
+      return { scale, coefficient };
+    }
+    case Tags.DATETIME64: {
+      const bytes = readBytes(r, 8);
+      const view = new DataView(bytes.buffer, bytes.byteOffset);
+      const val = view.getBigInt64(0, true);
+      if (val >= -9007199254740991n && val <= 9007199254740991n) {
+        return Number(val);
+      }
+      return val;
+    }
+    case Tags.UUID128: {
+      const bytes = readBytes(r, 16);
+      return Array.from(bytes);
+    }
+    case Tags.BIGINT: {
+      const len = readUvarint(r);
+      if (len === 0) return 0n;
+      const payload = readBytes(r, len);
+      // Reconstruct bigint from big-endian two's complement
+      let result = 0n;
+      for (let i = 0; i < payload.length; i++) {
+        result = (result << 8n) | BigInt(payload[i]);
+      }
+      // Check sign bit (MSB of first byte)
+      if (payload[0] & 0x80) {
+        // Negative: subtract 2^(len*8)
+        result -= 1n << BigInt(len * 8);
+      }
+      return result;
+    }
+    case Tags.EXTENSION: {
+      const ext_type = readUvarint(r);
+      const len = readUvarint(r);
+      const payload = readBytes(r, len);
+      return { ext_type, data: Array.from(payload) };
+    }
+    case Tags.FLOAT32: {
+      const bytes = readBytes(r, 4);
+      const view = new DataView(bytes.buffer, bytes.byteOffset);
+      return view.getFloat32(0, true);
     }
     case Tags.ARRAY: {
       const count = readUvarint(r);

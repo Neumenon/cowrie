@@ -1,4 +1,4 @@
-# Cowrie v0.1.1
+# Cowrie v2.0.0
 
 Initial public release of Cowrie — a multi-language binary codec for structured data with ML extensions.
 
@@ -15,11 +15,11 @@ All implementations are feature-complete and pass the same 23 cross-language tes
 
 | Language | Package | Version |
 |----------|---------|---------|
-| Go | `github.com/Neumenon/cowrie` | v0.1.1 |
-| Rust | `cowrie-rs` | 0.1.1 |
-| Python | `cowrie-py` | 0.1.1 |
-| TypeScript | `cowrie-codec` | 0.1.1 |
-| C | Source (CMake) | v0.1.1 |
+| Go | `github.com/Neumenon/cowrie` | v2.0.0 |
+| Rust | `cowrie-rs` | 2.0.0 |
+| Python | `cowrie-py` | 2.0.0 |
+| TypeScript | `cowrie-codec` | 2.0.0 |
+| C | Source (CMake) | v2.0.0 |
 
 ### ML Extension Types (Gen2)
 
@@ -63,16 +63,16 @@ cowrie info < data.cowrie
 
 ```bash
 # Go
-go get github.com/Neumenon/cowrie@v0.1.1
+go get github.com/Neumenon/cowrie@v2.0.0
 
 # Rust
-cargo add cowrie-rs@0.1.1
+cargo add cowrie-rs@2.0.0
 
 # Python
-pip install cowrie-py==0.1.1
+pip install cowrie-py==2.0.0
 
 # TypeScript
-npm install cowrie-codec@0.1.1
+npm install cowrie-codec@2.0.0
 
 # C
 git clone https://github.com/Neumenon/cowrie.git

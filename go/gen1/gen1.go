@@ -18,24 +18,33 @@ import (
 	"sync"
 )
 
-// Type tags - aligned with cross-language SPEC
+// Type tags - unified Gen1/Gen2 tag table
 const (
+	// Core types 0x00-0x0F
 	tagNull         = 0x00
 	tagFalse        = 0x01
 	tagTrue         = 0x02
 	tagInt64        = 0x03
 	tagFloat64      = 0x04
 	tagString       = 0x05
-	tagArrayGeneric = 0x06 // heterogeneous array (v3: aligned with Gen2)
-	tagObject       = 0x07 // object/map (v3: aligned with Gen2)
-	tagBytes        = 0x08 // binary bytes (v3: aligned with Gen2)
-	tagArrayInt64   = 0x09 // homogeneous int64 array (proto-tensor)
-	tagArrayFloat64 = 0x0A // homogeneous float64 array (proto-tensor)
-	tagArrayString  = 0x0B // homogeneous string array
-	tagArrayFloat32 = 0x0C // homogeneous float32 array (Go extension, 4 bytes/float)
-	tagFloat32      = 0x0D // scalar float32 (compact float, 4 bytes vs 8)
+	tagArrayGeneric = 0x06 // heterogeneous array
+	tagObject       = 0x07 // object/map
+	tagBytes        = 0x08 // binary bytes
+	tagUint64       = 0x09 // unsigned 64-bit integer (Gen2)
+	tagDecimal128   = 0x0A // IEEE 754 decimal128: 1 byte scale + 16 bytes coefficient (Gen2)
+	tagDatetime64   = 0x0B // nanosecond timestamp as int64 LE (Gen2)
+	tagUUID128      = 0x0C // 16-byte UUID (Gen2)
+	tagBigInt       = 0x0D // arbitrary-precision integer: uvarint len + payload (Gen2)
+	tagExtension    = 0x0E // extension type: uvarint ext_type + uvarint len + payload (Gen2)
+	tagFloat32      = 0x0F // scalar float32 (compact float, 4 bytes vs 8)
 
-	// Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
+	// Proto-tensor types 0x16-0x19
+	tagArrayInt64   = 0x16 // homogeneous int64 array (proto-tensor)
+	tagArrayFloat64 = 0x17 // homogeneous float64 array (proto-tensor)
+	tagArrayFloat32 = 0x18 // homogeneous float32 array (4 bytes/float)
+	tagArrayString  = 0x19 // homogeneous string array
+
+	// Graph types 0x30+
 	tagAdjList    = 0x30 // Adjacency list: nodeID + neighbors (int64 array)
 	tagNode       = 0x35 // Graph node: id + labels + props
 	tagEdge       = 0x36 // Graph edge: id + type + from + to + props
@@ -113,6 +122,9 @@ var (
 	ErrShortData         = errors.New("short data")
 	ErrExpectedObjectTag = errors.New("expected object tag")
 	ErrIncompleteRecord  = errors.New("unexpected EOF: incomplete record")
+	ErrShortDecimal128   = errors.New("short decimal128")
+	ErrShortDatetime64   = errors.New("short datetime64")
+	ErrShortUUID128      = errors.New("short uuid128")
 )
 
 // Buffer pool for encoding - reduces allocations in hot paths
@@ -1418,6 +1430,69 @@ func readValue(data []byte, off int, opts DecodeOptions) (any, int, error) {
 
 	case tagArrayGeneric:
 		return readArrayGeneric(data, off, opts)
+
+	case tagUint64:
+		v, n, err := readUvarint(data, off)
+		if err != nil {
+			return nil, 0, err
+		}
+		return v, off + n, nil
+
+	case tagDecimal128:
+		if off+17 > len(data) {
+			return nil, 0, ErrShortDecimal128
+		}
+		result := make([]byte, 17)
+		copy(result, data[off:off+17])
+		return result, off + 17, nil
+
+	case tagDatetime64:
+		if off+8 > len(data) {
+			return nil, 0, ErrShortDatetime64
+		}
+		v := int64(binary.LittleEndian.Uint64(data[off : off+8]))
+		return v, off + 8, nil
+
+	case tagUUID128:
+		if off+16 > len(data) {
+			return nil, 0, ErrShortUUID128
+		}
+		var uuid [16]byte
+		copy(uuid[:], data[off:off+16])
+		return uuid, off + 16, nil
+
+	case tagBigInt:
+		length, n, err := readUvarint(data, off)
+		if err != nil {
+			return nil, 0, err
+		}
+		off += n
+		end := off + int(length)
+		if end > len(data) {
+			return nil, 0, ErrShortData
+		}
+		result := make([]byte, length)
+		copy(result, data[off:end])
+		return result, end, nil
+
+	case tagExtension:
+		extType, n, err := readUvarint(data, off)
+		if err != nil {
+			return nil, 0, err
+		}
+		off += n
+		length, n, err := readUvarint(data, off)
+		if err != nil {
+			return nil, 0, err
+		}
+		off += n
+		end := off + int(length)
+		if end > len(data) {
+			return nil, 0, ErrShortData
+		}
+		payload := make([]byte, length)
+		copy(payload, data[off:end])
+		return map[string]any{"ext_type": extType, "data": payload}, end, nil
 
 	case tagArrayFloat64:
 		return readArrayFloat64(data, off, opts)

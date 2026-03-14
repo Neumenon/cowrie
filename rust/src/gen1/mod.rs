@@ -25,22 +25,31 @@
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
-/// Gen1 type tags
+/// Gen1 type tags (unified with Gen2 tag table)
 pub mod tags {
+    // Core types (0x00-0x08)
     pub const NULL: u8 = 0x00;
     pub const FALSE: u8 = 0x01;
     pub const TRUE: u8 = 0x02;
     pub const INT64: u8 = 0x03;
     pub const FLOAT64: u8 = 0x04;
     pub const STRING: u8 = 0x05;
-    pub const ARRAY: u8 = 0x06;   // v3: aligned with Gen2
-    pub const OBJECT: u8 = 0x07;  // v3: aligned with Gen2
-    pub const BYTES: u8 = 0x08;   // v3: aligned with Gen2
-    // Proto-tensor types
-    pub const INT64_ARRAY: u8 = 0x09;
-    pub const FLOAT64_ARRAY: u8 = 0x0A;
-    pub const STRING_ARRAY: u8 = 0x0B;
-    // Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
+    pub const ARRAY: u8 = 0x06;
+    pub const OBJECT: u8 = 0x07;
+    pub const BYTES: u8 = 0x08;
+    // Gen2 scalar types (0x09-0x0F)
+    pub const UINT64: u8 = 0x09;
+    pub const DECIMAL128: u8 = 0x0A;
+    pub const DATETIME64: u8 = 0x0B;
+    pub const UUID128: u8 = 0x0C;
+    pub const BIGINT: u8 = 0x0D;
+    pub const EXTENSION: u8 = 0x0E;
+    pub const FLOAT32: u8 = 0x0F;
+    // Proto-tensor types (relocated to avoid Gen2 collision)
+    pub const INT64_ARRAY: u8 = 0x16;
+    pub const FLOAT64_ARRAY: u8 = 0x17;
+    pub const STRING_ARRAY: u8 = 0x19;
+    // Graph types (0x30+0x35-0x39)
     pub const ADJLIST: u8 = 0x30;
     pub const NODE: u8 = 0x35;
     pub const EDGE: u8 = 0x36;
@@ -107,6 +116,14 @@ pub enum Value {
     Bytes(Vec<u8>),
     Array(Vec<Value>),
     Object(Vec<(String, Value)>),
+    // Gen2 scalar types
+    Uint64(u64),
+    Float32(f32),
+    Decimal128 { scale: i8, coefficient: [u8; 16] },
+    Datetime64(i64),
+    UUID128([u8; 16]),
+    BigInt(Vec<u8>),
+    Extension { ext_type: u64, data: Vec<u8> },
     // Proto-tensor types
     Int64Array(Vec<i64>),
     Float64Array(Vec<f64>),
@@ -224,6 +241,38 @@ fn encode_value<W: Write>(w: &mut W, val: &Value) -> Result<(), Gen1Error> {
                 w.write_all(key.as_bytes())?;
                 encode_value(w, val)?;
             }
+        }
+        Value::Uint64(n) => {
+            w.write_all(&[tags::UINT64])?;
+            write_uvarint(w, *n)?;
+        }
+        Value::Float32(f) => {
+            w.write_all(&[tags::FLOAT32])?;
+            w.write_all(&f.to_le_bytes())?;
+        }
+        Value::Decimal128 { scale, coefficient } => {
+            w.write_all(&[tags::DECIMAL128])?;
+            w.write_all(&[*scale as u8])?;
+            w.write_all(coefficient)?;
+        }
+        Value::Datetime64(n) => {
+            w.write_all(&[tags::DATETIME64])?;
+            w.write_all(&n.to_le_bytes())?;
+        }
+        Value::UUID128(bytes) => {
+            w.write_all(&[tags::UUID128])?;
+            w.write_all(bytes)?;
+        }
+        Value::BigInt(payload) => {
+            w.write_all(&[tags::BIGINT])?;
+            write_uvarint(w, payload.len() as u64)?;
+            w.write_all(payload)?;
+        }
+        Value::Extension { ext_type, data } => {
+            w.write_all(&[tags::EXTENSION])?;
+            write_uvarint(w, *ext_type)?;
+            write_uvarint(w, data.len() as u64)?;
+            w.write_all(data)?;
         }
         Value::Int64Array(arr) => {
             w.write_all(&[tags::INT64_ARRAY])?;
@@ -394,6 +443,52 @@ fn decode_value_depth<R: Read>(r: &mut R, depth: usize) -> Result<Value, Gen1Err
                 members.push((key, val));
             }
             Ok(Value::Object(members))
+        }
+        tags::UINT64 => {
+            let n = read_uvarint(r)?;
+            Ok(Value::Uint64(n))
+        }
+        tags::FLOAT32 => {
+            let mut buf = [0u8; 4];
+            r.read_exact(&mut buf)?;
+            Ok(Value::Float32(f32::from_le_bytes(buf)))
+        }
+        tags::DECIMAL128 => {
+            let mut scale_buf = [0u8; 1];
+            r.read_exact(&mut scale_buf)?;
+            let scale = scale_buf[0] as i8;
+            let mut coefficient = [0u8; 16];
+            r.read_exact(&mut coefficient)?;
+            Ok(Value::Decimal128 { scale, coefficient })
+        }
+        tags::DATETIME64 => {
+            let mut buf = [0u8; 8];
+            r.read_exact(&mut buf)?;
+            Ok(Value::Datetime64(i64::from_le_bytes(buf)))
+        }
+        tags::UUID128 => {
+            let mut bytes = [0u8; 16];
+            r.read_exact(&mut bytes)?;
+            Ok(Value::UUID128(bytes))
+        }
+        tags::BIGINT => {
+            let len = read_uvarint(r)? as usize;
+            if len > limits::MAX_BYTES_LEN {
+                return Err(Gen1Error::MaxBytesLen);
+            }
+            let mut payload = vec![0u8; len];
+            r.read_exact(&mut payload)?;
+            Ok(Value::BigInt(payload))
+        }
+        tags::EXTENSION => {
+            let ext_type = read_uvarint(r)?;
+            let len = read_uvarint(r)? as usize;
+            if len > limits::MAX_BYTES_LEN {
+                return Err(Gen1Error::MaxBytesLen);
+            }
+            let mut data = vec![0u8; len];
+            r.read_exact(&mut data)?;
+            Ok(Value::Extension { ext_type, data })
         }
         tags::INT64_ARRAY => {
             let count = read_uvarint(r)? as usize;

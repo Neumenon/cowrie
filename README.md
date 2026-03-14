@@ -2,15 +2,15 @@
 
 A multi-language binary JSON codec with two variants:
 
-- **Gen1**: Lightweight codec with proto-tensor support (11 core types + graph types)
-- **Gen2**: Full Cowrie v2 with ML extensions (18+ types, dictionary coding, compression)
+- **Gen1**: Lightweight codec with proto-tensor support (16 core types + 4 proto-tensor + graph types)
+- **Gen2**: Full Cowrie v2 with ML extensions (20+ types, dictionary coding, compression)
 
 ## Features
 
 | Feature | Gen1 | Gen2 |
 |---------|------|------|
-| Core types | 11 | 13+ |
-| ML types | proto-tensors | Tensor, Image, Audio, etc. |
+| Core types (0x00-0x0F) | 16 (unified with Gen2) | 16 (unified with Gen1) |
+| ML types | proto-tensors (0x16-0x19) | Tensor, Image, Audio, etc. |
 | Dictionary coding | No | Yes |
 | Compression | No | gzip/zstd |
 | Schema fingerprint | No | Yes |

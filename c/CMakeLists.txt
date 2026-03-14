@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(cowrie VERSION 0.1.0 LANGUAGES C)
+project(cowrie VERSION 2.0.0 LANGUAGES C)
 
 # Options
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)

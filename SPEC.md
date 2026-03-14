@@ -11,7 +11,10 @@ Cowrie is a binary serialization format for JSON-like data structures. Two varia
 
 Gen1 uses a simple tag-length-value encoding without a header.
 
-### Type Tags
+### Unified Type Tags (0x00-0x0F)
+
+These tags are shared between Gen1 and Gen2. Both formats use the same tag numbers
+for the same types.
 
 | Tag | Type | Encoding |
 |-----|------|----------|
@@ -21,52 +24,60 @@ Gen1 uses a simple tag-length-value encoding without a header.
 | 0x03 | Int64 | Tag + zigzag-encoded varint |
 | 0x04 | Float64 | Tag + 8 bytes LE |
 | 0x05 | String | Tag + length:varint + UTF-8 bytes |
-| 0x06 | Bytes | Tag + length:varint + raw bytes |
-| 0x07 | Array | Tag + count:varint + elements |
-| 0x08 | Object | Tag + count:varint + (key + value) pairs |
-| 0x09 | Int64Array | Tag + count:varint + count*8 bytes LE |
-| 0x0A | Float64Array | Tag + count:varint + count*8 bytes LE |
-| 0x0B | StringArray | Tag + count:varint + (length:varint + UTF-8)* |
-| 0x0C | Float32Array | Tag + count:varint + count*4 bytes LE |
-| 0x0D | Float32 | Tag + 4 bytes LE (compact float, decodes as float64) |
-| 0x0F | Int32GroupVB | Tag + count:varint + group-varint groups |
-| 0x10 | Node | Graph node (see below) |
-| 0x11 | Edge | Graph edge (see below) |
-| 0x12 | AdjList | CSR adjacency list (see below) |
-| 0x13 | NodeBatch | Batch of nodes |
-| 0x14 | EdgeBatch | Batch of edges |
-| 0x15 | GraphShard | Graph shard with nodes, edges, meta |
+| 0x06 | Array | Tag + count:varint + elements |
+| 0x07 | Object | Tag + count:varint + (key + value) pairs |
+| 0x08 | Bytes | Tag + length:varint + raw bytes |
+| 0x09 | Uint64 | Tag + varint (unsigned, no zigzag) |
+| 0x0A | Decimal128 | Tag + scale:int8 + coefficient:16 bytes |
+| 0x0B | Datetime64 | Tag + nanos:int64 LE |
+| 0x0C | UUID128 | Tag + 16 bytes |
+| 0x0D | BigInt | Tag + length:varint + two's complement bytes |
+| 0x0E | Extension | Tag + extType:varint + length:varint + payload |
+| 0x0F | Float32 | Tag + 4 bytes LE (compact float, decodes as float64) |
+
+### Proto-Tensor Tags (0x16-0x19)
+
+Gen1-specific compact encoding for homogeneous arrays. Gen2 uses Tensor (0x20) instead.
+
+| Tag | Type | Encoding |
+|-----|------|----------|
+| 0x16 | Int64Array | Tag + count:varint + count×8 bytes LE |
+| 0x17 | Float64Array | Tag + count:varint + count×8 bytes LE |
+| 0x18 | Float32Array | Tag + count:varint + count×4 bytes LE |
+| 0x19 | StringArray | Tag + count:varint + (length:varint + UTF-8)* |
 
 ### Graph Type Layouts (Gen1)
 
-#### Node (0x10)
+Gen1 graph types use inline keys (not dictionary-coded). Tags are shared with Gen2.
+
+#### Node (0x35)
 ```
-Tag(0x10) | id:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
+Tag(0x35) | id:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
 ```
 
-#### Edge (0x11)
+#### Edge (0x36)
 ```
-Tag(0x11) | src:zigzag-varint | dst:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
-```
-
-#### AdjList (0x12)
-```
-Tag(0x12) | idWidth:u8 (1=int32, 2=int64) | nodeCount:varint | edgeCount:varint | rowOffsets:(nodeCount+1)*varint | colIndices:edgeCount*(4|8 bytes based on idWidth)
+Tag(0x36) | src:zigzag-varint | dst:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
 ```
 
-#### NodeBatch (0x13)
+#### AdjList (0x30)
 ```
-Tag(0x13) | count:varint | Node*
-```
-
-#### EdgeBatch (0x14)
-```
-Tag(0x14) | count:varint | Edge*
+Tag(0x30) | idWidth:u8 (1=int32, 2=int64) | nodeCount:varint | edgeCount:varint | rowOffsets:(nodeCount+1)*varint | colIndices:edgeCount*(4|8 bytes based on idWidth)
 ```
 
-#### GraphShard (0x15)
+#### NodeBatch (0x37)
 ```
-Tag(0x15) | nodeCount:varint | Node* | edgeCount:varint | Edge* | metaCount:varint | (keyLen:varint | keyBytes | value)*
+Tag(0x37) | count:varint | Node*
+```
+
+#### EdgeBatch (0x38)
+```
+Tag(0x38) | count:varint | Edge*
+```
+
+#### GraphShard (0x39)
+```
+Tag(0x39) | nodeCount:varint | Node* | edgeCount:varint | Edge* | metaCount:varint | (keyLen:varint | keyBytes | value)*
 ```
 
 ### Varint Encoding
@@ -87,34 +98,37 @@ decode(z) = (z >> 1) ^ -(z & 1)
 
 In Gen1, object keys are encoded inline with each field:
 ```
-Object: Tag(0x08) | count:varint | (keyLen:varint | keyBytes | value)*
+Object: Tag(0x07) | count:varint | (keyLen:varint | keyBytes | value)*
 ```
 
-## Gen1 vs Gen2 Compatibility
+## Format Detection
 
-**IMPORTANT**: As of v3, Gen1 and Gen2 share tag assignments for core types 0x00-0x08.
-A decoder MUST check for the Gen2 magic header ("SJ") before decoding.
+Gen2 starts with a 4-byte header. Gen1 has no header — the first byte is the root value's tag.
 
-| Tag | Gen1 (pre-v3) | Gen1 v3 | Gen2/v3 |
-|-----|---------------|---------|---------|
-| 0x00-0x05 | Same | Same | Same |
-| 0x06 | Bytes | **Array** (aligned) | **Array** |
-| 0x07 | Array | **Object** (aligned) | **Object** (dict-coded) |
-| 0x08 | Object | **Bytes** (aligned) | **Bytes** |
-| 0x09 | Int64Array | Int64Array | Uint64 |
-| 0x0A | Float64Array | Float64Array | Decimal128 |
-| 0x0B | StringArray | StringArray | Datetime64 |
+```
+if bytes[0] == 0x53 && bytes[1] == 0x4A && bytes[2] == 0x02:
+    → Gen2 (magic "SJ", version 0x02)
+else:
+    → Gen1 (first byte is root tag 0x00-0x19 or FIXINT 0x40+)
+```
 
-Gen1 graph types moved from 0x10-0x15 to 0x30+0x35-0x39 (matching Gen2).
+Three bytes are needed because FIXINT can produce 0x53 ('S') and 0x4A ('J') for integers 19 and 10.
 
-To distinguish between formats:
-1. Check first **three** bytes: `bytes[0:2] == "SJ" && bytes[2] == 0x02`
-2. If all three match → Gen2/v3 format
-3. If absent → Gen1 format (first byte is root value tag)
+## Gen1 vs Gen2 Tag Usage
 
-**Why 3 bytes**: With v3 FIXINT, Gen1 value 19 encodes as 0x53 ('S') and value 10
-as 0x4A ('J'), so two bytes alone could collide. The third byte (version 0x02)
-is unambiguous since Gen1 root tags in that position would be 0x00-0x0D.
+Tags 0x00-0x0F are unified — both formats use the same tag numbers for the same types.
+The formats differ only in header presence and which tag ranges they use:
+
+| Range | Gen1 | Gen2 |
+|-------|------|------|
+| 0x00-0x0F | Core types (unified) | Core types (unified) |
+| 0x16-0x19 | Proto-tensor arrays | — (use Tensor 0x20 instead) |
+| 0x20-0x24 | — | ML extensions (Tensor, Image, Audio, Bitmask) |
+| 0x30-0x39 | Graph types (inline keys) | Graph types (dict-coded keys) + Delta/RichText |
+| 0x40-0xEF | FIXINT/FIXARRAY/FIXMAP/FIXNEG | FIXINT/FIXARRAY/FIXMAP/FIXNEG |
+
+Gen2 adds dictionary coding (header contains string dictionary, Object/Graph keys use dictionary indices)
+and a header with magic bytes, version, and compression flags. Gen1 has none of this overhead.
 
 ## Gen2 Wire Format
 
@@ -183,6 +197,7 @@ Malformed hints MUST result in a decode error.
 | 0x0C | UUID128 | Tag + 16 bytes |
 | 0x0D | BigInt | Tag + length:varint + two's complement bytes |
 | 0x0E | Extension | Tag + extType:varint + length:varint + payload |
+| 0x0F | Float32 | Tag + 4 bytes LE (compact float, decodes as float64) |
 
 ### ML Extension Tags (0x20-0x2F)
 
@@ -470,11 +485,11 @@ When the compressed flag is set:
 
 ### Array Promotion Threshold
 
-When encoding, implementations may automatically promote homogeneous numeric arrays
-to proto-tensor types (Int64Array, Float64Array) for efficiency. The recommended
-threshold is **4 elements** - arrays with 4 or more elements of the same numeric type
-should be encoded as proto-tensors. Arrays with fewer elements should use the generic
-Array type.
+When encoding, Gen1 implementations may automatically promote homogeneous arrays
+to proto-tensor types (Int64Array 0x16, Float64Array 0x17, Float32Array 0x18,
+StringArray 0x19) for efficiency. The recommended threshold is **4 elements** —
+arrays with 4 or more elements of the same type should be encoded as proto-tensors.
+Arrays with fewer elements should use the generic Array type (0x06).
 
 This is a recommendation, not a requirement. Implementations may choose different
 thresholds based on their use case.

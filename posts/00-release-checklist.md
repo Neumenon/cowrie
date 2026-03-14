@@ -5,11 +5,11 @@
 ### Cowrie (`cowrie-final/`)
 | Registry | Package | Version | File |
 |----------|---------|---------|------|
-| npm | `cowrie-codec` | 0.1.1 | `typescript/package.json` |
-| PyPI | `cowrie-py` | 0.1.1 | `python/pyproject.toml` |
-| crates.io | `cowrie-rs` | 0.1.1 | `rust/Cargo.toml` |
+| npm | `cowrie-codec` | 2.0.0 | `typescript/package.json` |
+| PyPI | `cowrie-py` | 2.0.0 | `python/pyproject.toml` |
+| crates.io | `cowrie-rs` | 2.0.0 | `rust/Cargo.toml` |
 | Go | `github.com/Neumenon/cowrie` | untagged | `go/go.mod` |
-| C | (source-only) | 0.1.0 | `c/CMakeLists.txt` |
+| C | (source-only) | 2.0.0 | `c/CMakeLists.txt` |
 
 ### Glyph (`glyph/`)
 | Registry | Package | Version | File |
@@ -19,7 +19,7 @@
 | crates.io | `glyph-rs` | 0.1.0 | `rust/glyph-codec/Cargo.toml` |
 | Go | `github.com/Neumenon/glyph` | untagged | `go/go.mod` |
 
-### Shard (`Agent-GO/cowrie/shard-*`)
+### Shard (`shard/`)
 | Registry | Package | Version | File |
 |----------|---------|---------|------|
 | npm | `shard-format` | 0.1.0 | `shard-ts/package.json` |
@@ -108,13 +108,8 @@ pip install glyph-py && python -c "import glyph; print('ok')"
 cargo add glyph-rs
 ```
 
-### Update Agent-GO
-After tagging a glyph release, update `Agent-GO/go.mod`:
-```
-# Replace local path with tagged version
-require github.com/Neumenon/glyph v0.X.Y
-# Remove: replace github.com/Neumenon/glyph => ../glyph/go
-```
+### Agent-GO (Deprecated)
+Agent-GO is deprecated. All code now lives in the cogs repos (`github.com/Neumenon/cowrie`, `github.com/Neumenon/glyph`, `shard/`). No Agent-GO updates needed.
 
 ### GitHub Release
 Create release on GitHub with changelog notes.
@@ -125,7 +120,7 @@ Create release on GitHub with changelog notes.
 
 1. **Stale glyph copies in cowrie-final**: `cowrie-final/typescript/glyph/` (`glyph-codec`) and `cowrie-final/python/glyph/` (`glyph-serial`) are dead code — never published. Canonical packages publish from `glyph/` repo. Consider deleting these stale dirs.
 
-2. **Glyph go.mod has stale replace**: `glyph/go/go.mod` has `replace github.com/phenomenon0/Agent-GO => ../../Agent-GO` (for `bridge.go` build tag). Must remove before tagging for Go proxy.
+2. **Glyph go.mod replace directive**: `glyph/go/go.mod` has a `replace` pointing to cowrie within the cogs workspace (for `bridge.go` build tag). Must remove before tagging for Go proxy.
 
 3. **Shard Python/C not implemented**: Only npm and crates.io packages exist.
 

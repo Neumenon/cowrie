@@ -20,7 +20,7 @@ import io
 from typing import Any, Dict, List, Union, Tuple, Optional
 from dataclasses import dataclass
 
-# Type tags
+# Type tags — core types (0x00–0x08)
 TAG_NULL = 0x00
 TAG_FALSE = 0x01
 TAG_TRUE = 0x02
@@ -30,10 +30,18 @@ TAG_STRING = 0x05
 TAG_ARRAY = 0x06   # v3: aligned with Gen2
 TAG_OBJECT = 0x07  # v3: aligned with Gen2
 TAG_BYTES = 0x08   # v3: aligned with Gen2
-# Proto-tensor types
-TAG_INT64_ARRAY = 0x09
-TAG_FLOAT64_ARRAY = 0x0A
-TAG_STRING_ARRAY = 0x0B
+# Gen2 unified types (0x09–0x0F)
+TAG_UINT64 = 0x09
+TAG_DECIMAL128 = 0x0A
+TAG_DATETIME64 = 0x0B
+TAG_UUID128 = 0x0C
+TAG_BIGINT = 0x0D
+TAG_EXTENSION = 0x0E
+TAG_FLOAT32 = 0x0F
+# Proto-tensor types (0x16–0x19)
+TAG_INT64_ARRAY = 0x16
+TAG_FLOAT64_ARRAY = 0x17
+TAG_STRING_ARRAY = 0x19
 # Graph types (v3: aligned with Gen2 at 0x30+0x35-0x39)
 TAG_ADJLIST = 0x30
 TAG_NODE = 0x35
@@ -360,6 +368,28 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
             length = _read_uvarint(r)
             result.append(r.read(length).decode('utf-8'))
         return result
+    elif tag == TAG_UINT64:
+        return _read_uvarint(r)
+    elif tag == TAG_DECIMAL128:
+        scale = r.read(1)[0]
+        coefficient = r.read(16)
+        return {"scale": scale, "coefficient": coefficient}
+    elif tag == TAG_DATETIME64:
+        raw = r.read(8)
+        return struct.unpack('<q', raw)[0]
+    elif tag == TAG_UUID128:
+        return r.read(16)
+    elif tag == TAG_BIGINT:
+        length = _read_uvarint(r)
+        payload = r.read(length)
+        return int.from_bytes(payload, byteorder='big', signed=True)
+    elif tag == TAG_EXTENSION:
+        ext_type = _read_uvarint(r)
+        length = _read_uvarint(r)
+        data = r.read(length)
+        return {"ext_type": ext_type, "data": data}
+    elif tag == TAG_FLOAT32:
+        return struct.unpack('<f', r.read(4))[0]
     elif tag == TAG_NODE:
         node_id = _zigzag_decode(_read_uvarint(r))
         label_len = _read_uvarint(r)
