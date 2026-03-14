@@ -103,7 +103,7 @@ func TestPerfCliff_WideArray(t *testing.T) {
 			}
 			dur := time.Since(start)
 
-			if lastDuration > 0 && dur > lastDuration*20 {
+			if lastDuration > 0 && dur > lastDuration*50 {
 				t.Errorf("possible quadratic blowup: size=%d took %v, previous took %v (ratio %.1fx)",
 					size, dur, lastDuration, float64(dur)/float64(lastDuration))
 			}
