@@ -1,4 +1,4 @@
-//go:build agentgo
+//go:build cogs
 
 // Package gnn provides GraphRAG: hybrid retrieval combining vector similarity
 // with graph-based importance (PageRank, community structure).
@@ -20,8 +20,8 @@ import (
 
 	"github.com/Neumenon/cowrie/go"
 	"github.com/Neumenon/cowrie/go/gnn/algo"
-	"github.com/phenomenon0/Agent-GO/vectordb/client"
-	"github.com/phenomenon0/Agent-GO/vectordb/hybrid"
+	"github.com/phenomenon0/vectordb/client"
+	"github.com/phenomenon0/vectordb/hybrid"
 )
 
 // FusionStrategy defines how vector and graph scores are combined.

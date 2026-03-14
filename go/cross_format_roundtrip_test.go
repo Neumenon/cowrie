@@ -1,19 +1,19 @@
-//go:build agentgo
+//go:build cogs
 
 package cowrie
 
 // Suite 2: Cross-Format Round-Trip
 //
 // Tests glyph text → cowrie binary → glyph text and reverse.
-// Only available in agentgo build (requires glyph bridge).
+// Only available in cogs build (requires glyph bridge).
 //
-// Build tag: agentgo (only builds in the Agent-GO monorepo context
+// Build tag: cogs (only builds in the CoGS workspace context
 // where glyph/go/glyph/bridge.go is available with the cowrie import).
 
 import (
 	"testing"
 
-	"github.com/phenomenon0/Agent-GO/glyph/go/glyph"
+	"github.com/Neumenon/glyph/glyph"
 )
 
 func TestCrossFormat_GlyphToCowrieThenBack(t *testing.T) {
