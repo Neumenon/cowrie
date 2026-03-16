@@ -26,6 +26,26 @@ A multi-language binary JSON codec with two variants:
 | C | Yes (core + proto-tensor) | Yes | Partial (Gen1 graph types pending) |
 | TypeScript | Yes (core + proto-tensor) | Yes | Partial (Gen1 graph types pending) |
 
+## Install
+
+```bash
+# Go
+go get github.com/Neumenon/cowrie/go@v2.0.0
+
+# Python
+pip install cowrie-py
+
+# JavaScript / TypeScript
+npm install cowrie-codec
+
+# Rust
+cargo add cowrie-rs
+
+# C (source-only)
+git clone https://github.com/Neumenon/cowrie.git
+cd cowrie/c && mkdir -p build && cd build && cmake .. && make
+```
+
 ## Quick Start
 
 ### Go
