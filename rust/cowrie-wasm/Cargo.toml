@@ -1,0 +1,23 @@
+[package]
+name = "cowrie-wasm"
+version = "2.0.0"
+edition = "2021"
+description = "Cowrie codec compiled to WebAssembly — encode/decode structured binary from JS/TS"
+license = "MIT"
+repository = "https://github.com/Neumenon/cowrie"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cowrie-rs = { path = ".." }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+opt-level = "s"    # Optimize for size
+lto = true
