@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
-	"github.com/Neumenon/cowrie/go/codec"
+	"github.com/Neumenon/cowrie/go/v2"
+	"github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 func TestFromRequest(t *testing.T) {

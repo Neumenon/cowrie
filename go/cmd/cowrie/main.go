@@ -28,8 +28,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/Neumenon/cowrie/go/gen1"
-	cowrie "github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2/gen1"
+	cowrie "github.com/Neumenon/cowrie/go/v2"
 )
 
 func main() {

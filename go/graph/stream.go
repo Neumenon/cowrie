@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // Errors

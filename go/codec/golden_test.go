@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // TestMasterFrame_GoldenGenerate generates golden fixtures if they don't exist.

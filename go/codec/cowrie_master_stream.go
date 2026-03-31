@@ -6,7 +6,7 @@ import (
 	"hash/crc32"
 	"io"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // Master Stream wire format constants

@@ -36,3 +36,6 @@ js/coverage/
 
 # Hypothesis test database
 .hypothesis/
+rust/cowrie-wasm/target/
+python/dist/
+c/bench_vllm

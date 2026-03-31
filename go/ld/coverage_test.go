@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 func TestContextBuilder_TypedTerms(t *testing.T) {

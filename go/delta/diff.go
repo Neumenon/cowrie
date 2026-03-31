@@ -16,7 +16,7 @@
 package delta
 
 import (
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // DiffConfig controls delta computation behavior.

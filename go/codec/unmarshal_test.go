@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go/codec"
+	"github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 // Test structs for edge cases

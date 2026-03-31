@@ -6,7 +6,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // Buffer pool for encoding - reduces allocations

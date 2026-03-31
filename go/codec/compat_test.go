@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // TestReader_MixedStream_BackCompat verifies the reader handles:

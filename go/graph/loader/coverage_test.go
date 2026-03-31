@@ -3,7 +3,7 @@ package loader
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie/go/graph"
+	"github.com/Neumenon/cowrie/go/v2/graph"
 )
 
 func TestBatchingWriter_EdgesAndTriples(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go/codec"
+	"github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 func TestStreamWriterReader_Roundtrip(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	cowrie "github.com/Neumenon/cowrie/go"
+	cowrie "github.com/Neumenon/cowrie/go/v2"
 )
 
 // FuzzMasterStreamReader_Next fuzzes the master stream reader.

@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
-	"github.com/Neumenon/cowrie/go/codec"
+	"github.com/Neumenon/cowrie/go/v2"
+	"github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 // TestCodecEquivalence verifies JSON and Cowrie produce equivalent results.

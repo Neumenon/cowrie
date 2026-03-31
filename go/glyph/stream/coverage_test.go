@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go/glyph"
+	"github.com/Neumenon/cowrie/go/v2/glyph"
 )
 
 func TestVerifyCRC(t *testing.T) {

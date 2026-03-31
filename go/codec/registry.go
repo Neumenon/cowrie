@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // FastUnmarshaler is a type-specific unmarshaler that avoids reflection overhead.

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"strconv"
 
-	"github.com/Neumenon/cowrie/go/graph"
+	"github.com/Neumenon/cowrie/go/v2/graph"
 )
 
 // Note: graph.StreamReader takes []byte, not io.Reader

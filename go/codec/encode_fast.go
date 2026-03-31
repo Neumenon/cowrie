@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // timeType and rawMessageType defined in unmarshal.go

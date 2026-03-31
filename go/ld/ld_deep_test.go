@@ -2,7 +2,7 @@ package ld
 
 import (
 	"bytes"
-	cowrie "github.com/Neumenon/cowrie/go"
+	cowrie "github.com/Neumenon/cowrie/go/v2"
 	"testing"
 )
 

@@ -7,7 +7,7 @@ import (
 	"math"
 	"strconv"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // Errors

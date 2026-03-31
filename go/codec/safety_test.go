@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // TestSafety_DecompressionBomb tests protection against decompression bombs.

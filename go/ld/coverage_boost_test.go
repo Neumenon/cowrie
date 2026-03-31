@@ -3,7 +3,7 @@ package ld
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // ============================================================

@@ -3,7 +3,7 @@ package delta
 import (
 	"fmt"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // Apply applies a delta to a base value, producing the target value.

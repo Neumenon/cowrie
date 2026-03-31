@@ -3,7 +3,7 @@ package delta
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 func TestComputeDelta_AddedField(t *testing.T) {

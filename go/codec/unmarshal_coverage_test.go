@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Neumenon/cowrie/go/codec"
+	"github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 // Coverage for unmarshalPrimitive edge cases

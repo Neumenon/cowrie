@@ -3,7 +3,7 @@
 package onnx
 
 import (
-	"github.com/Neumenon/cowrie/go/gnn/algo"
+	"github.com/Neumenon/cowrie/go/v2/gnn/algo"
 )
 
 // GATConfig configures the GAT inference model.

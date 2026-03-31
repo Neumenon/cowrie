@@ -3,7 +3,7 @@ package graph
 import (
 	"testing"
 
-	"github.com/Neumenon/cowrie/go/ld"
+	"github.com/Neumenon/cowrie/go/v2/ld"
 )
 
 // ============================================================

@@ -1,7 +1,7 @@
 package ld
 
 import (
-	"github.com/Neumenon/cowrie/go"
+	"github.com/Neumenon/cowrie/go/v2"
 )
 
 // ContextBuilder constructs JSON-LD context and term mappings for Cowrie-LD documents.

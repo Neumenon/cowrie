@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go/ld"
+	"github.com/Neumenon/cowrie/go/v2/ld"
 )
 
 func TestNodeEventRoundTrip(t *testing.T) {

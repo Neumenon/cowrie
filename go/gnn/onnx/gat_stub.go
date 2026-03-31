@@ -5,7 +5,7 @@ package onnx
 import (
 	"fmt"
 
-	"github.com/Neumenon/cowrie/go/gnn/algo"
+	"github.com/Neumenon/cowrie/go/v2/gnn/algo"
 )
 
 // GAT is a placeholder when built without the "onnx" tag.

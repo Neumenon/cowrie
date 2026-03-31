@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/Neumenon/cowrie/go/glyph"
+	"github.com/Neumenon/cowrie/go/v2/glyph"
 )
 
 type CaseResult struct {

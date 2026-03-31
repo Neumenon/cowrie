@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"testing"
 
-	"github.com/Neumenon/cowrie/go"
-	"github.com/Neumenon/cowrie/go/codec"
+	"github.com/Neumenon/cowrie/go/v2"
+	"github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 func TestDecodeTensorAuto_Int32(t *testing.T) {
