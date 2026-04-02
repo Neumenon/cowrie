@@ -3771,3 +3771,63 @@ int cowrie_decode_framed(const uint8_t *data, size_t len, COWRIEValue **out) {
         }
     }
 }
+
+/* ============================================================
+ * Direct Encode API (zero-malloc, Go-style)
+ * ============================================================
+ * Writes Cowrie wire format directly to buffer without building
+ * a value tree. This is the fast path for tensor serialization.
+ */
+
+int cowrie_direct_encode_tensor(COWRIEBuf *buf, uint8_t dtype, uint8_t rank,
+                                const size_t *dims, const uint8_t *data, size_t data_len) {
+    /* Header: magic + version + flags */
+    if (buf_put_byte(buf, COWRIE_MAGIC_0) != 0) return -1;  /* 'S' */
+    if (buf_put_byte(buf, COWRIE_MAGIC_1) != 0) return -1;  /* 'J' */
+    if (buf_put_byte(buf, COWRIE_VERSION) != 0) return -1;   /* 2 */
+    if (buf_put_byte(buf, 0) != 0) return -1;                /* flags=0 */
+
+    /* Empty dictionary (0 keys — no object wrapper) */
+    if (cowrie_put_uvarint(buf, 0) != 0) return -1;
+
+    /* Tensor tag */
+    if (buf_put_byte(buf, SJT_TENSOR) != 0) return -1;
+    if (buf_put_byte(buf, dtype) != 0) return -1;
+    if (buf_put_byte(buf, rank) != 0) return -1;
+    for (uint8_t i = 0; i < rank; i++) {
+        if (cowrie_put_uvarint(buf, dims[i]) != 0) return -1;
+    }
+    if (cowrie_put_uvarint(buf, data_len) != 0) return -1;
+    return buf_put(buf, data, data_len);
+}
+
+int cowrie_direct_encode_tensor_field(COWRIEBuf *buf,
+                                      const char *key, size_t key_len,
+                                      uint8_t dtype, uint8_t rank,
+                                      const size_t *dims, const uint8_t *data, size_t data_len) {
+    /* Header */
+    if (buf_put_byte(buf, COWRIE_MAGIC_0) != 0) return -1;
+    if (buf_put_byte(buf, COWRIE_MAGIC_1) != 0) return -1;
+    if (buf_put_byte(buf, COWRIE_VERSION) != 0) return -1;
+    if (buf_put_byte(buf, 0) != 0) return -1;
+
+    /* Dictionary with 1 key */
+    if (cowrie_put_uvarint(buf, 1) != 0) return -1;
+    if (cowrie_put_uvarint(buf, key_len) != 0) return -1;
+    if (buf_put(buf, key, key_len) != 0) return -1;
+
+    /* Object with 1 member */
+    if (buf_put_byte(buf, SJT_OBJECT) != 0) return -1;
+    if (cowrie_put_uvarint(buf, 1) != 0) return -1;  /* 1 field */
+    if (cowrie_put_uvarint(buf, 0) != 0) return -1;  /* key index 0 */
+
+    /* Tensor value */
+    if (buf_put_byte(buf, SJT_TENSOR) != 0) return -1;
+    if (buf_put_byte(buf, dtype) != 0) return -1;
+    if (buf_put_byte(buf, rank) != 0) return -1;
+    for (uint8_t i = 0; i < rank; i++) {
+        if (cowrie_put_uvarint(buf, dims[i]) != 0) return -1;
+    }
+    if (cowrie_put_uvarint(buf, data_len) != 0) return -1;
+    return buf_put(buf, data, data_len);
+}

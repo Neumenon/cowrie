@@ -573,6 +573,26 @@ int cowrie_decode_framed(const uint8_t *data, size_t len, COWRIEValue **out);
  * Utilities
  * ============================================================ */
 
+/* ── Direct Encode API (zero-malloc, Go-style) ── */
+
+/*
+ * Encode a tensor directly to buffer without building a value tree.
+ * Zero malloc — just writes tag + dtype + rank + dims + len + raw data.
+ * This is the fast path for tensor serialization (vLLM, inference, etc).
+ */
+int cowrie_direct_encode_tensor(COWRIEBuf *buf, uint8_t dtype, uint8_t rank,
+                                const size_t *dims, const uint8_t *data, size_t data_len);
+
+/*
+ * Encode an object with a single tensor field directly.
+ * Common pattern: {"embedding": <tensor>} or {"kv_cache": <tensor>}.
+ * Zero value-tree construction.
+ */
+int cowrie_direct_encode_tensor_field(COWRIEBuf *buf,
+                                      const char *key, size_t key_len,
+                                      uint8_t dtype, uint8_t rank,
+                                      const size_t *dims, const uint8_t *data, size_t data_len);
+
 /* Buffer helpers */
 void cowrie_buf_init(COWRIEBuf *buf);
 void cowrie_buf_free(COWRIEBuf *buf);
