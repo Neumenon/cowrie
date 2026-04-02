@@ -52,7 +52,7 @@ TAG_GRAPH_SHARD = 0x39
 
 # Security limits - prevent DoS from malicious input
 MAX_DEPTH = 1000
-MAX_ARRAY_LEN = 100_000_000  # 100M elements
+MAX_ARRAY_LEN = 1_000_000  # 1M elements (aligned with Go/TS/Gen2)
 MAX_OBJECT_LEN = 10_000_000  # 10M fields
 MAX_STRING_LEN = 500_000_000  # 500MB
 MAX_BYTES_LEN = 1_000_000_000  # 1GB

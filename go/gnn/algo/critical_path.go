@@ -147,7 +147,6 @@ func CriticalPath(csr *CSR, weights []float32) (*CriticalPathResult, error) {
 	}
 
 	// Process in reverse topological order
-	csrT := csr.Transpose() // Need incoming edges
 	for i := len(topoOrder) - 1; i >= 0; i-- {
 		u := topoOrder[i]
 		// Latest finish time is constrained by successors
@@ -187,9 +186,6 @@ func CriticalPath(csr *CSR, weights []float32) (*CriticalPathResult, error) {
 			path[i], path[j] = path[j], path[i]
 		}
 	}
-
-	// Use csrT to suppress unused variable warning
-	_ = csrT
 
 	return &CriticalPathResult{
 		Path:             path,
