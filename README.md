@@ -46,6 +46,10 @@ git clone https://github.com/Neumenon/cowrie.git
 cd cowrie/c && mkdir -p build && cd build && cmake .. && make
 ```
 
+## Benchmarks
+
+- [vLLM serialization comparison](benchmarks/vllm/) — Cowrie vs msgpack/pickle/JSON for inference payloads (5x compression on embeddings, zero-copy tensor decode)
+
 ## Quick Start
 
 ### Go

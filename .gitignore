@@ -31,5 +31,9 @@ js/coverage/
 # Hypothesis test database
 .hypothesis/
 rust/cowrie-wasm/target/
+rust/c/
 python/dist/
 c/bench_vllm
+
+# B2B pitch notebooks (not public yet)
+benchmarks/notebooks/
