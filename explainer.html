@@ -1,0 +1,2488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cowrie: A Forensic Deep-Dive into a Binary Codec</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #1a1815;
+  --bg-deep: #141210;
+  --text: #e8e0d4;
+  --text-dim: #a89e8c;
+  --accent: #e6a756;
+  --accent-dim: #b8843f;
+  --code-bg: #252118;
+  --border: #3a3228;
+  --pink: #ff6b9d;
+  --cyan: #4ecdc4;
+  --green: #7dcea0;
+  --red: #e74c3c;
+  --purple: #bb86fc;
+  --yellow: #f4d03f;
+  --serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; font-size: 17px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--serif);
+  line-height: 1.75;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Sticky Nav ── */
+nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 1rem;
+  backdrop-filter: blur(8px);
+}
+
+nav .nav-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.2rem;
+  align-items: center;
+}
+
+nav a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.82rem;
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+  transition: color 0.2s;
+}
+
+nav a:hover, nav a.active { color: var(--accent); }
+
+nav .nav-title {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.9rem;
+  margin-right: 0.8rem;
+}
+
+/* ── Main Layout ── */
+main {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 6rem;
+}
+
+/* ── Typography ── */
+h1 {
+  font-size: 2.6rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.02em;
+}
+
+h1 .subtitle {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 300;
+  color: var(--text-dim);
+  margin-top: 0.4rem;
+  letter-spacing: 0.02em;
+}
+
+h2 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 3.5rem 0 1.2rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 2px solid var(--border);
+}
+
+h2 .chapter-num {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  color: var(--accent-dim);
+  display: block;
+  margin-bottom: 0.2rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+h3 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 2rem 0 0.8rem;
+}
+
+h4 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--cyan);
+  margin: 1.5rem 0 0.6rem;
+}
+
+p { margin-bottom: 1rem; }
+
+a { color: var(--accent); }
+
+strong { color: var(--text); font-weight: 600; }
+
+em { font-style: italic; color: var(--text-dim); }
+
+/* ── Drop Caps ── */
+.drop-cap::first-letter {
+  float: left;
+  font-size: 3.8rem;
+  line-height: 0.8;
+  font-weight: 700;
+  color: var(--accent);
+  margin: 0.05em 0.12em 0 0;
+  padding-top: 0.05em;
+}
+
+/* ── Code ── */
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--code-bg);
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  color: var(--cyan);
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2rem;
+  overflow-x: auto;
+  margin: 1rem 0 1.5rem;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+.code-accent { color: var(--accent); }
+.code-cyan { color: var(--cyan); }
+.code-pink { color: var(--pink); }
+.code-green { color: var(--green); }
+.code-dim { color: var(--text-dim); }
+.code-purple { color: var(--purple); }
+
+/* ── Insight Box ── */
+.insight {
+  background: linear-gradient(135deg, rgba(230, 167, 86, 0.08), rgba(230, 167, 86, 0.03));
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+  padding: 1rem 1.2rem;
+  margin: 1.5rem 0;
+}
+
+.insight .insight-label {
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+
+.insight p:last-child { margin-bottom: 0; }
+
+/* Pink insight variant */
+.insight-pink {
+  background: linear-gradient(135deg, rgba(255, 107, 157, 0.08), rgba(255, 107, 157, 0.03));
+  border-left-color: var(--pink);
+}
+.insight-pink .insight-label { color: var(--pink); }
+
+/* Cyan insight variant */
+.insight-cyan {
+  background: linear-gradient(135deg, rgba(78, 205, 196, 0.08), rgba(78, 205, 196, 0.03));
+  border-left-color: var(--cyan);
+}
+.insight-cyan .insight-label { color: var(--cyan); }
+
+/* ── Tables ── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0 1.5rem;
+  font-size: 0.9rem;
+}
+
+th {
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 2px solid var(--border);
+  background: var(--code-bg);
+}
+
+td {
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+tr:hover td { background: rgba(230, 167, 86, 0.04); }
+
+td code { font-size: 0.8rem; }
+
+/* ── Expandable Sections ── */
+details {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin: 1rem 0;
+}
+
+details summary {
+  padding: 0.8rem 1rem;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--accent);
+  font-weight: 500;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  user-select: none;
+}
+
+details summary::before {
+  content: '\25B6';
+  font-size: 0.7rem;
+  transition: transform 0.2s;
+  color: var(--text-dim);
+}
+
+details[open] summary::before { transform: rotate(90deg); }
+
+details summary::-webkit-details-marker { display: none; }
+
+details .details-body {
+  padding: 0 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Tag Map (visual diagram) ── */
+.tag-map {
+  display: grid;
+  grid-template-columns: repeat(16, 1fr);
+  gap: 2px;
+  margin: 1.5rem 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+}
+
+.tag-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-dim);
+  position: relative;
+  min-height: 28px;
+}
+
+.tag-cell.core { background: rgba(230, 167, 86, 0.15); color: var(--accent); border-color: var(--accent-dim); }
+.tag-cell.ml { background: rgba(78, 205, 196, 0.15); color: var(--cyan); border-color: rgba(78, 205, 196, 0.4); }
+.tag-cell.graph { background: rgba(255, 107, 157, 0.15); color: var(--pink); border-color: rgba(255, 107, 157, 0.4); }
+.tag-cell.fixint { background: rgba(125, 206, 160, 0.12); color: var(--green); border-color: rgba(125, 206, 160, 0.3); }
+.tag-cell.fixarray { background: rgba(187, 134, 252, 0.15); color: var(--purple); border-color: rgba(187, 134, 252, 0.4); }
+.tag-cell.fixmap { background: rgba(244, 208, 63, 0.15); color: var(--yellow); border-color: rgba(244, 208, 63, 0.4); }
+.tag-cell.fixneg { background: rgba(231, 76, 60, 0.15); color: var(--red); border-color: rgba(231, 76, 60, 0.4); }
+.tag-cell.reserved { background: rgba(100, 100, 100, 0.1); color: #555; }
+
+.tag-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.5rem 0 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.tag-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.tag-legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* ── Timeline ── */
+.timeline {
+  position: relative;
+  padding-left: 2rem;
+  margin: 1.5rem 0;
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 0.5rem;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--border);
+}
+
+.timeline-entry {
+  position: relative;
+  margin-bottom: 1.5rem;
+  padding-left: 0.5rem;
+}
+
+.timeline-entry::before {
+  content: '';
+  position: absolute;
+  left: -1.65rem;
+  top: 0.55rem;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+
+.timeline-entry.major::before {
+  width: 14px;
+  height: 14px;
+  left: -1.8rem;
+  top: 0.4rem;
+  background: var(--pink);
+  box-shadow: 0 0 8px rgba(255, 107, 157, 0.4);
+}
+
+.timeline-date {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--accent-dim);
+  letter-spacing: 0.04em;
+}
+
+.timeline-title {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.timeline-body {
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  margin-top: 0.2rem;
+}
+
+/* ── Wire Diagram ── */
+.wire-diagram {
+  display: flex;
+  gap: 0;
+  margin: 1rem 0 1.5rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  overflow-x: auto;
+}
+
+.wire-byte {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.6rem;
+  text-align: center;
+  min-width: 52px;
+  background: var(--code-bg);
+}
+
+.wire-byte:first-child { border-radius: 6px 0 0 6px; }
+.wire-byte:last-child { border-radius: 0 6px 6px 0; }
+
+.wire-byte .wire-label {
+  display: block;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  margin-bottom: 0.2rem;
+}
+
+.wire-byte .wire-val {
+  font-weight: 700;
+}
+
+.wire-byte.accent { border-color: var(--accent-dim); }
+.wire-byte.accent .wire-val { color: var(--accent); }
+.wire-byte.cyan .wire-val { color: var(--cyan); }
+.wire-byte.pink .wire-val { color: var(--pink); }
+.wire-byte.green .wire-val { color: var(--green); }
+
+.wire-group {
+  display: flex;
+  gap: 0;
+}
+
+.wire-grow {
+  flex: 1;
+  min-width: 80px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--code-bg) 0px,
+    var(--code-bg) 8px,
+    rgba(78, 205, 196, 0.05) 8px,
+    rgba(78, 205, 196, 0.05) 16px
+  );
+}
+
+/* ── Comparison Grid ── */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.compare-card {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.2rem;
+}
+
+.compare-card h4 {
+  margin-top: 0;
+  margin-bottom: 0.6rem;
+}
+
+.compare-card ul {
+  list-style: none;
+  padding: 0;
+}
+
+.compare-card li {
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+  color: var(--text-dim);
+}
+
+.compare-card li::before {
+  content: '\2022';
+  color: var(--accent);
+  margin-right: 0.5rem;
+}
+
+/* ── Stat Grid ── */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.8rem;
+  margin: 1.5rem 0;
+}
+
+.stat-card {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.stat-num {
+  font-family: var(--mono);
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+}
+
+.stat-label {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 0.2rem;
+}
+
+/* ── Architecture Diagram ── */
+.arch-flow {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.arch-box {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+  text-align: center;
+  white-space: nowrap;
+  min-width: 90px;
+}
+
+.arch-box .arch-label {
+  font-weight: 700;
+  color: var(--accent);
+  display: block;
+  margin-bottom: 0.15rem;
+}
+
+.arch-box .arch-sub {
+  color: var(--text-dim);
+  font-size: 0.7rem;
+}
+
+.arch-arrow {
+  color: var(--text-dim);
+  padding: 0 0.4rem;
+  font-size: 1.2rem;
+}
+
+/* ── Byte ruler ── */
+.byte-ruler {
+  display: flex;
+  gap: 0;
+  margin: 1rem 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.byte-ruler-cell {
+  flex: 1;
+  text-align: center;
+  padding: 0.3rem 0.15rem;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+}
+
+.byte-ruler-cell:first-child { border-radius: 4px 0 0 4px; }
+.byte-ruler-cell:last-child { border-radius: 0 4px 4px 0; }
+
+.byte-ruler-cell.highlight {
+  background: rgba(230, 167, 86, 0.12);
+  border-color: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+  html { font-size: 15px; }
+  main { padding: 1rem 1rem 4rem; }
+  h1 { font-size: 2rem; }
+  h2 { font-size: 1.4rem; }
+  .compare-grid { grid-template-columns: 1fr; }
+  .tag-map { font-size: 0.5rem; }
+  .tag-cell { min-height: 22px; }
+  .wire-byte { min-width: 40px; padding: 0.4rem; }
+  nav .nav-inner { gap: 0.2rem 0.8rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- NAV                                                        -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<nav>
+  <div class="nav-inner">
+    <span class="nav-title">COWRIE</span>
+    <a href="#ch1">Origin</a>
+    <a href="#ch2">Wire Format</a>
+    <a href="#ch3">Gen1 vs Gen2</a>
+    <a href="#ch4">Type Zoo</a>
+    <a href="#ch5">Cross-Language</a>
+    <a href="#ch6">Timeline</a>
+    <a href="#ch7">Security</a>
+  </div>
+</nav>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- HEADER                                                     -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<main>
+
+<h1>
+  Cowrie
+  <span class="subtitle">A forensic anatomy of a binary codec born in 17 days</span>
+</h1>
+
+<p style="color: var(--text-dim); font-size: 0.92rem; margin-bottom: 1.2rem;">
+  Everything in this document was reconstructed from source code, git commits, and spec files.
+  No external documentation was consulted. The commit hashes are real. The code is verbatim.
+</p>
+
+<p style="color: var(--text-dim); font-size: 0.88rem; margin-bottom: 2.5rem;">
+  Cowrie is a binary serialization format for structured data with native ML extensions &mdash;
+  "JSON++" as its own source code puts it. It encodes tensors, graph shards, images, audio,
+  bitmasks, and delta patches alongside the usual strings, numbers, and nested objects.
+  Five language implementations produce byte-identical output. This is the story of how it
+  was built, what it encodes, and why it exists.
+</p>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-num">5</div>
+    <div class="stat-label">Languages</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">26+</div>
+    <div class="stat-label">Type Tags</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">17</div>
+    <div class="stat-label">Days to Ship</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">14k+</div>
+    <div class="stat-label">Lines of Code</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num">7</div>
+    <div class="stat-label">Codec Invariants</div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 1: ORIGIN                                          -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch1">
+  <span class="chapter-num">Chapter 1</span>
+  The Shape of Structured Data
+</h2>
+
+<p class="drop-cap">JSON won the internet. It is the lingua franca of APIs, configuration files, and data interchange. But JSON has a ceiling, and if you work with machine learning, real-time agents, or graph-structured data, you hit it fast. JSON cannot represent a tensor without base64-encoding it into a string. It cannot carry an image without doubling its size. It has no integers&mdash;only IEEE 754 doubles that silently mangle values above 2<sup>53</sup>. It has no schema fingerprinting, no streaming framing, no compression, no checksums. And it is <em>slow</em>&mdash;parsing JSON is dominated by string allocation, UTF-8 validation, and hash table construction for every object key, every time.</p>
+
+<p>Cowrie exists because the systems that need structured data most&mdash;ML inference engines, agent orchestration layers, graph databases, multimodal pipelines&mdash;need more than JSON can offer. Cowrie is a binary codec with 26 native types: the JSON basics (null, bool, int64, float64, string, bytes, array, object) plus tensors with 20+ dtypes, images with format metadata, audio with sample rates, adjacency lists in CSR format, rich text with token spans, semantic deltas, bitmasks, UUIDs, datetime64, decimal128, and bigints. Dictionary-coded object keys eliminate redundancy. Varint encoding keeps small values small. A single-byte <code>FIXINT</code> tag encodes integers 0-127 with zero overhead. Five language implementations&mdash;Go, Python, TypeScript, Rust, C&mdash;all produce identical bytes.</p>
+
+<p>The name comes from the cowrie shell, one of humanity's oldest units of exchange. The ambition is similar: a universal token of value that any system can accept.</p>
+
+<div class="insight">
+  <div class="insight-label">Origin</div>
+  <p>Cowrie was forked from SJSON on February 22, 2026. The rename touched 122 files in a single commit&mdash;but the wire format magic bytes <code>0x53 0x4A</code> (ASCII "SJ") were deliberately preserved. Every Cowrie message still carries the DNA of its predecessor in its first two bytes.</p>
+</div>
+
+<p>Within two hours of that first commit, ten more landed: Gen2 was promoted to the root package, the Glyph text codec was integrated, Agent-GO's graph and delta packages were carried forward, seven security vulnerabilities were patched, and sixteen regression tests were added. Then, in rapid succession:</p>
+
+<table>
+  <thead>
+    <tr><th>Time</th><th>Commit</th><th>Action</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>10:29</code></td><td><code>80d04e8</code></td><td>Glyph text codec integrated across all 5 languages</td></tr>
+    <tr><td><code>10:33</code></td><td><code>bfbefdd</code></td><td>Agent-GO packages carried forward (codec, gnn, delta, graph, ld)</td></tr>
+    <tr><td><code>10:37</code></td><td><code>b774096</code></td><td>7 critical/high security vulnerabilities fixed in Gen2 decoder</td></tr>
+    <tr><td><code>10:45</code></td><td><code>157969f</code></td><td>16 security regression tests added</td></tr>
+    <tr><td><code>10:48</code></td><td><code>38c0a32</code></td><td>Cross-language compatibility fixtures generated</td></tr>
+  </tbody>
+</table>
+
+<p>By 12:02 PM &mdash; less than two hours after the first commit &mdash; ten commits had landed. Cowrie had a header format, two codec generations, five language implementations, a security audit, and cross-language fixture tests. The sprint had begun.</p>
+
+<h3>What the Codec Actually Does</h3>
+
+<p>At its core, Cowrie solves the serialization problem for typed structured data. You hand it a value tree&mdash;a nested graph of nulls, booleans, integers, floats, strings, bytes, arrays, and objects&mdash;and it produces a compact binary representation. But what makes Cowrie more than "binary JSON" is the type zoo that lives beyond those basics.</p>
+
+<p>A <strong>tensor</strong> is a first-class citizen. You don't base64-encode a numpy array into a JSON string&mdash;you write the dtype, the shape, and the raw bytes directly into the wire format. The decoder on the other side can hand you a zero-copy view into the buffer without ever allocating. A 1MB embedding vector that takes 1.33MB in base64 JSON takes exactly 1MB plus 12 bytes of metadata in Cowrie.</p>
+
+<p>An <strong>adjacency list</strong> uses compressed sparse row (CSR) format&mdash;the same layout your GNN framework expects. Row offsets and column indices, packed as contiguous integer arrays. No JSON array-of-arrays. No deserialization into a hash map that you immediately convert to CSR anyway. The wire format <em>is</em> the in-memory layout.</p>
+
+<p>A <strong>delta</strong> encodes semantic patches: "set field X to value Y, delete field Z, append to list W." These aren't textual diffs&mdash;they're typed operations with dictionary-coded field IDs. An agent can stream state updates as deltas, and the receiver can apply them without parsing the full state.</p>
+
+<table>
+  <thead><tr><th>Type</th><th>JSON Equivalent</th><th>What Cowrie Adds</th></tr></thead>
+  <tbody>
+    <tr><td><code>Tensor</code></td><td>Base64 string + metadata object</td><td>20+ dtypes, zero-copy views, raw binary data</td></tr>
+    <tr><td><code>Image</code></td><td>Base64 string (2x size)</td><td>Format tag (JPEG/PNG/WEBP), width/height, raw bytes</td></tr>
+    <tr><td><code>Audio</code></td><td>Base64 string</td><td>Encoding (PCM/Opus/AAC), sample rate, channels</td></tr>
+    <tr><td><code>Adjacency List</code></td><td>Array of arrays (sparse, slow)</td><td>CSR format, INT32/INT64, contiguous memory</td></tr>
+    <tr><td><code>Bitmask</code></td><td>Array of booleans (8x larger)</td><td>LSB-first packed bits, 7.8x compression</td></tr>
+    <tr><td><code>Delta</code></td><td>Custom JSON patch (ad-hoc)</td><td>Typed ops (set/delete/append), dictionary-coded fields</td></tr>
+    <tr><td><code>RichText</code></td><td>String + separate token array</td><td>Text + optional token IDs + byte-offset spans</td></tr>
+    <tr><td><code>Decimal128</code></td><td>String (loss-prone float)</td><td>128-bit decimal, exact financial arithmetic</td></tr>
+    <tr><td><code>DateTime64</code></td><td>String (ISO-8601 parsing)</td><td>int64 nanoseconds, no parsing overhead</td></tr>
+  </tbody>
+</table>
+
+<p>The codec also carries higher-level packages that consume the wire format without defining it: a reflection-based <code>Marshal</code>/<code>Unmarshal</code> system (Go only), a framed streaming protocol with CRC-32 per frame, graph neural network primitives (PageRank, Louvain, Tarjan SCC), a structural diff/patch engine, and JSON-LD context resolution. These are Go-only because they operate at the application layer&mdash;they are <em>consumers</em> of Cowrie, not part of its specification.</p>
+
+<h3>Security From Day One</h3>
+
+<p>The sixth commit&mdash;still on Day 1&mdash;patched seven critical vulnerabilities inherited from SJSON: unchecked varint overflows that could cause infinite loops, unbounded string allocations that could exhaust memory, missing depth limits on recursive decode, and tensor data length validation gaps. The fix touched 4 files and 66 lines. The follow-up commit added 16 regression tests. This pattern&mdash;fix, then test, in adjacent commits&mdash;became the project's standard operating procedure.</p>
+
+<p>By the end of Day 1, all five implementations could encode and decode every Gen2 type tag, handle compressed payloads, accept configurable decode limits, and round-trip through cross-language fixtures. The codec was not just renamed&mdash;it was hardened.</p>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 2: THE WIRE FORMAT                                 -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch2">
+  <span class="chapter-num">Chapter 2</span>
+  The Wire Format
+</h2>
+
+<p class="drop-cap">Cowrie is a binary codec &mdash; often described in its own source as "JSON++" &mdash; designed for structured data with native ML extensions. The Gen2 wire format opens with a 4-byte header, followed by a string dictionary, followed by a root value. Every message starts the same way.</p>
+
+<h3>Encode / Decode Pipeline</h3>
+
+<div class="arch-flow">
+  <div class="arch-box">
+    <span class="arch-label">Value Tree</span>
+    <span class="arch-sub">typed AST</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box">
+    <span class="arch-label">Dict Collect</span>
+    <span class="arch-sub">gather keys</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box">
+    <span class="arch-label">Header</span>
+    <span class="arch-sub">"SJ" + ver + flags</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box">
+    <span class="arch-label">Dictionary</span>
+    <span class="arch-sub">sorted keys</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box">
+    <span class="arch-label">Root Value</span>
+    <span class="arch-sub">recursive TLV</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box">
+    <span class="arch-label">Compress?</span>
+    <span class="arch-sub">gzip / zstd</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box">
+    <span class="arch-label">[]byte</span>
+    <span class="arch-sub">wire output</span>
+  </div>
+</div>
+
+<p>The decode pipeline is the reverse: validate header, decompress if flagged, parse dictionary, then recursively decode the root value with depth tracking and size limit enforcement at every step.</p>
+
+<h3>Header</h3>
+
+<div class="wire-diagram">
+  <div class="wire-byte accent">
+    <span class="wire-label">Byte 0</span>
+    <span class="wire-val">'S'</span>
+  </div>
+  <div class="wire-byte accent">
+    <span class="wire-label">Byte 1</span>
+    <span class="wire-val">'J'</span>
+  </div>
+  <div class="wire-byte cyan">
+    <span class="wire-label">Byte 2</span>
+    <span class="wire-val">0x02</span>
+  </div>
+  <div class="wire-byte pink">
+    <span class="wire-label">Byte 3</span>
+    <span class="wire-val">Flags</span>
+  </div>
+  <div class="wire-byte green wire-grow">
+    <span class="wire-label">Byte 4+</span>
+    <span class="wire-val">Dictionary + Root Value</span>
+  </div>
+</div>
+
+<p>The magic bytes <code>0x53 0x4A</code> ("SJ") and version <code>0x02</code> form a 3-byte format discriminator. Why three bytes instead of two? Because of a collision introduced by v3 inline types: a Gen1 integer with value 19 encodes as <code>0x53</code> ('S'), and value 10 as <code>0x4A</code> ('J'). Two bytes alone would be ambiguous. The third byte &mdash; version <code>0x02</code> &mdash; sits outside Gen1's tag range (<code>0x00-0x0D</code>), making detection unambiguous.</p>
+
+<h4>Flag Bits</h4>
+
+<table>
+  <thead>
+    <tr><th>Bit</th><th>Name</th><th>Effect</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>0</code></td><td>Compressed</td><td>Payload after header is compressed + framed</td></tr>
+    <tr><td><code>1-2</code></td><td>Compression Type</td><td>0 = none, 1 = gzip, 2 = zstd</td></tr>
+    <tr><td><code>3</code></td><td>Has Column Hints</td><td>Columnar metadata block before dictionary</td></tr>
+  </tbody>
+</table>
+
+<h3>Dictionary Coding</h3>
+
+<p>After the header (and optional column hints), the message contains a string dictionary. Object field names are encoded once in this dictionary, then referenced by index throughout the message. From <code>types.go</code>:</p>
+
+<pre><code><span class="code-dim">// Wire format:</span>
+<span class="code-dim">//   DictLen: uvarint</span>
+<span class="code-dim">//   Dict:    DictLen x [len:uvarint][utf8 bytes]</span>
+<span class="code-dim">//   RootVal: encoded value</span></code></pre>
+
+<p>Object fields then reference dictionary entries by uvarint index instead of repeating the key string. For payloads with repeated object schemas (arrays of objects, nested structures), this eliminates massive redundancy.</p>
+
+<p>Consider a 1000-element array of user objects, each with a <code>"name"</code> field. Without dictionary coding, the 4-byte string <code>"name"</code> is repeated 1000 times (5 bytes per instance: length varint + 4 chars = 5,000 bytes). With dictionary coding, <code>"name"</code> appears once in the dictionary (5 bytes) and each reference is a single-byte varint index (1,000 bytes). That's an 80% reduction on key data alone.</p>
+
+<h3>Column Hints</h3>
+
+<p>An optional metadata block sits between the header and the dictionary when flag bit 3 is set. Column hints describe the expected schema of objects within the root array &mdash; field names, types, tensor shapes, and flags:</p>
+
+<pre><code><span class="code-accent">ColumnHints</span>:
+  HintCount: <span class="code-cyan">uvarint</span>
+  Repeat HintCount times:
+    Field:    <span class="code-green">[len:uvarint][utf8 bytes]</span>
+    Type:     <span class="code-pink">u8</span>               <span class="code-dim">// maps to tag values</span>
+    ShapeLen: <span class="code-cyan">uvarint</span>
+    ShapeDims:<span class="code-cyan">uvarint * ShapeLen</span>
+    Flags:    <span class="code-pink">u8</span>               <span class="code-dim">// Required | Columnar</span></code></pre>
+
+<p>The Go implementation provides a <code>ColumnReader</code> that uses these hints for partial decoding &mdash; reading specific fields from deeply nested structures without deserializing the entire message. From <code>column_reader.go</code>:</p>
+
+<pre><code><span class="code-dim">// ColumnReader provides columnar access to Cowrie data using hints.</span>
+<span class="code-dim">// It enables partial decoding of specific fields without fully</span>
+<span class="code-dim">// decoding the data.</span>
+<span class="code-accent">type</span> ColumnReader <span class="code-accent">struct</span> {
+    data   []<span class="code-green">byte</span>
+    hints  []ColumnHint
+    dict   []<span class="code-green">string</span>
+    root   *Value  <span class="code-dim">// Lazily decoded</span>
+    offset <span class="code-green">int</span>     <span class="code-dim">// Position after header, hints, dict</span>
+}</code></pre>
+
+<h3>Compression Framing</h3>
+
+<p>When the Compressed flag is set, everything after the 4-byte header is wrapped in a compression frame. The Go implementation supports gzip and zstd, with a minimum threshold of 256 bytes before compression is attempted. If compression doesn't help, the raw payload is returned unchanged:</p>
+
+<pre><code><span class="code-accent">const</span> compressThreshold = 256
+
+<span class="code-accent">func</span> <span class="code-cyan">EncodeFramed</span>(v *Value, comp Compression) ([]<span class="code-green">byte</span>, <span class="code-green">error</span>) {
+    raw, err := Encode(v)
+    <span class="code-dim">// ...</span>
+    <span class="code-pink">if</span> comp == CompressionNone || len(raw) &lt; compressThreshold {
+        <span class="code-pink">return</span> raw, <span class="code-purple">nil</span>
+    }
+    <span class="code-dim">// Compress, then check if it actually helped</span>
+    <span class="code-pink">if</span> len(compressed) &gt;= len(payload) {
+        <span class="code-pink">return</span> raw, <span class="code-purple">nil</span>  <span class="code-dim">// Compression made it bigger — keep raw</span>
+    }
+}</code></pre>
+
+<p>The frame format itself is simple: <code>OrigLen:uvarint</code> followed by the compressed payload. On decode, the original length is validated against the actual decompressed size &mdash; a mismatch is a hard error.</p>
+
+<h3>Worked Example: Encoding a Message</h3>
+
+<p>Consider encoding the JSON object <code>{"name": "cowrie", "version": 2, "tags": ["ml", "codec"]}</code>. Here's what the v3 Gen2 wire format produces, byte by byte:</p>
+
+<pre><code><span class="code-accent">Header</span>
+  53 4A 02 00                  <span class="code-dim">"SJ" + version 2 + flags 0</span>
+
+<span class="code-accent">Dictionary</span> (3 keys, sorted)
+  03                           <span class="code-dim">uvarint: 3 entries</span>
+  04 6E 61 6D 65               <span class="code-dim">key 0: "name"</span>
+  04 74 61 67 73               <span class="code-dim">key 1: "tags"</span>
+  07 76 65 72 73 69 6F 6E      <span class="code-dim">key 2: "version"</span>
+
+<span class="code-accent">Root Object</span> (3 fields → FIXMAP)
+  <span class="code-pink">D3</span>                           <span class="code-dim">tag 0xD3 = FIXMAP(3)</span>
+
+  <span class="code-cyan">00</span>                           <span class="code-dim">dictIdx 0 → "name"</span>
+  05 06 63 6F 77 72 69 65      <span class="code-dim">STRING "cowrie" (len=6)</span>
+
+  <span class="code-cyan">02</span>                           <span class="code-dim">dictIdx 2 → "version"</span>
+  <span class="code-green">42</span>                           <span class="code-dim">tag 0x42 = FIXINT(2)</span>
+
+  <span class="code-cyan">01</span>                           <span class="code-dim">dictIdx 1 → "tags"</span>
+  <span class="code-purple">C2</span>                           <span class="code-dim">tag 0xC2 = FIXARRAY(2)</span>
+  05 02 6D 6C                  <span class="code-dim">STRING "ml" (len=2)</span>
+  05 05 63 6F 64 65 63         <span class="code-dim">STRING "codec" (len=5)</span></code></pre>
+
+<p>Total: 4 (header) + 20 (dict) + 1 (fixmap) + 1+8 (name) + 1+1 (version) + 1+1+5+8 (tags) = <strong>~41 bytes</strong>. The equivalent JSON is 52 bytes. The v3 inline types saved 3 bytes (fixmap, fixint, fixarray) compared to v2 encoding.</p>
+
+<div class="insight insight-cyan">
+  <div class="insight-label">Dictionary Amortization</div>
+  <p>The dictionary overhead (20 bytes for 3 keys) is a fixed cost. In a batch of 100 such objects, the dictionary appears once while each object saves its key bytes. At 100 objects: Cowrie ~2,100 bytes vs JSON ~5,200 bytes &mdash; a 60% reduction, almost entirely from dictionary coding.</p>
+</div>
+
+<h3>The Tag Space</h3>
+
+<p>Every encoded value begins with a single tag byte. The full 256-byte tag space divides into five regions:</p>
+
+<div class="tag-legend">
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(230, 167, 86, 0.3);"></div>
+    <span>Core (0x00-0x0F)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(78, 205, 196, 0.3);"></div>
+    <span>ML/Media (0x20-0x2F)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(255, 107, 157, 0.3);"></div>
+    <span>Graph (0x30-0x3F)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(125, 206, 160, 0.2);"></div>
+    <span>FIXINT (0x40-0xBF)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(187, 134, 252, 0.3);"></div>
+    <span>FIXARRAY (0xC0-0xCF)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(244, 208, 63, 0.3);"></div>
+    <span>FIXMAP (0xD0-0xDF)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(231, 76, 60, 0.3);"></div>
+    <span>FIXNEG (0xE0-0xEF)</span>
+  </div>
+  <div class="tag-legend-item">
+    <div class="tag-legend-swatch" style="background: rgba(100, 100, 100, 0.2);"></div>
+    <span>Reserved (0xF0-0xFF)</span>
+  </div>
+</div>
+
+<!-- Tag map: 16x16 grid -->
+<div class="tag-map">
+  <!-- Row 0x00 -->
+  <div class="tag-cell core" title="0x00 NULL">NUL</div>
+  <div class="tag-cell core" title="0x01 FALSE">F</div>
+  <div class="tag-cell core" title="0x02 TRUE">T</div>
+  <div class="tag-cell core" title="0x03 INT64">I64</div>
+  <div class="tag-cell core" title="0x04 FLOAT64">F64</div>
+  <div class="tag-cell core" title="0x05 STRING">STR</div>
+  <div class="tag-cell core" title="0x06 ARRAY">ARR</div>
+  <div class="tag-cell core" title="0x07 OBJECT">OBJ</div>
+  <div class="tag-cell core" title="0x08 BYTES">BYT</div>
+  <div class="tag-cell core" title="0x09 UINT64">U64</div>
+  <div class="tag-cell core" title="0x0A DECIMAL128">D28</div>
+  <div class="tag-cell core" title="0x0B DATETIME64">DT</div>
+  <div class="tag-cell core" title="0x0C UUID128">UID</div>
+  <div class="tag-cell core" title="0x0D BIGINT">BIG</div>
+  <div class="tag-cell core" title="0x0E EXT">EXT</div>
+  <div class="tag-cell core" title="0x0F FLOAT32">F32</div>
+  <!-- Row 0x10 -->
+  <div class="tag-cell" title="0x10"></div>
+  <div class="tag-cell" title="0x11"></div>
+  <div class="tag-cell" title="0x12"></div>
+  <div class="tag-cell" title="0x13"></div>
+  <div class="tag-cell" title="0x14"></div>
+  <div class="tag-cell" title="0x15"></div>
+  <div class="tag-cell" title="0x16"></div>
+  <div class="tag-cell" title="0x17"></div>
+  <div class="tag-cell" title="0x18"></div>
+  <div class="tag-cell" title="0x19"></div>
+  <div class="tag-cell" title="0x1A"></div>
+  <div class="tag-cell" title="0x1B"></div>
+  <div class="tag-cell" title="0x1C"></div>
+  <div class="tag-cell" title="0x1D"></div>
+  <div class="tag-cell" title="0x1E"></div>
+  <div class="tag-cell" title="0x1F"></div>
+  <!-- Row 0x20 -->
+  <div class="tag-cell ml" title="0x20 TENSOR">TNS</div>
+  <div class="tag-cell ml" title="0x21 TENSOR_REF">REF</div>
+  <div class="tag-cell ml" title="0x22 IMAGE">IMG</div>
+  <div class="tag-cell ml" title="0x23 AUDIO">AUD</div>
+  <div class="tag-cell ml" title="0x24 BITMASK">BIT</div>
+  <div class="tag-cell" title="0x25"></div>
+  <div class="tag-cell" title="0x26"></div>
+  <div class="tag-cell" title="0x27"></div>
+  <div class="tag-cell" title="0x28"></div>
+  <div class="tag-cell" title="0x29"></div>
+  <div class="tag-cell" title="0x2A"></div>
+  <div class="tag-cell" title="0x2B"></div>
+  <div class="tag-cell" title="0x2C"></div>
+  <div class="tag-cell" title="0x2D"></div>
+  <div class="tag-cell" title="0x2E"></div>
+  <div class="tag-cell" title="0x2F"></div>
+  <!-- Row 0x30 -->
+  <div class="tag-cell graph" title="0x30 ADJLIST">ADJ</div>
+  <div class="tag-cell graph" title="0x31 RICHTEXT">RTX</div>
+  <div class="tag-cell graph" title="0x32 DELTA">DLT</div>
+  <div class="tag-cell" title="0x33"></div>
+  <div class="tag-cell" title="0x34"></div>
+  <div class="tag-cell graph" title="0x35 NODE">NOD</div>
+  <div class="tag-cell graph" title="0x36 EDGE">EDG</div>
+  <div class="tag-cell graph" title="0x37 NODE_BATCH">NB</div>
+  <div class="tag-cell graph" title="0x38 EDGE_BATCH">EB</div>
+  <div class="tag-cell graph" title="0x39 GRAPH_SHARD">GS</div>
+  <div class="tag-cell" title="0x3A"></div>
+  <div class="tag-cell" title="0x3B"></div>
+  <div class="tag-cell" title="0x3C"></div>
+  <div class="tag-cell" title="0x3D"></div>
+  <div class="tag-cell" title="0x3E"></div>
+  <div class="tag-cell" title="0x3F"></div>
+  <!-- Rows 0x40-0xBF: FIXINT (128 cells) -->
+  <div class="tag-cell fixint" title="0x40 FIXINT 0">0</div>
+  <div class="tag-cell fixint" title="0x41 FIXINT 1">1</div>
+  <div class="tag-cell fixint" title="0x42 FIXINT 2">2</div>
+  <div class="tag-cell fixint" title="0x43 FIXINT 3">3</div>
+  <div class="tag-cell fixint" title="0x44 FIXINT 4">4</div>
+  <div class="tag-cell fixint" title="0x45 FIXINT 5">5</div>
+  <div class="tag-cell fixint" title="0x46 FIXINT 6">6</div>
+  <div class="tag-cell fixint" title="0x47 FIXINT 7">7</div>
+  <div class="tag-cell fixint" title="0x48 FIXINT 8">8</div>
+  <div class="tag-cell fixint" title="0x49 FIXINT 9">9</div>
+  <div class="tag-cell fixint" title="0x4A">10</div>
+  <div class="tag-cell fixint" title="0x4B">11</div>
+  <div class="tag-cell fixint" title="0x4C">12</div>
+  <div class="tag-cell fixint" title="0x4D">13</div>
+  <div class="tag-cell fixint" title="0x4E">14</div>
+  <div class="tag-cell fixint" title="0x4F">15</div>
+  <!-- 0x50 -->
+  <div class="tag-cell fixint">16</div>
+  <div class="tag-cell fixint">17</div>
+  <div class="tag-cell fixint">18</div>
+  <div class="tag-cell fixint">19</div>
+  <div class="tag-cell fixint">20</div>
+  <div class="tag-cell fixint">21</div>
+  <div class="tag-cell fixint">22</div>
+  <div class="tag-cell fixint">23</div>
+  <div class="tag-cell fixint">24</div>
+  <div class="tag-cell fixint">25</div>
+  <div class="tag-cell fixint">26</div>
+  <div class="tag-cell fixint">27</div>
+  <div class="tag-cell fixint">28</div>
+  <div class="tag-cell fixint">29</div>
+  <div class="tag-cell fixint">30</div>
+  <div class="tag-cell fixint">31</div>
+  <!-- 0x60 -->
+  <div class="tag-cell fixint">32</div>
+  <div class="tag-cell fixint">33</div>
+  <div class="tag-cell fixint">34</div>
+  <div class="tag-cell fixint">35</div>
+  <div class="tag-cell fixint">36</div>
+  <div class="tag-cell fixint">37</div>
+  <div class="tag-cell fixint">38</div>
+  <div class="tag-cell fixint">39</div>
+  <div class="tag-cell fixint">40</div>
+  <div class="tag-cell fixint">41</div>
+  <div class="tag-cell fixint">42</div>
+  <div class="tag-cell fixint">43</div>
+  <div class="tag-cell fixint">44</div>
+  <div class="tag-cell fixint">45</div>
+  <div class="tag-cell fixint">46</div>
+  <div class="tag-cell fixint">47</div>
+  <!-- 0x70 -->
+  <div class="tag-cell fixint">48</div>
+  <div class="tag-cell fixint">49</div>
+  <div class="tag-cell fixint">50</div>
+  <div class="tag-cell fixint">51</div>
+  <div class="tag-cell fixint">52</div>
+  <div class="tag-cell fixint">53</div>
+  <div class="tag-cell fixint">54</div>
+  <div class="tag-cell fixint">55</div>
+  <div class="tag-cell fixint">56</div>
+  <div class="tag-cell fixint">57</div>
+  <div class="tag-cell fixint">58</div>
+  <div class="tag-cell fixint">59</div>
+  <div class="tag-cell fixint">60</div>
+  <div class="tag-cell fixint">61</div>
+  <div class="tag-cell fixint">62</div>
+  <div class="tag-cell fixint">63</div>
+  <!-- 0x80 -->
+  <div class="tag-cell fixint">64</div>
+  <div class="tag-cell fixint">65</div>
+  <div class="tag-cell fixint">66</div>
+  <div class="tag-cell fixint">67</div>
+  <div class="tag-cell fixint">68</div>
+  <div class="tag-cell fixint">69</div>
+  <div class="tag-cell fixint">70</div>
+  <div class="tag-cell fixint">71</div>
+  <div class="tag-cell fixint">72</div>
+  <div class="tag-cell fixint">73</div>
+  <div class="tag-cell fixint">74</div>
+  <div class="tag-cell fixint">75</div>
+  <div class="tag-cell fixint">76</div>
+  <div class="tag-cell fixint">77</div>
+  <div class="tag-cell fixint">78</div>
+  <div class="tag-cell fixint">79</div>
+  <!-- 0x90 -->
+  <div class="tag-cell fixint">80</div>
+  <div class="tag-cell fixint">81</div>
+  <div class="tag-cell fixint">82</div>
+  <div class="tag-cell fixint">83</div>
+  <div class="tag-cell fixint">84</div>
+  <div class="tag-cell fixint">85</div>
+  <div class="tag-cell fixint">86</div>
+  <div class="tag-cell fixint">87</div>
+  <div class="tag-cell fixint">88</div>
+  <div class="tag-cell fixint">89</div>
+  <div class="tag-cell fixint">90</div>
+  <div class="tag-cell fixint">91</div>
+  <div class="tag-cell fixint">92</div>
+  <div class="tag-cell fixint">93</div>
+  <div class="tag-cell fixint">94</div>
+  <div class="tag-cell fixint">95</div>
+  <!-- 0xA0 -->
+  <div class="tag-cell fixint">96</div>
+  <div class="tag-cell fixint">97</div>
+  <div class="tag-cell fixint">98</div>
+  <div class="tag-cell fixint">99</div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <!-- 0xB0 -->
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint"></div>
+  <div class="tag-cell fixint" title="0xBF FIXINT 127">127</div>
+  <!-- Row 0xC0: FIXARRAY -->
+  <div class="tag-cell fixarray" title="0xC0 FIXARRAY 0">A0</div>
+  <div class="tag-cell fixarray" title="0xC1 FIXARRAY 1">A1</div>
+  <div class="tag-cell fixarray" title="0xC2 FIXARRAY 2">A2</div>
+  <div class="tag-cell fixarray" title="0xC3 FIXARRAY 3">A3</div>
+  <div class="tag-cell fixarray" title="0xC4">A4</div>
+  <div class="tag-cell fixarray" title="0xC5">A5</div>
+  <div class="tag-cell fixarray" title="0xC6">A6</div>
+  <div class="tag-cell fixarray" title="0xC7">A7</div>
+  <div class="tag-cell fixarray" title="0xC8">A8</div>
+  <div class="tag-cell fixarray" title="0xC9">A9</div>
+  <div class="tag-cell fixarray" title="0xCA">A10</div>
+  <div class="tag-cell fixarray" title="0xCB">A11</div>
+  <div class="tag-cell fixarray" title="0xCC">A12</div>
+  <div class="tag-cell fixarray" title="0xCD">A13</div>
+  <div class="tag-cell fixarray" title="0xCE">A14</div>
+  <div class="tag-cell fixarray" title="0xCF FIXARRAY 15">A15</div>
+  <!-- Row 0xD0: FIXMAP -->
+  <div class="tag-cell fixmap" title="0xD0 FIXMAP 0">M0</div>
+  <div class="tag-cell fixmap" title="0xD1 FIXMAP 1">M1</div>
+  <div class="tag-cell fixmap" title="0xD2 FIXMAP 2">M2</div>
+  <div class="tag-cell fixmap" title="0xD3 FIXMAP 3">M3</div>
+  <div class="tag-cell fixmap" title="0xD4">M4</div>
+  <div class="tag-cell fixmap" title="0xD5">M5</div>
+  <div class="tag-cell fixmap" title="0xD6">M6</div>
+  <div class="tag-cell fixmap" title="0xD7">M7</div>
+  <div class="tag-cell fixmap" title="0xD8">M8</div>
+  <div class="tag-cell fixmap" title="0xD9">M9</div>
+  <div class="tag-cell fixmap" title="0xDA">M10</div>
+  <div class="tag-cell fixmap" title="0xDB">M11</div>
+  <div class="tag-cell fixmap" title="0xDC">M12</div>
+  <div class="tag-cell fixmap" title="0xDD">M13</div>
+  <div class="tag-cell fixmap" title="0xDE">M14</div>
+  <div class="tag-cell fixmap" title="0xDF FIXMAP 15">M15</div>
+  <!-- Row 0xE0: FIXNEG -->
+  <div class="tag-cell fixneg" title="0xE0 FIXNEG -1">-1</div>
+  <div class="tag-cell fixneg" title="0xE1 FIXNEG -2">-2</div>
+  <div class="tag-cell fixneg" title="0xE2 FIXNEG -3">-3</div>
+  <div class="tag-cell fixneg" title="0xE3 FIXNEG -4">-4</div>
+  <div class="tag-cell fixneg" title="0xE4">-5</div>
+  <div class="tag-cell fixneg" title="0xE5">-6</div>
+  <div class="tag-cell fixneg" title="0xE6">-7</div>
+  <div class="tag-cell fixneg" title="0xE7">-8</div>
+  <div class="tag-cell fixneg" title="0xE8">-9</div>
+  <div class="tag-cell fixneg" title="0xE9">-10</div>
+  <div class="tag-cell fixneg" title="0xEA">-11</div>
+  <div class="tag-cell fixneg" title="0xEB">-12</div>
+  <div class="tag-cell fixneg" title="0xEC">-13</div>
+  <div class="tag-cell fixneg" title="0xED">-14</div>
+  <div class="tag-cell fixneg" title="0xEE">-15</div>
+  <div class="tag-cell fixneg" title="0xEF FIXNEG -16">-16</div>
+  <!-- Row 0xF0: RESERVED -->
+  <div class="tag-cell reserved" title="0xF0 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF1 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF2 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF3 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF4 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF5 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF6 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF7 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF8 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xF9 RESERVED"></div>
+  <div class="tag-cell reserved" title="0xFA RESERVED"></div>
+  <div class="tag-cell reserved" title="0xFB RESERVED"></div>
+  <div class="tag-cell reserved" title="0xFC RESERVED"></div>
+  <div class="tag-cell reserved" title="0xFD RESERVED"></div>
+  <div class="tag-cell reserved" title="0xFE RESERVED"></div>
+  <div class="tag-cell reserved" title="0xFF RESERVED"></div>
+</div>
+
+<p style="font-size: 0.82rem; color: var(--text-dim); text-align: center; margin-top: -0.5rem;">
+  Hover over cells for tag details. The 16&times;16 grid maps the entire 0x00-0xFF tag space.
+</p>
+
+<h3>Encoding Rules</h3>
+
+<details>
+  <summary>Core type encoding</summary>
+  <div class="details-body">
+    <table>
+      <thead><tr><th>Tag</th><th>Type</th><th>Wire Encoding</th></tr></thead>
+      <tbody>
+        <tr><td><code>0x00</code></td><td>Null</td><td>Tag only (1 byte)</td></tr>
+        <tr><td><code>0x01</code></td><td>False</td><td>Tag only (1 byte)</td></tr>
+        <tr><td><code>0x02</code></td><td>True</td><td>Tag only (1 byte)</td></tr>
+        <tr><td><code>0x03</code></td><td>Int64</td><td>Tag + zigzag-encoded LEB128 varint</td></tr>
+        <tr><td><code>0x04</code></td><td>Float64</td><td>Tag + 8 bytes little-endian</td></tr>
+        <tr><td><code>0x05</code></td><td>String</td><td>Tag + uvarint length + UTF-8 bytes</td></tr>
+        <tr><td><code>0x06</code></td><td>Array</td><td>Tag + uvarint count + recursive values</td></tr>
+        <tr><td><code>0x07</code></td><td>Object</td><td>Tag + uvarint count + (uvarint dictIdx + value) pairs</td></tr>
+        <tr><td><code>0x08</code></td><td>Bytes</td><td>Tag + uvarint length + raw bytes</td></tr>
+        <tr><td><code>0x09</code></td><td>Uint64</td><td>Tag + uvarint</td></tr>
+        <tr><td><code>0x0A</code></td><td>Decimal128</td><td>Tag + scale(int8) + coef(16 bytes big-endian)</td></tr>
+        <tr><td><code>0x0B</code></td><td>Datetime64</td><td>Tag + int64 LE nanoseconds since Unix epoch</td></tr>
+        <tr><td><code>0x0C</code></td><td>UUID128</td><td>Tag + 16 bytes</td></tr>
+        <tr><td><code>0x0D</code></td><td>BigInt</td><td>Tag + uvarint length + two's complement bytes</td></tr>
+        <tr><td><code>0x0E</code></td><td>Extension</td><td>Tag + uvarint extType + uvarint length + payload</td></tr>
+        <tr><td><code>0x0F</code></td><td>Float32</td><td>Tag + 4 bytes little-endian</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<details>
+  <summary>Varint encoding (LEB128 / zigzag)</summary>
+  <div class="details-body">
+    <p><strong>Unsigned varints</strong> use Protocol Buffers-compatible LEB128: each byte uses 7 data bits with MSB as continuation flag.</p>
+    <pre><code><span class="code-dim">// Value 300 = 0b100101100</span>
+<span class="code-dim">// Byte 0: 1_0101100 = 0xAC (MSB=1: more bytes)</span>
+<span class="code-dim">// Byte 1: 0_0000010 = 0x02 (MSB=0: final byte)</span></code></pre>
+    <p><strong>Signed integers</strong> use zigzag encoding to keep small negatives compact:</p>
+    <pre><code><span class="code-accent">encode</span>(n) = (n &lt;&lt; 1) ^ (n &gt;&gt; 63)
+<span class="code-accent">decode</span>(z) = (z &gt;&gt; 1) ^ -(z &amp; 1)
+
+<span class="code-dim">// 0 -> 0, -1 -> 1, 1 -> 2, -2 -> 3, 2 -> 4, ...</span></code></pre>
+  </div>
+</details>
+
+<details>
+  <summary>v3 inline types &mdash; wire savings</summary>
+  <div class="details-body">
+    <p>The v3 wire format, introduced in commit <code>533a380</code>, packs small values directly into the tag byte:</p>
+    <table>
+      <thead><tr><th>Scenario</th><th>v2 (bytes)</th><th>v3 (bytes)</th><th>Savings</th></tr></thead>
+      <tbody>
+        <tr><td>Integer <code>42</code></td><td>2 (tag + varint)</td><td>1 (fixint)</td><td>50%</td></tr>
+        <tr><td>Integer <code>-1</code></td><td>2 (tag + varint)</td><td>1 (fixneg)</td><td>50%</td></tr>
+        <tr><td>Array <code>[1,2,3]</code></td><td>5 bytes</td><td>4 bytes</td><td>20%</td></tr>
+        <tr><td>Object <code>{"a":1}</code></td><td>4 bytes</td><td>3 bytes</td><td>25%</td></tr>
+      </tbody>
+    </table>
+    <p>Encoding rules from the spec are mandatory: integers 0-127 <strong>MUST</strong> use FIXINT. Integers -1 to -16 <strong>MUST</strong> use FIXNEG. Arrays with 0-15 elements <strong>MUST</strong> use FIXARRAY. Objects with 0-15 fields <strong>MUST</strong> use FIXMAP.</p>
+  </div>
+</details>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 3: GEN1 VS GEN2                                    -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch3">
+  <span class="chapter-num">Chapter 3</span>
+  Gen1 vs Gen2
+</h2>
+
+<p class="drop-cap">Cowrie ships two codec generations in every language implementation. Gen1 is the legacy format: no header, no dictionary, no ML extensions. Gen2 is the "current" format with the full type system. Both coexist in the same codebase, served from different import paths. Understanding why both exist requires looking at what each was designed for.</p>
+
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--accent);">Gen1 (Legacy)</h4>
+    <ul>
+      <li>No header &mdash; first byte is root tag</li>
+      <li>11 core type tags (0x00-0x0D)</li>
+      <li>No dictionary coding &mdash; keys inline</li>
+      <li>Proto-tensors: arrays auto-promote to typed arrays when homogeneous and &ge;4 elements</li>
+      <li>6 graph types (Node, Edge, AdjList, NodeBatch, EdgeBatch, GraphShard)</li>
+      <li>Float32 scalar + Float32Array</li>
+      <li>Lightweight JSON alternative</li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--cyan);">Gen2 (Current)</h4>
+    <ul>
+      <li>4-byte header ("SJ" + version + flags)</li>
+      <li>16 core tags + 5 ML + 8 graph + v3 inline</li>
+      <li>Dictionary-coded object keys</li>
+      <li>Full Tensor with 17 dtypes, rank metadata</li>
+      <li>Image (JPEG/PNG/WEBP/AVIF/BMP)</li>
+      <li>Audio (PCM/OPUS/AAC)</li>
+      <li>Bitmask, Delta, RichText</li>
+      <li>TagExt forward-compat envelope</li>
+      <li>Column hints, compression (gzip/zstd)</li>
+    </ul>
+  </div>
+</div>
+
+<h3>The v3 Tag Alignment</h3>
+
+<p>Before v3 (commit <code>533a380</code>), Gen1 and Gen2 had a painful divergence in their core tag assignments for tags 0x06-0x08:</p>
+
+<table>
+  <thead><tr><th>Tag</th><th>Gen1 (pre-v3)</th><th>Gen1 v3</th><th>Gen2 / v3</th></tr></thead>
+  <tbody>
+    <tr><td><code>0x06</code></td><td style="color: var(--pink);">Bytes</td><td style="color: var(--green);">Array</td><td>Array</td></tr>
+    <tr><td><code>0x07</code></td><td style="color: var(--pink);">Array</td><td style="color: var(--green);">Object</td><td>Object (dict-coded)</td></tr>
+    <tr><td><code>0x08</code></td><td style="color: var(--pink);">Object</td><td style="color: var(--green);">Bytes</td><td>Bytes</td></tr>
+  </tbody>
+</table>
+
+<p>The v3 commit swapped Gen1's assignments to match Gen2. This was a breaking change for legacy Gen1 data, but it eliminated a class of bugs where a Gen1 Array could be misinterpreted as a Gen2 Object. The graph type tags were also realigned from the 0x10-0x15 range to 0x30+0x35-0x39, matching Gen2's graph region.</p>
+
+<div class="insight insight-pink">
+  <div class="insight-label">Proto-Tensors</div>
+  <p>Gen1's most distinctive feature is "proto-tensors": when encoding a homogeneous numeric array with 4 or more elements, Gen1 automatically promotes it to a typed array (<code>tagArrayInt64</code>, <code>tagArrayFloat64</code>, <code>tagArrayFloat32</code>). The threshold of 4 is hardcoded as <code>NumericArrayMin</code> in <code>gen1.go</code>. This gives ML-like efficiency without the full tensor type system &mdash; a pragmatic middle ground.</p>
+</div>
+
+<h3>Format Detection</h3>
+
+<p>Because Gen1 has no header, format detection is needed. The v3 update made this a 3-byte check:</p>
+
+<pre><code><span class="code-dim">// Detection algorithm (from SPEC.md):</span>
+<span class="code-dim">// 1. Check first three bytes: bytes[0:2] == "SJ" && bytes[2] == 0x02</span>
+<span class="code-dim">// 2. If all three match -> Gen2/v3 format</span>
+<span class="code-dim">// 3. If absent -> Gen1 format (first byte is root value tag)</span></code></pre>
+
+<p>Before v3, two bytes were sufficient because Gen1 had no tag producing <code>0x53</code> in the first position. But FIXINT changed that: <code>0x53</code> is now "integer 19" in v3 Gen1. The third byte breaks the tie &mdash; version <code>0x02</code> sits outside Gen1's root tag range (<code>0x00-0x0D</code>), making detection unambiguous regardless of the payload content.</p>
+
+<h3>What Gen1 Taught Gen2</h3>
+
+<p>Gen1's simplicity was its strength: no header overhead, no dictionary, just tag-value pairs. But three limitations drove Gen2's design:</p>
+
+<table>
+  <thead><tr><th>Gen1 Limitation</th><th>Gen2 Solution</th></tr></thead>
+  <tbody>
+    <tr><td>No metadata &mdash; can't version the format</td><td>4-byte header with magic, version, flags</td></tr>
+    <tr><td>Key strings repeated per object</td><td>Dictionary coding &mdash; keys stored once</td></tr>
+    <tr><td>Proto-tensors lack dtype/shape metadata</td><td>Full Tensor type with 17 dtypes, rank, dims</td></tr>
+    <tr><td>No forward compatibility mechanism</td><td>TagExt envelope for unknown extensions</td></tr>
+    <tr><td>No compression support</td><td>Header flag + gzip/zstd framing</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 4: THE TYPE ZOO                                    -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch4">
+  <span class="chapter-num">Chapter 4</span>
+  The Type Zoo
+</h2>
+
+<p class="drop-cap">Beyond the JSON primitives, Cowrie Gen2 defines a collection of specialized types that reveal its intended purpose: ML inference pipelines, graph neural networks, and multimodal AI applications. Each type tells a story about a problem that JSON couldn't solve.</p>
+
+<h3>Tensor</h3>
+
+<p>The Tensor type (<code>0x20</code>) is the heart of Cowrie's ML extensions. Its wire format packs dtype, shape, and raw data into a single tagged value:</p>
+
+<div class="wire-diagram">
+  <div class="wire-byte cyan">
+    <span class="wire-label">Tag</span>
+    <span class="wire-val">0x20</span>
+  </div>
+  <div class="wire-byte accent">
+    <span class="wire-label">DType</span>
+    <span class="wire-val">u8</span>
+  </div>
+  <div class="wire-byte accent">
+    <span class="wire-label">Rank</span>
+    <span class="wire-val">u8</span>
+  </div>
+  <div class="wire-byte pink">
+    <span class="wire-label">Dims</span>
+    <span class="wire-val">uvar*</span>
+  </div>
+  <div class="wire-byte green">
+    <span class="wire-label">DataLen</span>
+    <span class="wire-val">uvar</span>
+  </div>
+  <div class="wire-byte green wire-grow">
+    <span class="wire-label">Data</span>
+    <span class="wire-val">raw bytes (row-major)</span>
+  </div>
+</div>
+
+<p>The dtype byte supports 17 data types, from standard IEEE floats to quantized formats for model compression:</p>
+
+<details>
+  <summary>All 17 tensor data types</summary>
+  <div class="details-body">
+    <table>
+      <thead><tr><th>Code</th><th>DType</th><th>Size</th><th>Use Case</th></tr></thead>
+      <tbody>
+        <tr><td><code>0x01</code></td><td>Float32</td><td>4 B</td><td>Standard ML inference</td></tr>
+        <tr><td><code>0x02</code></td><td>Float16</td><td>2 B</td><td>Mobile inference, GPU half-precision</td></tr>
+        <tr><td><code>0x03</code></td><td>BFloat16</td><td>2 B</td><td>TPU training, wider exponent range</td></tr>
+        <tr><td><code>0x0C</code></td><td>Float64</td><td>8 B</td><td>High-precision scientific compute</td></tr>
+        <tr><td><code>0x04</code></td><td>Int8</td><td>1 B</td><td>Quantized models, INT8 inference</td></tr>
+        <tr><td><code>0x05</code></td><td>Int16</td><td>2 B</td><td>Audio samples, signal processing</td></tr>
+        <tr><td><code>0x06</code></td><td>Int32</td><td>4 B</td><td>Token IDs, indices</td></tr>
+        <tr><td><code>0x07</code></td><td>Int64</td><td>8 B</td><td>Large index spaces</td></tr>
+        <tr><td><code>0x08</code></td><td>Uint8</td><td>1 B</td><td>Image pixels, masks</td></tr>
+        <tr><td><code>0x09</code></td><td>Uint16</td><td>2 B</td><td>Depth maps, sensor data</td></tr>
+        <tr><td><code>0x0A</code></td><td>Uint32</td><td>4 B</td><td>Feature hashes</td></tr>
+        <tr><td><code>0x0B</code></td><td>Uint64</td><td>8 B</td><td>Large counters, hashes</td></tr>
+        <tr><td><code>0x0D</code></td><td>Bool</td><td>1 B</td><td>Boolean tensors</td></tr>
+        <tr><td><code>0x10</code></td><td>QINT4</td><td>0.5 B</td><td>4-bit quantized (GPTQ, AWQ)</td></tr>
+        <tr><td><code>0x11</code></td><td>QINT2</td><td>0.25 B</td><td>2-bit extreme quantization</td></tr>
+        <tr><td><code>0x12</code></td><td>QINT3</td><td>0.375 B</td><td>3-bit quantization</td></tr>
+        <tr><td><code>0x13</code></td><td>Ternary</td><td>~2 bits</td><td>Ternary networks (-1, 0, 1)</td></tr>
+        <tr><td><code>0x14</code></td><td>Binary</td><td>1 bit</td><td>Binary neural networks (0, 1)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<h4>Tensor Wire Example</h4>
+
+<p>A 2x3 float32 tensor containing <code>[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]</code> encodes as:</p>
+
+<pre><code><span class="code-cyan">20</span>              <span class="code-dim">tag: TENSOR</span>
+<span class="code-accent">01</span>              <span class="code-dim">dtype: float32 (0x01)</span>
+<span class="code-accent">02</span>              <span class="code-dim">rank: 2</span>
+<span class="code-pink">02 03</span>           <span class="code-dim">dims: [2, 3] as uvarints</span>
+<span class="code-green">18</span>              <span class="code-dim">data_len: 24 (6 floats * 4 bytes)</span>
+<span class="code-green">00 00 80 3F</span>     <span class="code-dim">1.0f LE</span>
+<span class="code-green">00 00 00 40</span>     <span class="code-dim">2.0f LE</span>
+<span class="code-green">00 00 40 40</span>     <span class="code-dim">3.0f LE</span>
+<span class="code-green">00 00 80 40</span>     <span class="code-dim">4.0f LE</span>
+<span class="code-green">00 00 A0 40</span>     <span class="code-dim">5.0f LE</span>
+<span class="code-green">00 00 C0 40</span>     <span class="code-dim">6.0f LE</span></code></pre>
+
+<p>Total: 30 bytes. The same data in JSON (<code>[[1,2,3],[4,5,6]]</code>) is 15 bytes, but loses type information. As a JSON array of floats (<code>[[1.0,2.0,3.0],[4.0,5.0,6.0]]</code>) it's 27 bytes &mdash; comparable in size but lacking dtype, shape metadata, and zero-copy access.</p>
+
+<p>Maximum rank is capped at 32 dimensions (enforced as <code>DefaultMaxRank</code>), and the rank byte is a <code>u8</code> in the wire format, so the absolute ceiling is 255. The Go implementation provides zero-copy views &mdash; <code>ViewFloat32()</code>, <code>ViewFloat64()</code>, <code>ViewInt32()</code>, <code>ViewInt64()</code> &mdash; that return typed slices backed by the original tensor data without copying, using <code>unsafe.Slice</code>:</p>
+
+<pre><code><span class="code-dim">// From types.go — zero-copy tensor view</span>
+<span class="code-accent">func</span> (td *TensorData) <span class="code-cyan">ViewFloat32</span>() ([]<span class="code-green">float32</span>, <span class="code-green">bool</span>) {
+    <span class="code-pink">if</span> td == <span class="code-purple">nil</span> || td.DType != DTypeFloat32 { <span class="code-pink">return</span> <span class="code-purple">nil</span>, <span class="code-purple">false</span> }
+    <span class="code-pink">if</span> len(td.Data) == 0 { <span class="code-pink">return</span> <span class="code-purple">nil</span>, <span class="code-purple">true</span> }
+    <span class="code-pink">if</span> len(td.Data)%4 != 0 { <span class="code-pink">return</span> <span class="code-purple">nil</span>, <span class="code-purple">false</span> }
+    ptr := unsafe.Pointer(&amp;td.Data[0])
+    <span class="code-pink">if</span> uintptr(ptr)%4 != 0 { <span class="code-pink">return</span> <span class="code-purple">nil</span>, <span class="code-purple">false</span> }
+    count := len(td.Data) / 4
+    <span class="code-pink">return</span> unsafe.Slice((*float32)(ptr), count), <span class="code-purple">true</span>
+}</code></pre>
+
+<h3>Image &amp; Audio</h3>
+
+<p>The Image type (<code>0x22</code>) and Audio type (<code>0x23</code>) carry multimodal data natively, eliminating the base64 encoding tax that JSON imposes:</p>
+
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--cyan);">Image (0x22)</h4>
+    <ul>
+      <li>Format: JPEG, PNG, WEBP, AVIF, BMP</li>
+      <li>Width/Height: u16 LE (metadata)</li>
+      <li>Data: raw encoded bytes</li>
+      <li>Wire: format(1B) + w(2B) + h(2B) + len(uvar) + data</li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--pink);">Audio (0x23)</h4>
+    <ul>
+      <li>Encoding: PCM_INT16, PCM_FLOAT32, OPUS, AAC</li>
+      <li>SampleRate: u32 LE (Hz)</li>
+      <li>Channels: u8</li>
+      <li>Wire: enc(1B) + rate(4B) + ch(1B) + len(uvar) + data</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Bitmask</h3>
+
+<p>Added in the v3 commit, the Bitmask type (<code>0x24</code>) packs boolean arrays into bits using LSB-first ordering within each byte. A 2048-element attention mask shrinks from ~4KB as an integer array to just 259 bytes:</p>
+
+<pre><code><span class="code-dim">// From types.go</span>
+<span class="code-accent">type</span> BitmaskData <span class="code-accent">struct</span> {
+    Count <span class="code-green">uint64</span>   <span class="code-dim">// Number of boolean values</span>
+    Bits  []<span class="code-green">byte</span>   <span class="code-dim">// Packed bits, ceil(Count/8) bytes</span>
+}
+
+<span class="code-dim">// Bit i is at: bytes[i/8] & (1 << (i%8))</span></code></pre>
+
+<div class="insight insight-cyan">
+  <div class="insight-label">Compression Ratio</div>
+  <p>Bitmask achieves a <strong>7.8x</strong> size reduction over bool arrays. For a 2048-element mask: <code>ceil(2048/8) = 256</code> bytes of data + 3 bytes overhead (tag + uvarint count) = <strong>259 bytes</strong> vs. <code>2048 * 2 = 4096</code> bytes for FIXINT-encoded booleans.</p>
+</div>
+
+<h3>Adjacency List</h3>
+
+<p>The AdjList type (<code>0x30</code>) encodes graph topology in Compressed Sparse Row (CSR) format &mdash; the standard in-memory representation for GNN frameworks:</p>
+
+<pre><code><span class="code-accent">type</span> AdjlistData <span class="code-accent">struct</span> {
+    IDWidth    IDWidth   <span class="code-dim">// 1=int32, 2=int64</span>
+    NodeCount  <span class="code-green">uint64</span>
+    EdgeCount  <span class="code-green">uint64</span>
+    RowOffsets []<span class="code-green">uint64</span>  <span class="code-dim">// [NodeCount + 1] offsets</span>
+    ColIndices []<span class="code-green">byte</span>    <span class="code-dim">// Edge destinations (int32/int64 LE)</span>
+}</code></pre>
+
+<p>Node <em>i</em>'s neighbors are at <code>ColIndices[RowOffsets[i]..RowOffsets[i+1]]</code>. This is the exact layout that PyTorch Geometric, DGL, and CuGraph expect, making deserialization a pointer swap rather than a graph reconstruction.</p>
+
+<h4>CSR Layout Diagram</h4>
+
+<p>For a 4-node graph with edges 0&rarr;1, 0&rarr;2, 1&rarr;2, 2&rarr;3, 3&rarr;0:</p>
+
+<pre><code><span class="code-accent">RowOffsets</span>: [<span class="code-cyan">0</span>, <span class="code-cyan">2</span>, <span class="code-cyan">3</span>, <span class="code-cyan">4</span>, <span class="code-cyan">5</span>]   <span class="code-dim">(NodeCount + 1 = 5 entries)</span>
+<span class="code-accent">ColIndices</span>: [<span class="code-green">1</span>, <span class="code-green">2</span>, <span class="code-green">2</span>, <span class="code-green">3</span>, <span class="code-green">0</span>]   <span class="code-dim">(EdgeCount = 5 entries)</span>
+
+<span class="code-dim">Node 0: ColIndices[0..2] = [1, 2]  → edges to 1 and 2</span>
+<span class="code-dim">Node 1: ColIndices[2..3] = [2]     → edge to 2</span>
+<span class="code-dim">Node 2: ColIndices[3..4] = [3]     → edge to 3</span>
+<span class="code-dim">Node 3: ColIndices[4..5] = [0]     → edge to 0</span></code></pre>
+
+<p>The IDWidth field controls whether ColIndices entries are 4 bytes (int32) or 8 bytes (int64). For graphs under 2 billion nodes, int32 halves the memory footprint of the edge list.</p>
+
+<div class="insight insight-pink">
+  <div class="insight-label">Bug Fix: C AdjList Decode</div>
+  <p>During invariant testing (March 9), a bug was found in the C adjacency list decoder: the <code>ro_alloc</code> buffer was allocated based on node count but the bounds check used <code>ro_count</code>, a different variable. This could cause an out-of-bounds read when the row offsets array was shorter than expected. The fix was a one-line guard: check <code>ro_count</code> against the actual allocation size before accessing the array.</p>
+</div>
+
+<h3>Delta</h3>
+
+<p>The Delta type (<code>0x32</code>) represents semantic patches with three operations: <code>SetField</code>, <code>DeleteField</code>, and <code>AppendArray</code>. Field IDs are dictionary-coded, matching the parent object's encoding:</p>
+
+<pre><code><span class="code-accent">type</span> DeltaOp <span class="code-accent">struct</span> {
+    OpCode  DeltaOpCode  <span class="code-dim">// 0x01=Set, 0x02=Delete, 0x03=Append</span>
+    FieldID <span class="code-green">uint64</span>       <span class="code-dim">// Dictionary-coded field ID</span>
+    Value   *Value       <span class="code-dim">// For SetField and AppendArray</span>
+}</code></pre>
+
+<h3>RichText</h3>
+
+<p>RichText (<code>0x31</code>) combines UTF-8 text with optional token IDs and annotated spans &mdash; the output format of tokenizers and NER pipelines, encoded in a single wire value instead of three separate fields:</p>
+
+<pre><code><span class="code-accent">type</span> RichTextData <span class="code-accent">struct</span> {
+    Text   <span class="code-green">string</span>          <span class="code-dim">// UTF-8 text</span>
+    Tokens []<span class="code-green">int32</span>          <span class="code-dim">// Token IDs (optional)</span>
+    Spans  []RichTextSpan   <span class="code-dim">// Annotated spans (optional)</span>
+}
+
+<span class="code-accent">type</span> RichTextSpan <span class="code-accent">struct</span> {
+    Start  <span class="code-green">uint64</span>  <span class="code-dim">// Byte offset start</span>
+    End    <span class="code-green">uint64</span>  <span class="code-dim">// Byte offset end</span>
+    KindID <span class="code-green">uint64</span>  <span class="code-dim">// Application-defined kind</span>
+}</code></pre>
+
+<p>The wire encoding uses a flags byte after the text to indicate which optional fields are present. This avoids wasting bytes on the common case where you just want text without annotations.</p>
+
+<h3>Graph Types</h3>
+
+<p>The graph extension region (0x35-0x39) provides a complete vocabulary for serializing graph data &mdash; from individual nodes to entire graph shards. These are the types that the <code>go/gnn/</code> and <code>go/graph/</code> packages were built to consume:</p>
+
+<table>
+  <thead><tr><th>Tag</th><th>Type</th><th>Wire Format</th></tr></thead>
+  <tbody>
+    <tr><td><code>0x35</code></td><td>Node</td><td>id:string + labelCount:uvar + labels:string* + propCount:uvar + (dictIdx:uvar + value)*</td></tr>
+    <tr><td><code>0x36</code></td><td>Edge</td><td>src:string + dst:string + type:string + propCount:uvar + (dictIdx:uvar + value)*</td></tr>
+    <tr><td><code>0x37</code></td><td>NodeBatch</td><td>count:uvar + Node[count]</td></tr>
+    <tr><td><code>0x38</code></td><td>EdgeBatch</td><td>count:uvar + Edge[count]</td></tr>
+    <tr><td><code>0x39</code></td><td>GraphShard</td><td>nodeCount:uvar + nodes + edgeCount:uvar + edges + metaCount:uvar + metadata</td></tr>
+  </tbody>
+</table>
+
+<p>The <code>GraphShard</code> is the heaviest type &mdash; a self-contained subgraph with nodes, edges, and arbitrary metadata. It serves as the unit of serialization for distributed graph processing: partition a large graph into shards, serialize each independently, process in parallel.</p>
+
+<div class="insight">
+  <div class="insight-label">Design Pattern</div>
+  <p>Notice that Node and Edge properties use dictionary-coded keys (<code>dictIdx:uvar</code>), sharing the same dictionary as the containing message. This means a GraphShard containing 10,000 nodes with a <code>"feature_vector"</code> property on each stores the string <code>"feature_vector"</code> exactly once, regardless of node count.</p>
+</div>
+
+<h3>The JSON Bridge</h3>
+
+<p>Every Cowrie value can be projected to JSON and back. The Go implementation provides two modes: <code>FromJSON</code> (strict, strings stay strings) and <code>FromJSONEnriched</code> (auto-detects dates, UUIDs, and base64 in string values). The enriched mode uses regex patterns to identify candidates:</p>
+
+<pre><code><span class="code-dim">// From json.go</span>
+<span class="code-accent">var</span> (
+    iso8601Pattern = regexp.MustCompile(
+        `<span class="code-green">^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}</span>`)
+    uuidPattern = regexp.MustCompile(
+        `<span class="code-green">^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-...</span>`)
+)
+
+<span class="code-dim">// JavaScript safe integer range — int64 values outside</span>
+<span class="code-dim">// this range are encoded as strings in JSON projection</span>
+<span class="code-accent">const</span> (
+    maxSafeInt =  <span class="code-cyan">9007199254740991</span>  <span class="code-dim">// 2^53 - 1</span>
+    minSafeInt = <span class="code-cyan">-9007199254740991</span>  <span class="code-dim">// -(2^53 - 1)</span>
+)</code></pre>
+
+<p>The <code>ToAny</code> function converts Cowrie values to JSON-safe Go types: bytes become base64 strings, datetimes become RFC 3339 strings, UUIDs become their canonical string form. The reverse path, <code>FromAny</code>, accepts native Go types and auto-tensorizes numeric slices when the <code>TensorizeSlices</code> option is set &mdash; a bridge between Gen1's auto-promotion and Gen2's explicit tensor type.</p>
+
+<h3>The Value Tree</h3>
+
+<p>At the center of all five implementations sits the <code>Value</code> type &mdash; a discriminated union holding exactly one of the 26+ type variants. In Go, this is a struct with a <code>typ</code> discriminant and a field per variant. Two API styles coexist: panicking accessors (<code>.Int64()</code>, <code>.String()</code>) for code that has already type-checked, and safe accessors (<code>.TryInt64()</code>, <code>.TryString()</code>) that return <code>(T, bool)</code>:</p>
+
+<pre><code><span class="code-dim">// Panicking — use when type is known</span>
+name := v.Get(<span class="code-green">"name"</span>).String()
+
+<span class="code-dim">// Safe — use for optional/polymorphic fields</span>
+<span class="code-pink">if</span> score, ok := v.Get(<span class="code-green">"score"</span>).TryFloat64(); ok {
+    <span class="code-dim">// ...</span>
+}</code></pre>
+
+<p>Constructor functions (<code>cowrie.Int64(42)</code>, <code>cowrie.String("hello")</code>, <code>cowrie.Array(...)</code>) create values. The <code>Bytes()</code> constructor defensively copies input to prevent aliasing &mdash; a detail that matters when the source slice might be reused.</p>
+
+<h3>The Encoder Architecture</h3>
+
+<p>The Go encoder follows a two-pass approach: first collect dictionary keys, then encode. The dictionary collection walks the entire value tree, gathering every object field name into a sorted, deduplicated list. This is the only way to produce the dictionary before the root value &mdash; you have to know all the keys before you can write any of them.</p>
+
+<pre><code><span class="code-accent">func</span> encode(buf *buffer, v *Value) <span class="code-green">error</span> {
+    <span class="code-dim">// Pass 1: collect all object keys</span>
+    d := newDict()
+    collectKeys(v, d)
+
+    <span class="code-dim">// Write header</span>
+    buf.writeByte(Magic0)  <span class="code-dim">// 'S'</span>
+    buf.writeByte(Magic1)  <span class="code-dim">// 'J'</span>
+    buf.writeByte(Version) <span class="code-dim">// 0x02</span>
+    buf.writeByte(0)       <span class="code-dim">// flags</span>
+
+    <span class="code-dim">// Write dictionary</span>
+    buf.writeUvarint(uint64(len(d.keys)))
+    <span class="code-pink">for</span> _, key := <span class="code-pink">range</span> d.keys {
+        buf.writeString(key)
+    }
+
+    <span class="code-dim">// Pass 2: encode root value</span>
+    <span class="code-pink">return</span> encodeValue(buf, v, d)
+}</code></pre>
+
+<p>The buffer type is deliberately simple &mdash; just a <code>[]byte</code> with append methods. No interfaces, no virtual dispatch. The <code>writeUvarint</code> method uses a fixed 10-byte stack buffer to avoid heap allocation for the temporary encoding. Every method on <code>buffer</code> is designed to be inlined by the Go compiler.</p>
+
+<div class="insight">
+  <div class="insight-label">Pool Discipline</div>
+  <p>The <code>Encode()</code> function gets a buffer from the pool, encodes into it, copies the result to a fresh allocation, and returns the buffer to the pool. The copy is mandatory &mdash; returning a pooled buffer would let the caller hold a reference that gets overwritten by the next encode. The <code>EncodeAppend()</code> variant skips the pool entirely, writing directly into a caller-managed buffer. This is the hot path for streaming protocols where the caller batches multiple encodes into a single allocation.</p>
+</div>
+
+<h3>The Decimal128 Representation</h3>
+
+<p>One of Cowrie's more unusual types is Decimal128 (<code>0x0A</code>), a 17-byte wire encoding for arbitrary-precision decimals. Unlike IEEE 754 Decimal128, Cowrie uses a simpler representation:</p>
+
+<pre><code><span class="code-accent">type</span> Decimal128 <span class="code-accent">struct</span> {
+    Scale <span class="code-green">int8</span>      <span class="code-dim">// -127 to +127</span>
+    Coef  [16]<span class="code-green">byte</span>  <span class="code-dim">// Two's complement big-endian</span>
+}
+<span class="code-dim">// Value = Coef * 10^(-Scale)</span></code></pre>
+
+<p>This representation can exactly represent any decimal up to 38 significant digits, covering the full range of financial calculations, database DECIMAL columns, and scientific measurements. The wire cost is 18 bytes (tag + scale + 16-byte coefficient) &mdash; compared to JSON's variable-length string representation that can't distinguish <code>0.1</code> from <code>0.10</code>.</p>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 5: CROSS-LANGUAGE SURFACE                          -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch5">
+  <span class="chapter-num">Chapter 5</span>
+  Cross-Language Surface
+</h2>
+
+<p class="drop-cap">Five languages, one wire format. Every Cowrie implementation must produce byte-identical output for the same input. But not every language has the same capabilities. Go is the reference implementation, and it has grown exclusive features that the other four do not (yet) provide.</p>
+
+<h3>Go-Only Features</h3>
+
+<table>
+  <thead><tr><th>Feature</th><th>Mechanism</th><th>Performance Impact</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>UnsafeStrings</strong></td>
+      <td>Zero-copy string decode via <code>unsafe.String</code>; decoded strings point directly into the input buffer</td>
+      <td>16% faster decode, 40% fewer allocs</td>
+    </tr>
+    <tr>
+      <td><strong>TensorSink</strong></td>
+      <td>Streaming decode callback: tensor bodies are piped through an <code>io.Reader</code> instead of allocated as <code>[]byte</code></td>
+      <td>4.4x faster, 207x less memory (1MB tensors)</td>
+    </tr>
+    <tr>
+      <td><strong>EncodeToWriter</strong></td>
+      <td>Scatter-gather I/O via <code>net.Buffers</code>; tensor data segments are written directly without intermediate copy</td>
+      <td>1.9x faster, 50% less memory</td>
+    </tr>
+    <tr>
+      <td><strong>SchemaFingerprint</strong></td>
+      <td>FNV-1a structural hash of a value's type shape; captures field names and types but not data</td>
+      <td>Schema-based routing and drift detection</td>
+    </tr>
+    <tr>
+      <td><strong>FromAnyEnriched</strong></td>
+      <td>Auto-detection of dates (RFC3339), UUIDs, and base64 in <code>any</code> values during encoding</td>
+      <td>Convenience API for Go callers</td>
+    </tr>
+  </tbody>
+</table>
+
+<details>
+  <summary>TensorSink interface</summary>
+  <div class="details-body">
+    <pre><code><span class="code-dim">// From decode.go</span>
+<span class="code-accent">type</span> TensorSink <span class="code-accent">interface</span> {
+    AcceptTensor(dtype DType, dims []<span class="code-green">uint64</span>, data <span class="code-cyan">io.Reader</span>) <span class="code-green">error</span>
+}
+
+<span class="code-dim">// Usage in DecodeOptions:</span>
+opts := DecodeOptions{
+    TensorSink: myGPUUploader,  <span class="code-dim">// stream tensor directly to GPU</span>
+}</code></pre>
+    <p>When <code>TensorSink</code> is set, the decoder does not allocate a <code>[]byte</code> for the tensor body. Instead, it wraps a <code>bytes.Reader</code> over the input slice and passes it to <code>AcceptTensor</code>. The sink must consume all bytes. This is the key to the 207x memory reduction: a 1MB tensor decode allocates only the metadata, not the payload.</p>
+  </div>
+</details>
+
+<details>
+  <summary>EncodeToWriter &mdash; scatter-gather I/O</summary>
+  <div class="details-body">
+    <pre><code><span class="code-dim">// From encode_writer.go</span>
+<span class="code-accent">func</span> <span class="code-cyan">EncodeToWriter</span>(w io.Writer, v *Value) <span class="code-green">error</span> {
+    <span class="code-dim">// Build dictionary</span>
+    d := newDict()
+    collectKeys(v, d)
+
+    <span class="code-dim">// Header + dictionary → first segment</span>
+    hdr := bufferPool.Get().(*buffer)
+    <span class="code-dim">// ... write magic, version, flags, dict ...</span>
+
+    <span class="code-dim">// Collect write segments, tensor data as separate buffers</span>
+    segments := make(<span class="code-cyan">net.Buffers</span>, 0, 8)
+    segments = append(segments, hdr.bytes())
+    collectSegments(&amp;segments, v, d)
+
+    <span class="code-dim">// Vectored write — kernel merges segments</span>
+    _, err := segments.<span class="code-cyan">WriteTo</span>(w)
+    <span class="code-pink">return</span> err
+}</code></pre>
+    <p>For values containing tensors, the metadata and tensor data become separate <code>net.Buffers</code> segments. On Linux, this maps to <code>writev(2)</code> &mdash; a single syscall that writes multiple non-contiguous buffers. The tensor payload is never copied into an intermediate buffer.</p>
+  </div>
+</details>
+
+<h3>Five-Language API Comparison</h3>
+
+<table>
+  <thead><tr><th>Capability</th><th>Go</th><th>Python</th><th>Rust</th><th>C</th><th>TypeScript</th></tr></thead>
+  <tbody>
+    <tr><td>Gen1 encode/decode</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Gen2 encode/decode</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>v3 inline types</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Bitmask</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Compression (gzip)</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Compression (zstd)</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>Column hints</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>JSON bridge</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>UnsafeStrings</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>TensorSink</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>EncodeToWriter</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>SchemaFingerprint</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>Configurable limits</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+  </tbody>
+</table>
+
+<div class="insight">
+  <div class="insight-label">Implementation Scale</div>
+  <p>By lines of code (Gen2 only): C leads at <strong>3,773</strong> lines, followed by TypeScript at <strong>3,044</strong>, Python at <strong>2,727</strong>, Rust at <strong>2,984</strong> (across 7 modules), and Go which spans dozens of files totaling well over <strong>4,000</strong> lines including tests. The total across all five languages exceeds <strong>14,000</strong> lines of implementation code.</p>
+</div>
+
+<h3>Language-Specific Notes</h3>
+
+<details>
+  <summary>Go &mdash; the reference implementation</summary>
+  <div class="details-body">
+    <p>Go serves as the reference implementation and the testing ground for new features. Every new type tag, encoding rule, or security fix lands in Go first, then propagates to the other four languages. The Go implementation is distinguished by:</p>
+    <ul style="margin: 0.5rem 0; padding-left: 1.5rem; color: var(--text-dim);">
+      <li><code>sync.Pool</code> buffer recycling with 1 MB cap</li>
+      <li><code>unsafe.Slice</code> zero-copy tensor views</li>
+      <li><code>net.Buffers</code> scatter-gather encoding</li>
+      <li>Full reflection-based <code>Marshal</code>/<code>Unmarshal</code> in the <code>codec</code> package</li>
+      <li>Fuzz testing via Go's native <code>testing.F</code></li>
+      <li>Benchmark suite with JSON baselines</li>
+    </ul>
+    <p>Module path: <code>github.com/Neumenon/cowrie/go</code></p>
+  </div>
+</details>
+
+<details>
+  <summary>Python &mdash; 2,727 lines of Gen2</summary>
+  <div class="details-body">
+    <p>The Python implementation lives in <code>python/cowrie/gen2.py</code> &mdash; a single 2,727-line file handling both encode and decode. Python's dynamic typing makes the Value type a natural fit: values are represented as native Python objects (dicts, lists, ints, floats) with type wrappers for extended types (Tensor, Image, etc.). The Gen1 implementation is a separate 456-line file.</p>
+    <p>Property-based fuzzing uses <code>hypothesis</code>, generating random Cowrie values and verifying roundtrip integrity.</p>
+  </div>
+</details>
+
+<details>
+  <summary>Rust &mdash; modular architecture</summary>
+  <div class="details-body">
+    <p>The Rust implementation splits Gen2 across 7 modules: <code>types.rs</code> (806 lines), <code>decode.rs</code> (1,234 lines), <code>encode.rs</code> (527 lines), <code>json.rs</code> (430 lines), <code>compress.rs</code> (252 lines), <code>schema.rs</code> (326 lines), and <code>master_stream.rs</code> (383 lines). Rust is the only non-Go language with a <code>SchemaFingerprint</code> implementation.</p>
+    <p>Mutation testing and <code>cargo-fuzz</code> integration were added in the robustness framework.</p>
+  </div>
+</details>
+
+<details>
+  <summary>C &mdash; the largest implementation</summary>
+  <div class="details-body">
+    <p>At 3,773 lines, <code>c/src/gen2.c</code> is the largest single file in the project. C requires manual memory management, explicit bounds checking, and careful overflow arithmetic &mdash; all of which add line count. The C decoder was the target of specific security fixes: commit <code>aa8930c</code> addressed malloc overflow (multiplying count by element size without checking for overflow), and the adjacency list decoder had a <code>ro_alloc</code>/<code>ro_count</code> guard bug fixed during invariant testing.</p>
+    <p>Headers: <code>cowrie_gen1.h</code>, <code>cowrie_gen2.h</code>, <code>cowrie_json.h</code></p>
+  </div>
+</details>
+
+<details>
+  <summary>TypeScript &mdash; V8 precision concerns</summary>
+  <div class="details-body">
+    <p>The TypeScript implementation (<code>typescript/src/gen2/index.ts</code>, 3,044 lines) faces a unique challenge: JavaScript's <code>Number</code> type is IEEE 754 double-precision, which means uint64 values above <code>2^53 - 1</code> lose precision. Commit <code>aa8930c</code> specifically addressed "TS varint precision loss" &mdash; large varint values were being silently truncated.</p>
+    <p>The test runner uses Node's built-in test runner (<code>node --import tsx --test</code>), not Jest. Coverage is measured via <code>c8</code> (V8 native coverage).</p>
+  </div>
+</details>
+
+<h3>The MasterStream Protocol</h3>
+
+<p>The <code>go/codec/cowrie_master_stream.go</code> file implements a framed streaming protocol for sending multiple Cowrie values over a single connection. Each frame is a self-contained Cowrie message with a length prefix and CRC-32 checksum. This is the protocol used by Agent-GO's real-time inference pipeline, where model outputs (tensors, embeddings, graph updates) are streamed as a sequence of Cowrie frames.</p>
+
+<p>The stream protocol is Go-only &mdash; the other four languages implement encode/decode for individual messages but not the framing layer. This is a deliberate design choice: the framing layer is an application concern (different applications want different framing), while the message format is universal.</p>
+
+<h3>The Reflection Codec</h3>
+
+<p>On top of the low-level <code>Encode</code>/<code>Decode</code> API, the <code>go/codec/</code> package provides a reflection-based <code>Marshal</code>/<code>Unmarshal</code> system that maps Go structs to Cowrie values automatically. The <code>reflect_cache.go</code> file caches type metadata to avoid repeated reflection, and the <code>registry.go</code> file maintains a type registry for polymorphic decode. This is the API that most Go callers use in practice &mdash; the low-level Value tree is for library authors and cross-language interop.</p>
+
+<h3>Cross-Language Fixtures</h3>
+
+<p>The <code>testdata/fixtures/</code> directory contains binary fixtures generated by the Go implementation. Every other language must decode these fixtures and produce identical values. Every language must also encode the same logical values and produce byte-identical output. This is the contract that makes "five languages, one wire format" real:</p>
+
+<pre><code><span class="code-dim">testdata/fixtures/</span>
+  <span class="code-accent">basic_types.cowrie</span>       <span class="code-dim"># null, bool, int, float, string</span>
+  <span class="code-accent">nested_objects.cowrie</span>    <span class="code-dim"># dictionary-coded keys, nesting</span>
+  <span class="code-accent">tensors.cowrie</span>           <span class="code-dim"># float32/64, int8/16/32/64 tensors</span>
+  <span class="code-accent">graph_types.cowrie</span>       <span class="code-dim"># node, edge, adjlist, shard</span>
+  <span class="code-accent">edge_cases.cowrie</span>        <span class="code-dim"># empty arrays, max values, unicode</span>
+  <span class="code-accent">v3_inline.cowrie</span>         <span class="code-dim"># FIXINT, FIXNEG, FIXARRAY, FIXMAP</span>
+  <span class="code-accent">error_*.cowrie</span>           <span class="code-dim"># malformed inputs → expected errors</span></code></pre>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 6: THE 17-DAY SPRINT                               -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch6">
+  <span class="chapter-num">Chapter 6</span>
+  The 17-Day Sprint
+</h2>
+
+<p class="drop-cap">The complete git history fits in 32 commits spanning February 22 to March 10, 2026. The work falls into three distinct phases: genesis, dormancy, and a burst of hardening that compressed two months of security and performance work into a single week.</p>
+
+<div class="timeline">
+
+  <div class="timeline-entry major">
+    <div class="timeline-date">Day 1 &mdash; February 22, 2026</div>
+    <div class="timeline-title">Genesis</div>
+    <div class="timeline-body">
+      10 commits in under 2 hours. Fork from sjson-final, rename across 122 files, promote Gen2, integrate Glyph, carry forward Agent-GO packages, fix 7 security vulnerabilities, add 16 regression tests, generate cross-language fixtures, close feature parity gaps. By noon, the codec was production-ready.
+    </div>
+  </div>
+
+  <div class="timeline-entry">
+    <div class="timeline-date">Days 2-11 &mdash; February 23 to March 4</div>
+    <div class="timeline-title">Dormancy</div>
+    <div class="timeline-body">
+      Zero commits. Release preparation happened elsewhere: package naming, registry setup, launch materials. The code was frozen.
+    </div>
+  </div>
+
+  <div class="timeline-entry">
+    <div class="timeline-date">Days 12-13 &mdash; March 5-6</div>
+    <div class="timeline-title">Release Infrastructure</div>
+    <div class="timeline-body">
+      Package alignment, v0.1.1 version bump, elevator pitches, benchmarks across all 5 languages with JSON baselines, Go module path fix. Eight commits of release polish.
+    </div>
+  </div>
+
+  <div class="timeline-entry">
+    <div class="timeline-date">Day 14 &mdash; March 7</div>
+    <div class="timeline-title">PR #1 &mdash; The First External Contribution</div>
+    <div class="timeline-body">
+      Commit <code>eb2ec3f</code> ("Harden cowrie go codecs and glyph parsing") merged via PR #1 from the <code>Neumenon/codex</code> branch. This was the first pull request in the repository's history, adding hardening to the Go codec and Glyph parser. It was merged at 5:07 PM, the only merge commit in the entire history.
+    </div>
+  </div>
+
+  <div class="timeline-entry major">
+    <div class="timeline-date">Day 15 &mdash; March 8</div>
+    <div class="timeline-title">Deep Hardening (8 commits in one day)</div>
+    <div class="timeline-body">
+      <p>The most intense day of the sprint. Eight commits between 11:55 AM and 10:21 PM:</p>
+      <ol style="margin: 0.5rem 0; padding-left: 1.5rem; color: var(--text-dim); font-size: 0.9rem;">
+        <li><code>5cfa297</code> &mdash; Trailing data detection, uint64 overflow, varint parity across decoders</li>
+        <li><code>aa8930c</code> &mdash; C malloc overflow fix + TypeScript varint precision loss</li>
+        <li><code>fa44ef1</code> &mdash; Overflow protection verification tests</li>
+        <li><code>2e88841</code> &mdash; LD decode length and ID conversion hardening</li>
+        <li><code>d7c8a65</code> &mdash; Sentinel errors, thread-safe decode options, compact floats</li>
+        <li><code>83596f9</code> &mdash; Deterministic map key sorting for byte-stable encoding</li>
+        <li><code>04be5a9</code> &mdash; Buffer pool deduplication, tighter codec allocations</li>
+        <li><code>533a380</code> &mdash; v3 wire format (the biggest commit)</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="timeline-entry major">
+    <div class="timeline-date">Day 15 &mdash; March 8 (evening)</div>
+    <div class="timeline-title">v3 Wire Format</div>
+    <div class="timeline-body">
+      Commit <code>533a380</code>: FIXINT, FIXNEG, FIXARRAY, FIXMAP, Bitmask, Gen1/Gen2 tag alignment, UnsafeStrings, TensorSink, EncodeToWriter. The most impactful single commit in the project's history, touching all 5 language implementations simultaneously.
+    </div>
+  </div>
+
+  <div class="timeline-entry">
+    <div class="timeline-date">Day 16 &mdash; March 9</div>
+    <div class="timeline-title">Invariant Testing</div>
+    <div class="timeline-body">
+      7 codec invariants tested across all 5 languages. NaN/Inf policy established (allowed in binary, rejected in Glyph text/JSON). Coverage pushed toward 80% threshold. Glyph safety fixes synced; CLI glue promoted to library APIs.
+    </div>
+  </div>
+
+  <div class="timeline-entry major">
+    <div class="timeline-date">Day 17 &mdash; March 10</div>
+    <div class="timeline-title">Robustness Framework</div>
+    <div class="timeline-body">
+      Seven test suites: truth tables (5 langs), mutation/corruption testing (Rust/Python/C/TS), performance cliff detection (Go/Rust), property-based fuzzing (hypothesis + cargo-fuzz), cross-format roundtrip, differential testing scaffold, and CI workflows.
+    </div>
+  </div>
+
+</div>
+
+<div class="insight insight-pink">
+  <div class="insight-label">Velocity</div>
+  <p>The hardening phase (March 7-10) produced 14 commits in 4 days, touching security, performance, and correctness simultaneously across 5 language implementations. The v3 wire format commit alone changed files in Go, Python, Rust, C, and TypeScript &mdash; all in a single atomic commit with regenerated cross-language fixtures.</p>
+</div>
+
+<h3>Commit Density by Phase</h3>
+
+<div class="stat-grid">
+  <div class="stat-card">
+    <div class="stat-num" style="color: var(--accent);">10</div>
+    <div class="stat-label">Day 1 (Genesis)<br><span style="font-size: 0.65rem;">Feb 22 &mdash; 2 hours</span></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color: var(--text-dim);">0</div>
+    <div class="stat-label">Days 2-11<br><span style="font-size: 0.65rem;">Dormancy</span></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color: var(--cyan);">8</div>
+    <div class="stat-label">Days 12-13<br><span style="font-size: 0.65rem;">Release infra</span></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color: var(--pink);">11</div>
+    <div class="stat-label">Days 14-15<br><span style="font-size: 0.65rem;">Hardening + v3</span></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-num" style="color: var(--green);">3</div>
+    <div class="stat-label">Days 16-17<br><span style="font-size: 0.65rem;">Testing framework</span></div>
+  </div>
+</div>
+
+<p>The distribution is revealing. More than two-thirds of all commits (22 of 32) landed in just 5 days of active work. The 11-day gap between Day 1 and Day 12 suggests that Cowrie was being tested in production (or at least in integration) before the hardening push began. The hardening didn't happen because the code was untested &mdash; it happened because real usage revealed the edges that needed reinforcement.</p>
+
+<p>The busiest single day was March 8, with 8 commits spanning 10.5 hours. The morning started with security patches (trailing data detection, overflow guards), progressed through architectural improvements (sentinel errors, deterministic encoding, buffer pool cleanup), and concluded with the v3 wire format &mdash; the most significant feature addition in the project's history. This is the commit pattern of a developer (or team) running at full velocity with a clear objective: make the codec correct, make it fast, make it compact, in that order.</p>
+
+<p>By contrast, the testing framework on Day 17 was a single large commit &mdash; 7 test suites introduced at once. This suggests the suites were developed and validated locally before being committed as a cohesive package, rather than being built incrementally. The CI workflow changes (adding <code>fuzz.yml</code> and robustness jobs) were included in the same commit, indicating a planned delivery rather than an organic evolution.</p>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CHAPTER 7: SECURITY & INVARIANTS                           -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="ch7">
+  <span class="chapter-num">Chapter 7</span>
+  Security &amp; Invariants
+</h2>
+
+<p class="drop-cap">A binary codec that accepts untrusted input is an attack surface. Every length field is an allocation request. Every recursion is a stack frame. Every varint is a potential infinite loop. Cowrie's decode pipeline enforces layered defenses to prevent these attacks while remaining fast enough for ML inference hot paths.</p>
+
+<h3>The Three Defense Layers</h3>
+
+<p>The decoder enforces security at three levels, each catching attacks that slip past the previous:</p>
+
+<div class="arch-flow" style="justify-content: center;">
+  <div class="arch-box" style="border-color: var(--pink);">
+    <span class="arch-label" style="color: var(--pink);">Layer 1</span>
+    <span class="arch-sub">Length vs. Remaining<br>Primary defense</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box" style="border-color: var(--accent);">
+    <span class="arch-label">Layer 2</span>
+    <span class="arch-sub">Hard Limits<br>Secondary caps</span>
+  </div>
+  <span class="arch-arrow">&rarr;</span>
+  <div class="arch-box" style="border-color: var(--cyan);">
+    <span class="arch-label" style="color: var(--cyan);">Layer 3</span>
+    <span class="arch-sub">Depth Tracking<br>Recursion guard</span>
+  </div>
+</div>
+
+<p><strong>Layer 1</strong> is the most important: before allocating any buffer, the decoder checks if the claimed length exceeds the remaining input bytes. A message claiming a 1GB string but containing only 100 bytes is rejected immediately &mdash; no allocation occurs. <strong>Layer 2</strong> catches legitimately large payloads: a 100MB string that is actually present in the input but exceeds the MaxStringLen limit. <strong>Layer 3</strong> tracks recursion depth for nested arrays and objects, preventing stack overflow from deeply nested structures.</p>
+
+<h3>Decode Limits</h3>
+
+<table>
+  <thead><tr><th>Limit</th><th>Default</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>MaxDepth</code></td><td>1,000</td><td>Nested array/object depth &mdash; prevents stack overflow</td></tr>
+    <tr><td><code>MaxArrayLen</code></td><td>1,000,000</td><td>Array elements &mdash; prevents memory bomb</td></tr>
+    <tr><td><code>MaxObjectLen</code></td><td>1,000,000</td><td>Object fields &mdash; prevents memory bomb</td></tr>
+    <tr><td><code>MaxStringLen</code></td><td>10,000,000</td><td>String bytes (10 MB) &mdash; prevents allocation spike</td></tr>
+    <tr><td><code>MaxBytesLen</code></td><td>50,000,000</td><td>Binary bytes (50 MB) &mdash; also covers tensor/image/audio</td></tr>
+    <tr><td><code>MaxExtLen</code></td><td>1,000,000</td><td>Extension payload (1 MB)</td></tr>
+    <tr><td><code>MaxDictLen</code></td><td>1,000,000</td><td>Dictionary entries</td></tr>
+    <tr><td><code>MaxHintCount</code></td><td>10,000</td><td>Column hints</td></tr>
+    <tr><td><code>MaxRank</code></td><td>32</td><td>Tensor dimensions</td></tr>
+  </tbody>
+</table>
+
+<div class="insight">
+  <div class="insight-label">Tightening History</div>
+  <p>The original SJSON limits were generous (100M arrays, 500MB strings, 1GB bytes). Commit <code>b774096</code> on Day 1 tightened them by 10-100x. The comments in <code>decode.go</code> still reference the old values: <em>"tightened: was 100M"</em>, <em>"tightened: was 500MB"</em>, <em>"tightened: was 1GB"</em>.</p>
+</div>
+
+<h3>The 7 Vulnerabilities</h3>
+
+<p>Commit <code>b774096</code> ("security: fix 7 critical/high vulnerabilities in gen2 decoder") was the third commit ever. The security audit was retroactive &mdash; applied to code inherited from SJSON. The 16 regression tests in the following commit (<code>157969f</code>) ensure these bugs stay fixed. The exact vulnerabilities are visible in the diff: unchecked varint overflows, unbounded string allocations, missing depth limits, and tensor data length validation.</p>
+
+<h3>Seven Codec Invariants</h3>
+
+<p>By Day 16, seven invariants had been identified and tested across all five languages:</p>
+
+<table>
+  <thead><tr><th>#</th><th>Invariant</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td><strong>Roundtrip</strong></td><td>Encode(Decode(bytes)) == bytes for valid input</td></tr>
+    <tr><td>2</td><td><strong>Canonical form</strong></td><td>Encode always produces the same bytes for the same value</td></tr>
+    <tr><td>3</td><td><strong>Trailing data rejection</strong></td><td>Bytes after the root value must cause an error</td></tr>
+    <tr><td>4</td><td><strong>Truncated input rejection</strong></td><td>Partial messages must cause an error, not silent data loss</td></tr>
+    <tr><td>5</td><td><strong>Invalid tag rejection</strong></td><td>Reserved tags (0xF0-0xFF) must cause an error</td></tr>
+    <tr><td>6</td><td><strong>Depth limit enforcement</strong></td><td>Nested structures beyond MaxDepth must fail</td></tr>
+    <tr><td>7</td><td><strong>NaN/Inf handling</strong></td><td>Allowed in binary encoding; rejected in Glyph text/JSON bridges</td></tr>
+  </tbody>
+</table>
+
+<h3>Forward Compatibility</h3>
+
+<p>The <code>TagExt</code> envelope (<code>0x0E</code>) provides forward compatibility. When a decoder encounters an unknown extension type, it has three options controlled by <code>OnUnknownExt</code>:</p>
+
+<pre><code><span class="code-accent">const</span> (
+    UnknownExtKeep       <span class="code-dim">// Preserve as UnknownExtData (default)</span>
+    UnknownExtSkipAsNull <span class="code-dim">// Replace with Null</span>
+    UnknownExtError      <span class="code-dim">// Return error (strict mode)</span>
+)</code></pre>
+
+<p>The default &mdash; <code>Keep</code> &mdash; preserves the raw payload and extension type ID, enabling round-trip through intermediate systems that don't understand the extension. This is the same strategy used by Protocol Buffers' unknown field handling, applied at the value level rather than the message level.</p>
+
+<h3>Deterministic Encoding</h3>
+
+<p>Commit <code>83596f9</code> ("fix: sort map keys in codec for deterministic byte-stable encoding") ensured that object fields are always emitted in sorted dictionary-index order. This guarantees that <code>Encode(Decode(Encode(v))) == Encode(v)</code> &mdash; idempotent encoding &mdash; which is critical for content-addressed storage, caching, and signature verification.</p>
+
+<h3>Buffer Pool Hygiene</h3>
+
+<p>The encoder uses a <code>sync.Pool</code> for buffer reuse, but caps returned buffers at 1 MB:</p>
+
+<pre><code><span class="code-accent">const</span> maxPoolBufSize = 1 &lt;&lt; 20 <span class="code-dim">// 1MB</span>
+
+<span class="code-accent">func</span> <span class="code-cyan">putBuf</span>(buf *buffer) {
+    <span class="code-pink">if</span> cap(buf.data) &lt;= maxPoolBufSize {
+        bufferPool.Put(buf)
+    }
+    <span class="code-dim">// Oversized buffers are dropped — GC reclaims them</span>
+}</code></pre>
+
+<p>This prevents a single large encode (e.g., a 50 MB tensor) from permanently bloating the pool. The pool itself was deduplicated in commit <code>04be5a9</code> after the buffer pool logic had been copy-pasted across multiple files.</p>
+
+<div class="insight insight-cyan">
+  <div class="insight-label">Error Taxonomy</div>
+  <p>The decoder exports 14 sentinel errors (from <code>ErrInvalidMagic</code> to <code>ErrTrailingData</code>), all created via <code>errors.New</code> for stable identity comparison. The <code>TagError</code> struct provides hex-formatted tag bytes in its message. This taxonomy was introduced in commit <code>d7c8a65</code> ("harden decode pipeline: sentinel errors"), replacing generic <code>fmt.Errorf</code> calls that callers couldn't match programmatically.</p>
+</div>
+
+<h3>The Robustness Framework</h3>
+
+<p>The final commit (<code>6ad5635</code>, March 10) introduced a seven-suite testing framework that operates at a different level than unit tests. These suites answer the question: <em>what happens when the codec encounters reality?</em></p>
+
+<table>
+  <thead><tr><th>Suite</th><th>Languages</th><th>What It Tests</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Truth Tables</strong></td><td>All 5</td><td>Exhaustive encode/decode for every type tag, including edge cases (empty strings, zero-length arrays, max-value integers)</td></tr>
+    <tr><td><strong>Mutation/Corruption</strong></td><td>Rust, Python, C, TS</td><td>Bit-flip, truncation, and byte-insertion attacks on valid messages &mdash; decoder must never panic</td></tr>
+    <tr><td><strong>Perf Cliff Detection</strong></td><td>Go, Rust</td><td>Identifies non-linear performance degradation: O(n) operations that secretly become O(n^2) at scale</td></tr>
+    <tr><td><strong>Property Fuzzing</strong></td><td>Python (hypothesis), Rust (cargo-fuzz)</td><td>Random input generation with property-based assertions (roundtrip, no panic, bounded memory)</td></tr>
+    <tr><td><strong>Cross-Format Roundtrip</strong></td><td>Go</td><td>Cowrie &rarr; JSON &rarr; Cowrie &rarr; JSON, verifying semantic preservation through format transitions</td></tr>
+    <tr><td><strong>Differential Testing</strong></td><td>Scaffold</td><td>Compare outputs of multiple implementations on the same input &mdash; any divergence is a bug</td></tr>
+    <tr><td><strong>CI Workflows</strong></td><td>All</td><td><code>fuzz.yml</code> for continuous fuzzing, robustness jobs in main CI</td></tr>
+  </tbody>
+</table>
+
+<div class="insight">
+  <div class="insight-label">Defense in Depth</div>
+  <p>The layered testing strategy mirrors the layered decode defenses. Unit tests verify individual functions. Invariant tests verify cross-cutting properties. Truth tables verify exhaustive coverage. Mutation tests verify crash resistance. Fuzz tests verify the unknown unknowns. Each layer catches bugs the others miss.</p>
+</div>
+
+<h3>The Error Taxonomy</h3>
+
+<p>Fourteen sentinel errors form a complete taxonomy of decode failures, each created as a package-level <code>errors.New</code> for stable identity comparison. Before commit <code>d7c8a65</code>, errors were ad-hoc <code>fmt.Errorf</code> calls that callers couldn't match programmatically.</p>
+
+<pre><code><span class="code-accent">var</span> (
+    ErrInvalidMagic   = errors.New(<span class="code-green">"cowrie: invalid magic bytes"</span>)
+    ErrInvalidVersion = errors.New(<span class="code-green">"cowrie: unsupported version"</span>)
+    ErrUnexpectedEOF  = errors.New(<span class="code-green">"cowrie: unexpected end of data"</span>)
+    ErrInvalidTag     = errors.New(<span class="code-green">"cowrie: invalid type tag"</span>)
+    ErrMalformedLength= errors.New(<span class="code-green">"cowrie: malformed length exceeds remaining data"</span>)
+    ErrDepthExceeded  = errors.New(<span class="code-green">"cowrie: maximum nesting depth exceeded"</span>)
+    ErrArrayTooLarge  = errors.New(<span class="code-green">"cowrie: array exceeds maximum length"</span>)
+    ErrObjectTooLarge = errors.New(<span class="code-green">"cowrie: object exceeds maximum field count"</span>)
+    ErrStringTooLarge = errors.New(<span class="code-green">"cowrie: string exceeds maximum length"</span>)
+    ErrBytesTooLarge  = errors.New(<span class="code-green">"cowrie: bytes exceeds maximum length"</span>)
+    ErrExtTooLarge    = errors.New(<span class="code-green">"cowrie: extension payload exceeds maximum length"</span>)
+    ErrUnknownExt     = errors.New(<span class="code-green">"cowrie: unknown extension type (strict mode)"</span>)
+    ErrInvalidVarint  = errors.New(<span class="code-green">"cowrie: invalid or overflow varint encoding"</span>)
+    ErrTrailingData   = errors.New(<span class="code-green">"cowrie: trailing data after root value"</span>)
+)</code></pre>
+
+<p>The <code>TagError</code> struct provides additional detail for invalid tags, formatting the offending byte as hex. This taxonomy means callers can switch on error identity to provide meaningful user-facing messages &mdash; or to implement error-specific recovery strategies in streaming decode pipelines.</p>
+
+<h3>The NaN/Inf Policy</h3>
+
+<p>IEEE 754 special values (NaN, +Inf, -Inf) are a perennial source of bugs in serialization. Cowrie's policy, established during invariant testing on March 9, draws a clear line:</p>
+
+<div class="compare-grid">
+  <div class="compare-card">
+    <h4 style="color: var(--green);">Binary (Cowrie wire format)</h4>
+    <ul>
+      <li>NaN: ALLOWED in Float32 and Float64</li>
+      <li>+Inf/-Inf: ALLOWED in Float32 and Float64</li>
+      <li>Rationale: binary format must faithfully represent IEEE 754</li>
+      <li>Tested across all 5 languages</li>
+    </ul>
+  </div>
+  <div class="compare-card">
+    <h4 style="color: var(--red);">Text (Glyph / JSON bridges)</h4>
+    <ul>
+      <li>NaN: REJECTED with error</li>
+      <li>+Inf/-Inf: REJECTED with error</li>
+      <li>Rationale: JSON has no NaN/Inf literals; silent data corruption is worse than failure</li>
+      <li>Rust glyph: <code>canon_float()</code> returns <code>Result&lt;String, GlyphError&gt;</code></li>
+    </ul>
+  </div>
+</div>
+
+<p>This policy ensures that binary round-trips are lossless (a tensor of NaN values survives encode/decode), while text conversions fail loudly rather than silently converting NaN to <code>null</code> or <code>"NaN"</code> &mdash; both of which would corrupt downstream processing.</p>
+
+<h3>What the Codec Knows</h3>
+
+<p>In 17 days, Cowrie went from a fork to a hardened, multi-language binary codec with 26+ type tags, seven codec invariants, a robustness framework, and performance optimizations that approach zero-copy. The "SJ" magic bytes still anchor every message to its SJSON origins &mdash; a deliberate choice that prioritizes wire compatibility over branding.</p>
+
+<p>The code tells the story of a format designed for a specific moment: when LLMs, GNNs, and multimodal models all need to exchange structured data that JSON can't efficiently represent. Tensors, graph shards, attention masks, rich text with token IDs &mdash; these aren't abstract features. They're the data types of the AI stack, encoded in a format that five languages can produce and consume, byte-for-byte identical, with security limits and invariants tested at every layer.</p>
+
+<h3>The Commit Graph</h3>
+
+<p>Every commit in the repository's history, mapped to its primary domain:</p>
+
+<details>
+  <summary>Full commit log (32 commits, annotated)</summary>
+  <div class="details-body">
+    <table>
+      <thead><tr><th>Hash</th><th>Date</th><th>Domain</th><th>Message</th></tr></thead>
+      <tbody>
+        <tr><td><code>54a82c5</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>init: cowrie-final from sjson-final</td></tr>
+        <tr><td><code>2faf026</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>rename: sjson &rarr; cowrie across all 5 languages</td></tr>
+        <tr><td><code>5d66f35</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>refactor(go): promote gen2 to root cowrie package</td></tr>
+        <tr><td><code>80d04e8</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>feat: integrate glyph codec (5 languages)</td></tr>
+        <tr><td><code>bfbefdd</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>feat: carry forward Agent-GO codec packages</td></tr>
+        <tr><td><code>b774096</code></td><td>Feb 22</td><td style="color: var(--pink);">security</td><td>security: fix 7 critical/high vulnerabilities</td></tr>
+        <tr><td><code>157969f</code></td><td>Feb 22</td><td style="color: var(--cyan);">testing</td><td>test: add 16 security regression tests</td></tr>
+        <tr><td><code>38c0a32</code></td><td>Feb 22</td><td style="color: var(--cyan);">testing</td><td>test: generate cross-language compat fixtures</td></tr>
+        <tr><td><code>5dc5866</code></td><td>Feb 22</td><td style="color: var(--green);">parity</td><td>feat: close cross-language feature parity gaps</td></tr>
+        <tr><td><code>8959c50</code></td><td>Feb 22</td><td style="color: var(--green);">parity</td><td>feat: close remaining parity gaps</td></tr>
+        <tr><td><code>69c649b</code></td><td>Mar 5</td><td style="color: var(--text-dim);">release</td><td>fix: align package names, imports, docs</td></tr>
+        <tr><td><code>ae8e12c</code></td><td>Mar 5</td><td style="color: var(--text-dim);">release</td><td>chore: bump all packages to v0.1.1</td></tr>
+        <tr><td><code>71ef559</code></td><td>Mar 5</td><td style="color: var(--text-dim);">release</td><td>docs: add launch materials</td></tr>
+        <tr><td><code>f597d2a</code></td><td>Mar 5</td><td style="color: var(--text-dim);">release</td><td>fix: correct inconsistencies in posts</td></tr>
+        <tr><td><code>aa7b072</code></td><td>Mar 6</td><td style="color: var(--text-dim);">release</td><td>fix: resolve cross-language test failures</td></tr>
+        <tr><td><code>daf4281</code></td><td>Mar 6</td><td style="color: var(--cyan);">testing</td><td>fix: add glyph-js skip guard</td></tr>
+        <tr><td><code>69ed7df</code></td><td>Mar 6</td><td style="color: var(--text-dim);">release</td><td>docs: add elevator pitches</td></tr>
+        <tr><td><code>ae3fbdc</code></td><td>Mar 6</td><td style="color: var(--purple);">perf</td><td>bench: Gen1 vs Gen2 benchmarks, JSON baseline</td></tr>
+        <tr><td><code>7d62141</code></td><td>Mar 6</td><td style="color: var(--text-dim);">release</td><td>fix: update Go module path</td></tr>
+        <tr><td><code>a85ff11</code></td><td>Mar 6</td><td style="color: var(--text-dim);">cleanup</td><td>chore: remove __pycache__, fix stale sjson refs</td></tr>
+        <tr><td><code>e2393c5</code></td><td>Mar 7</td><td style="color: var(--green);">parity</td><td>feat: gen1 C/TS expansion, glyph docs refresh</td></tr>
+        <tr><td><code>eb2ec3f</code></td><td>Mar 7</td><td style="color: var(--pink);">security</td><td>Harden cowrie go codecs and glyph parsing</td></tr>
+        <tr><td><code>8b7ba83</code></td><td>Mar 7</td><td style="color: var(--pink);">security</td><td>Merge pull request #1</td></tr>
+        <tr><td><code>5cfa297</code></td><td>Mar 8</td><td style="color: var(--pink);">security</td><td>fix: trailing data, uint64 overflow, varint parity</td></tr>
+        <tr><td><code>aa8930c</code></td><td>Mar 8</td><td style="color: var(--pink);">security</td><td>fix: C malloc overflow + TS varint precision</td></tr>
+        <tr><td><code>fa44ef1</code></td><td>Mar 8</td><td style="color: var(--cyan);">testing</td><td>test: overflow protection verification</td></tr>
+        <tr><td><code>2e88841</code></td><td>Mar 8</td><td style="color: var(--pink);">security</td><td>fix: harden ld decode length/id conversions</td></tr>
+        <tr><td><code>d7c8a65</code></td><td>Mar 8</td><td style="color: var(--pink);">security</td><td>harden: sentinel errors, thread-safe opts</td></tr>
+        <tr><td><code>83596f9</code></td><td>Mar 8</td><td style="color: var(--pink);">security</td><td>fix: deterministic map key sorting</td></tr>
+        <tr><td><code>04be5a9</code></td><td>Mar 8</td><td style="color: var(--purple);">perf</td><td>refactor: buffer pool dedup, tighter allocs</td></tr>
+        <tr><td><code>533a380</code></td><td>Mar 8</td><td style="color: var(--accent);">feature</td><td>feat: v3 wire format &mdash; inline types, bitmask</td></tr>
+        <tr><td><code>5be5384</code></td><td>Mar 9</td><td style="color: var(--green);">parity</td><td>feat: sync glyph safety, promote CLI to library</td></tr>
+        <tr><td><code>8457972</code></td><td>Mar 9</td><td style="color: var(--cyan);">testing</td><td>fix: patch 7 codec invariant testing holes</td></tr>
+        <tr><td><code>d04fea8</code></td><td>Mar 9</td><td style="color: var(--cyan);">testing</td><td>chore: coverage tests, benchmarks, build docs</td></tr>
+        <tr><td><code>6ad5635</code></td><td>Mar 10</td><td style="color: var(--cyan);">testing</td><td>feat: 7-suite robustness test framework</td></tr>
+      </tbody>
+    </table>
+  </div>
+</details>
+
+<h3>The Specification as Living Document</h3>
+
+<p>The <code>SPEC.md</code> file (328 lines at last count) serves as both documentation and contract. It defines canonical error codes that all five implementations must map to for fixture validation:</p>
+
+<pre><code><span class="code-dim">// Canonical error codes from SPEC.md:</span>
+<span class="code-pink">ERR_INVALID_MAGIC</span>         <span class="code-dim">ERR_INVALID_VERSION</span>
+<span class="code-pink">ERR_TRUNCATED</span>             <span class="code-dim">ERR_INVALID_TAG</span>
+<span class="code-pink">ERR_INVALID_FIELD_ID</span>      <span class="code-dim">ERR_INVALID_UTF8</span>
+<span class="code-pink">ERR_INVALID_VARINT</span>        <span class="code-dim">ERR_TOO_DEEP</span>
+<span class="code-pink">ERR_TOO_LARGE</span>             <span class="code-dim">ERR_DICT_TOO_LARGE</span>
+<span class="code-pink">ERR_STRING_TOO_LARGE</span>      <span class="code-dim">ERR_BYTES_TOO_LARGE</span>
+<span class="code-pink">ERR_EXT_TOO_LARGE</span>         <span class="code-dim">ERR_RANK_TOO_LARGE</span>
+<span class="code-pink">ERR_UNSUPPORTED_COMPRESSION</span>
+<span class="code-pink">ERR_DECOMPRESSED_TOO_LARGE</span></code></pre>
+
+<p>Each implementation translates its native error types to these canonical codes when running fixture tests. A C <code>COWRIE_ERR_OVERFLOW</code> maps to <code>ERR_TOO_LARGE</code>; a Rust <code>CowrieError::DepthExceeded</code> maps to <code>ERR_TOO_DEEP</code>. The fixtures are the source of truth. If an implementation disagrees with the fixtures, the implementation is wrong.</p>
+
+<h3>Looking Forward</h3>
+
+<h3>Headroom</h3>
+
+<p>The reserved tag space (0xF0-0xFF) and the unallocated gaps in the 0x10 and 0x25-0x2F ranges leave room for future type tags without wire format changes. The TagExt envelope can carry any new extension type without requiring decoder updates. The version byte in the header is still <code>0x02</code> &mdash; there's never been a version bump since the format was defined.</p>
+
+<p>Specifically: 16 bytes in the 0x10-0x1F range, 11 bytes in the 0x25-0x2F range, 2 bytes in the 0x33-0x34 range, 6 bytes in the 0x3A-0x3F range, and 16 bytes in the reserved 0xF0-0xFF range &mdash; totaling 51 unallocated tag values available for future extensions without any wire format changes.</p>
+
+<p>The 80% coverage threshold enforced across all five languages in CI ensures that new code ships with tests. The fuzz workflow runs continuously. The seven codec invariants serve as a regression net that catches cross-language drift before it reaches production.</p>
+
+<p>Cowrie is complete in the sense that matters: it can encode everything the AI stack needs today, and it has room to encode what it will need tomorrow. The "SJ" magic bytes will be there in every message, a quiet reminder that all codecs are forks of codecs, all the way down.</p>
+
+<h3>The Glyph Connection</h3>
+
+<p>Cowrie does not exist in isolation. It is the binary half of a two-codec system. Glyph &mdash; integrated in the fourth commit on Day 1 &mdash; is the text half: a human-readable format that supports the same extended types as Cowrie but in a text syntax with schemas, pools, tab-separated data, and pool references. The NaN/Inf policy exists precisely because of this duality: binary Cowrie faithfully preserves IEEE 754 special values, while text Glyph must reject them because JSON and human-readable formats have no canonical representation for NaN.</p>
+
+<p>The integration runs deep. Both codecs share the same type universe. A value encoded in Cowrie binary can be converted to Glyph text and back without semantic loss (except for NaN/Inf, which are deliberately rejected at the boundary). The <code>go/glyph/</code> directory in the Cowrie repo contains the full Glyph implementation for Go, including a streaming protocol (<code>gs1t_reader.go</code>, <code>gs1t_writer.go</code>), CRC validation, cursor-based navigation, and UI event types.</p>
+
+<h3>What JSON Cannot Do</h3>
+
+<p>To understand why Cowrie exists, consider what JSON forces you to do with ML data:</p>
+
+<table>
+  <thead><tr><th>Data</th><th>JSON Encoding</th><th>Cowrie Encoding</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>768-dim float32 embedding</td>
+      <td>Array of numbers: ~6KB (text)</td>
+      <td>Tensor: 3,078 bytes (raw)</td>
+      <td>~50% smaller, typed, zero-copy</td>
+    </tr>
+    <tr>
+      <td>100KB JPEG image</td>
+      <td>Base64 string: ~133KB</td>
+      <td>Image: 100KB + 6 bytes metadata</td>
+      <td>33% smaller, no encode/decode tax</td>
+    </tr>
+    <tr>
+      <td>2048-element attention mask</td>
+      <td>Array of 0/1: ~6KB</td>
+      <td>Bitmask: 259 bytes</td>
+      <td>23x smaller</td>
+    </tr>
+    <tr>
+      <td>10K-node graph adjacency</td>
+      <td>Edge list array: ~200KB</td>
+      <td>AdjList CSR: ~80KB</td>
+      <td>2.5x smaller, zero-copy to GNN</td>
+    </tr>
+    <tr>
+      <td>Timestamp (nanoseconds)</td>
+      <td>String "2026-03-10T...": 30 bytes</td>
+      <td>Datetime64: 9 bytes</td>
+      <td>3.3x smaller, native int64</td>
+    </tr>
+    <tr>
+      <td>UUID</td>
+      <td>String "550e8400-...": 38 bytes</td>
+      <td>UUID128: 17 bytes</td>
+      <td>2.2x smaller, native bytes</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Each row represents a real data type from the AI stack that JSON handles poorly. Cowrie doesn't replace JSON for configuration files or REST APIs &mdash; it replaces JSON where JSON's text encoding creates overhead that matters at scale: model serving, embedding pipelines, graph databases, and real-time inference.</p>
+
+<p>The overhead isn't just about bytes on the wire. Consider the encode/decode CPU cost: JSON must convert every number to/from ASCII text (multiple divisions and multiplications per digit), while Cowrie reads and writes numbers as fixed-width binary values. A 768-dimensional float32 embedding requires 768 float-to-text conversions in JSON; in Cowrie, it's a single memcpy of 3,072 bytes. For a model serving pipeline handling thousands of requests per second, this difference is the gap between needing one server and needing three.</p>
+
+<p>Base64 encoding for binary data is similarly expensive: a 100KB image becomes 133KB of ASCII text, and the encode/decode step consumes CPU cycles proportional to the payload size. Cowrie's Image type embeds the raw bytes directly &mdash; no encoding step, no size inflation, and the format metadata (JPEG/PNG/WEBP, width, height) is structured data rather than a MIME type string that needs parsing.</p>
+
+<div class="insight insight-cyan">
+  <div class="insight-label">The EncodeAny Bridge</div>
+  <p>For callers who don't want to build Value trees manually, the <code>EncodeAny</code> function accepts native Go types (<code>any</code>) and automatically converts them. The <code>TensorizeSlices</code> option (enabled by default in <code>DefaultAnyOptions</code>) auto-promotes <code>[]float32</code> and <code>[]float64</code> slices to tensors &mdash; bridging the gap between Go's type system and Cowrie's richer type universe without requiring explicit tensor construction.</p>
+</div>
+
+<h3>The CI Contract</h3>
+
+<p>The CI pipeline (<code>.github/workflows/ci.yml</code>) enforces the five-language contract on every commit. Five parallel jobs (Go, Python, TypeScript, Rust, C) run their respective test suites. A Fixtures job verifies cross-language compatibility. A Publish Gate job aggregates the results &mdash; if any job fails, the gate fails, and the commit cannot merge to main:</p>
+
+<pre><code><span class="code-accent">Publish Gate v2</span>:
+  needs: [go, python, typescript, rust, c, fixtures]
+  if: always()
+  <span class="code-dim"># Fails if ANY dependency failed</span>
+  <span class="code-dim"># Required status check on main branch</span></code></pre>
+
+<p>Coverage thresholds are enforced at 80% across all five languages, using language-appropriate tools: <code>go tool cover</code> (excluding <code>cmd/</code>), <code>pytest-cov</code> for Python, <code>c8</code> (V8 native) for TypeScript, <code>cargo-tarpaulin</code> for Rust, and <code>gcov</code> for C. Admin bypass lets pushes go through, but CI still runs &mdash; the gate can fail retroactively.</p>
+
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- COLOPHON                                                   -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.85rem;">
+  <p><strong style="color: var(--accent);">Colophon.</strong> This document was generated entirely from forensic analysis of the Cowrie repository at <code>github.com/Neumenon/cowrie</code>. Sources: 32 git commits (<code>54a82c5</code> through <code>6ad5635</code>), <code>SPEC.md</code>, <code>types.go</code>, <code>encode.go</code>, <code>decode.go</code>, <code>encode_writer.go</code>, <code>schema.go</code>, <code>gen1/gen1.go</code>, and corresponding implementations in Python, Rust, C, and TypeScript. No external documentation, blog posts, or design docs were consulted.</p>
+  <p style="margin-top: 0.5rem;">Commit range: <code>54a82c5..6ad5635</code> | 17 calendar days | 32 commits | 5 languages | 14,000+ lines</p>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- APPENDIX: TYPE REFERENCE                                   -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<h2 id="appendix" style="margin-top: 3rem;">
+  <span class="chapter-num">Appendix</span>
+  Quick Reference
+</h2>
+
+<h3>Complete Type Tag Table</h3>
+
+<table>
+  <thead><tr><th>Tag</th><th>Name</th><th>Region</th><th>Wire Encoding (after tag)</th></tr></thead>
+  <tbody>
+    <tr><td><code>0x00</code></td><td>Null</td><td>Core</td><td><em>none</em></td></tr>
+    <tr><td><code>0x01</code></td><td>False</td><td>Core</td><td><em>none</em></td></tr>
+    <tr><td><code>0x02</code></td><td>True</td><td>Core</td><td><em>none</em></td></tr>
+    <tr><td><code>0x03</code></td><td>Int64</td><td>Core</td><td>zigzag varint</td></tr>
+    <tr><td><code>0x04</code></td><td>Float64</td><td>Core</td><td>8 bytes LE</td></tr>
+    <tr><td><code>0x05</code></td><td>String</td><td>Core</td><td>uvarint len + UTF-8</td></tr>
+    <tr><td><code>0x06</code></td><td>Array</td><td>Core</td><td>uvarint count + values</td></tr>
+    <tr><td><code>0x07</code></td><td>Object</td><td>Core</td><td>uvarint count + (dictIdx + value)*</td></tr>
+    <tr><td><code>0x08</code></td><td>Bytes</td><td>Core</td><td>uvarint len + raw</td></tr>
+    <tr><td><code>0x09</code></td><td>Uint64</td><td>Core</td><td>uvarint</td></tr>
+    <tr><td><code>0x0A</code></td><td>Decimal128</td><td>Core</td><td>scale(i8) + coef(16B)</td></tr>
+    <tr><td><code>0x0B</code></td><td>Datetime64</td><td>Core</td><td>int64 LE (nanos)</td></tr>
+    <tr><td><code>0x0C</code></td><td>UUID128</td><td>Core</td><td>16 bytes</td></tr>
+    <tr><td><code>0x0D</code></td><td>BigInt</td><td>Core</td><td>uvarint len + two's complement</td></tr>
+    <tr><td><code>0x0E</code></td><td>Extension</td><td>Core</td><td>uvarint type + uvarint len + payload</td></tr>
+    <tr><td><code>0x0F</code></td><td>Float32</td><td>Core</td><td>4 bytes LE</td></tr>
+    <tr><td><code>0x20</code></td><td>Tensor</td><td>ML</td><td>dtype(u8) + rank(u8) + dims(uvar*) + len(uvar) + data</td></tr>
+    <tr><td><code>0x21</code></td><td>TensorRef</td><td>ML</td><td>storeId(u8) + keyLen(uvar) + key</td></tr>
+    <tr><td><code>0x22</code></td><td>Image</td><td>ML</td><td>fmt(u8) + w(u16) + h(u16) + len(uvar) + data</td></tr>
+    <tr><td><code>0x23</code></td><td>Audio</td><td>ML</td><td>enc(u8) + rate(u32) + ch(u8) + len(uvar) + data</td></tr>
+    <tr><td><code>0x24</code></td><td>Bitmask</td><td>ML</td><td>count(uvar) + ceil(count/8) bytes</td></tr>
+    <tr><td><code>0x30</code></td><td>AdjList</td><td>Graph</td><td>idWidth(u8) + nodes(uvar) + edges(uvar) + offsets + indices</td></tr>
+    <tr><td><code>0x31</code></td><td>RichText</td><td>Graph</td><td>text(str) + flags(u8) + [tokens] + [spans]</td></tr>
+    <tr><td><code>0x32</code></td><td>Delta</td><td>Graph</td><td>baseId(uvar) + opCount(uvar) + ops</td></tr>
+    <tr><td><code>0x35</code></td><td>Node</td><td>Graph</td><td>id(str) + labels + props</td></tr>
+    <tr><td><code>0x36</code></td><td>Edge</td><td>Graph</td><td>src(str) + dst(str) + type(str) + props</td></tr>
+    <tr><td><code>0x37</code></td><td>NodeBatch</td><td>Graph</td><td>count(uvar) + Node[count]</td></tr>
+    <tr><td><code>0x38</code></td><td>EdgeBatch</td><td>Graph</td><td>count(uvar) + Edge[count]</td></tr>
+    <tr><td><code>0x39</code></td><td>GraphShard</td><td>Graph</td><td>nodes + edges + metadata</td></tr>
+    <tr><td><code>0x40-BF</code></td><td>FIXINT</td><td>v3</td><td><em>none</em> (value = tag - 0x40)</td></tr>
+    <tr><td><code>0xC0-CF</code></td><td>FIXARRAY</td><td>v3</td><td>values (count = tag - 0xC0)</td></tr>
+    <tr><td><code>0xD0-DF</code></td><td>FIXMAP</td><td>v3</td><td>(dictIdx + value)* (count = tag - 0xD0)</td></tr>
+    <tr><td><code>0xE0-EF</code></td><td>FIXNEG</td><td>v3</td><td><em>none</em> (value = -1 - (tag - 0xE0))</td></tr>
+    <tr><td><code>0xF0-FF</code></td><td>RESERVED</td><td>&mdash;</td><td>Must be rejected as invalid</td></tr>
+  </tbody>
+</table>
+
+<h3>Security Limits Reference</h3>
+
+<table>
+  <thead><tr><th>Limit</th><th>Constant</th><th>Default</th><th>Original (SJSON)</th><th>Ratio</th></tr></thead>
+  <tbody>
+    <tr><td>Max Depth</td><td><code>DefaultMaxDepth</code></td><td>1,000</td><td>1,000</td><td>1x</td></tr>
+    <tr><td>Max Array Length</td><td><code>DefaultMaxArrayLen</code></td><td>1,000,000</td><td>100,000,000</td><td>100x tighter</td></tr>
+    <tr><td>Max Object Fields</td><td><code>DefaultMaxObjectLen</code></td><td>1,000,000</td><td>10,000,000</td><td>10x tighter</td></tr>
+    <tr><td>Max String (bytes)</td><td><code>DefaultMaxStringLen</code></td><td>10,000,000</td><td>500,000,000</td><td>50x tighter</td></tr>
+    <tr><td>Max Bytes (bytes)</td><td><code>DefaultMaxBytesLen</code></td><td>50,000,000</td><td>1,000,000,000</td><td>20x tighter</td></tr>
+    <tr><td>Max Extension</td><td><code>DefaultMaxExtLen</code></td><td>1,000,000</td><td>100,000,000</td><td>100x tighter</td></tr>
+    <tr><td>Max Dictionary</td><td><code>DefaultMaxDictLen</code></td><td>1,000,000</td><td>10,000,000</td><td>10x tighter</td></tr>
+    <tr><td>Max Hints</td><td><code>DefaultMaxHintCount</code></td><td>10,000</td><td>&mdash;</td><td>new</td></tr>
+    <tr><td>Max Tensor Rank</td><td><code>DefaultMaxRank</code></td><td>32</td><td>&mdash;</td><td>new</td></tr>
+  </tbody>
+</table>
+
+<h3>File Map</h3>
+
+<details>
+  <summary>Repository structure (key files only)</summary>
+  <div class="details-body">
+<pre><code><span class="code-accent">cowrie/</span>
+  SPEC.md                    <span class="code-dim">Wire format specification</span>
+  README.md                  <span class="code-dim">Project overview</span>
+  CHANGELOG.md               <span class="code-dim">Version history</span>
+  <span class="code-accent">go/</span>
+    types.go                 <span class="code-dim">Value type, type tags, all struct defs</span>
+    new.go                   <span class="code-dim">Value constructors</span>
+    encode.go                <span class="code-dim">Encoder (buffer pool, two-pass)</span>
+    decode.go                <span class="code-dim">Decoder (limits, sentinel errors)</span>
+    encode_writer.go         <span class="code-dim">Scatter-gather EncodeToWriter</span>
+    compress.go              <span class="code-dim">gzip/zstd framing</span>
+    json.go                  <span class="code-dim">JSON bridge (FromJSON, ToJSON, enriched)</span>
+    any_api.go               <span class="code-dim">EncodeAny/DecodeAny with tensorization</span>
+    schema.go                <span class="code-dim">SchemaFingerprint (FNV-1a)</span>
+    hints.go                 <span class="code-dim">Column hint types and encoding</span>
+    column_reader.go         <span class="code-dim">Partial decode via hints</span>
+    view.go                  <span class="code-dim">Zero-copy tensor views</span>
+    <span class="code-accent">gen1/</span>
+      gen1.go                <span class="code-dim">Legacy codec (456 lines)</span>
+    <span class="code-accent">codec/</span>
+      codec.go               <span class="code-dim">Reflection Marshal/Unmarshal</span>
+      cowrie_master_stream.go<span class="code-dim">Framed streaming protocol</span>
+      registry.go            <span class="code-dim">Type registry for polymorphic decode</span>
+      tensor.go              <span class="code-dim">Tensor utilities</span>
+    <span class="code-accent">gnn/</span>                     <span class="code-dim">Graph neural network primitives</span>
+    <span class="code-accent">delta/</span>                   <span class="code-dim">Structural diff/patch engine</span>
+    <span class="code-accent">graph/</span>                   <span class="code-dim">Graph frame operations</span>
+    <span class="code-accent">ld/</span>                      <span class="code-dim">Linked data / JSON-LD</span>
+    <span class="code-accent">glyph/</span>                   <span class="code-dim">Glyph text codec</span>
+  <span class="code-pink">python/</span>
+    cowrie/gen2.py            <span class="code-dim">Full Gen2 codec (2,727 lines)</span>
+    cowrie/gen1.py            <span class="code-dim">Gen1 codec (456 lines)</span>
+  <span class="code-pink">rust/src/</span>
+    gen2/decode.rs            <span class="code-dim">Decoder (1,234 lines)</span>
+    gen2/encode.rs            <span class="code-dim">Encoder (527 lines)</span>
+    gen2/types.rs             <span class="code-dim">Type definitions (806 lines)</span>
+  <span class="code-pink">c/</span>
+    src/gen2.c                <span class="code-dim">Full Gen2 codec (3,773 lines)</span>
+    include/cowrie_gen2.h     <span class="code-dim">Public header</span>
+  <span class="code-pink">typescript/src/</span>
+    gen2/index.ts             <span class="code-dim">Full Gen2 codec (3,044 lines)</span>
+  <span class="code-accent">testdata/</span>
+    fixtures/                <span class="code-dim">Cross-language binary test fixtures</span></code></pre>
+  </div>
+</details>
+
+</main>
+</body>
+</html>
