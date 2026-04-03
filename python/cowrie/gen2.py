@@ -44,9 +44,10 @@ import os as _os
 # Priority: Cython > descriptor ring > pure Python
 _HAS_NATIVE = False
 _fast_encode = None
+_fast_decode = None
 if not _os.environ.get('COWRIE_PUREPYTHON'):
     try:
-        from ._cext import cython_encode as _fast_encode
+        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode
         _HAS_NATIVE = True
     except (ImportError, OSError):
         try:
@@ -1676,8 +1677,11 @@ def decode(data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.
         on_unknown_ext: Behavior for unknown extension types.
         opts: Optional decode security limits. Uses safe defaults if None.
     """
-    # Native decode disabled — C bridge doesn't yet handle all extension types
-    # (richtext, delta, bitmask, etc.). Enable once full type coverage is added.
+    if _fast_decode is not None and opts is None and on_unknown_ext == UnknownExtBehavior.KEEP:
+        try:
+            return _fast_decode(data)
+        except (TypeError, ValueError):
+            pass  # fall back for unsupported tags or malformed data
     return Decoder(data, on_unknown_ext=on_unknown_ext, opts=opts).decode()
 
 

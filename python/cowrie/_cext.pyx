@@ -510,3 +510,213 @@ def cython_encode_tensor(object arr_in) -> bytes:
     cdef bytes result = PyBytes_FromStringAndSize(<const char*>buf.data, buf.len)
     cowrie_buf_free(&buf)
     return result
+
+
+# ══════════════════════════════════════════════════════════════════
+# DECODE — Direct wire reader
+# ══════════════════════════════════════════════════════════════════
+
+cdef struct RBuf:
+    const uint8_t *data
+    size_t pos
+    size_t len
+
+cdef inline int rb_byte(RBuf *r, uint8_t *out) noexcept nogil:
+    if r.pos >= r.len: return -1
+    out[0] = r.data[r.pos]; r.pos += 1
+    return 0
+
+cdef inline int rb_raw(RBuf *r, size_t n, const uint8_t **out) noexcept nogil:
+    if r.pos + n > r.len: return -1
+    out[0] = r.data + r.pos; r.pos += n
+    return 0
+
+cdef inline int rb_uvarint(RBuf *r, uint64_t *out) noexcept nogil:
+    cdef uint64_t val = 0
+    cdef int shift = 0
+    cdef uint8_t b
+    while True:
+        if r.pos >= r.len: return -1
+        b = r.data[r.pos]; r.pos += 1
+        val |= (<uint64_t>(b & 0x7F)) << shift
+        if (b & 0x80) == 0:
+            out[0] = val
+            return 0
+        shift += 7
+        if shift >= 64: return -1
+
+cdef inline int64_t zigzag_dec(uint64_t v) noexcept nogil:
+    return <int64_t>((v >> 1) ^ -<int64_t>(v & 1))
+
+
+cdef object _read_value(RBuf *r, list dictionary, int depth):
+    """Decode one cowrie value from the read buffer."""
+    cdef uint8_t tag, dt, rk, flags_byte
+    cdef uint64_t uv, count, field_id, data_len
+    cdef int64_t iv
+    cdef double fval
+    cdef float f32val
+    cdef const uint8_t *raw
+    cdef Py_ssize_t i, n
+    cdef list items
+    cdef dict members
+
+    if depth > 1000:
+        raise ValueError("Maximum nesting depth exceeded")
+
+    if rb_byte(r, &tag) != 0:
+        raise ValueError("Unexpected end of data")
+
+    # ── Inline types (most common first) ──
+    if FIXINT_BASE <= tag <= 0xBF:
+        return _Value(Type_INT64, <int64_t>(tag - FIXINT_BASE))
+
+    if FIXMAP_BASE <= tag <= 0xDF:
+        count = tag - FIXMAP_BASE
+        members = {}
+        for i in range(<Py_ssize_t>count):
+            if rb_uvarint(r, &field_id) != 0: raise ValueError("truncated")
+            if field_id >= <uint64_t>len(dictionary): raise ValueError("bad dict idx")
+            key = dictionary[<Py_ssize_t>field_id]
+            members[key] = _read_value(r, dictionary, depth + 1)
+        return _Value(Type_OBJECT, members)
+
+    if FIXARRAY_BASE <= tag <= 0xCF:
+        count = tag - FIXARRAY_BASE
+        items = []
+        for i in range(<Py_ssize_t>count):
+            items.append(_read_value(r, dictionary, depth + 1))
+        return _Value(Type_ARRAY, items)
+
+    if FIXNEG_BASE <= tag <= 0xEF:
+        return _Value(Type_INT64, <int64_t>(-1 - (tag - FIXNEG_BASE)))
+
+    # ── Tag-based types ──
+    if tag == TAG_NULL:
+        return _Value(Type_NULL, None)
+    elif tag == TAG_FALSE:
+        return _Value(Type_BOOL, False)
+    elif tag == TAG_TRUE:
+        return _Value(Type_BOOL, True)
+    elif tag == TAG_INT64:
+        if rb_uvarint(r, &uv) != 0: raise ValueError("truncated")
+        return _Value(Type_INT64, zigzag_dec(uv))
+    elif tag == TAG_UINT64:
+        if rb_uvarint(r, &uv) != 0: raise ValueError("truncated")
+        return _Value(Type_UINT64, <object>uv)
+    elif tag == TAG_FLOAT64:
+        if rb_raw(r, 8, &raw) != 0: raise ValueError("truncated")
+        memcpy(&fval, raw, 8)
+        return _Value(Type_FLOAT64, fval)
+    elif tag == 0x0F:  # FLOAT32
+        if rb_raw(r, 4, &raw) != 0: raise ValueError("truncated")
+        memcpy(&f32val, raw, 4)
+        return _Value(Type_FLOAT64, <double>f32val)
+    elif tag == TAG_STRING:
+        if rb_uvarint(r, &uv) != 0: raise ValueError("truncated")
+        if rb_raw(r, <size_t>uv, &raw) != 0: raise ValueError("truncated")
+        return _Value(Type_STRING, (<const char*>raw)[:uv].decode('utf-8'))
+    elif tag == TAG_BYTES:
+        if rb_uvarint(r, &uv) != 0: raise ValueError("truncated")
+        if rb_raw(r, <size_t>uv, &raw) != 0: raise ValueError("truncated")
+        return _Value(Type_BYTES, (<const char*>raw)[:uv])
+    elif tag == TAG_ARRAY:
+        if rb_uvarint(r, &count) != 0: raise ValueError("truncated")
+        items = []
+        for i in range(<Py_ssize_t>count):
+            items.append(_read_value(r, dictionary, depth + 1))
+        return _Value(Type_ARRAY, items)
+    elif tag == TAG_OBJECT:
+        if rb_uvarint(r, &count) != 0: raise ValueError("truncated")
+        members = {}
+        for i in range(<Py_ssize_t>count):
+            if rb_uvarint(r, &field_id) != 0: raise ValueError("truncated")
+            if field_id >= <uint64_t>len(dictionary): raise ValueError("bad dict idx")
+            key = dictionary[<Py_ssize_t>field_id]
+            members[key] = _read_value(r, dictionary, depth + 1)
+        return _Value(Type_OBJECT, members)
+    elif tag == TAG_TENSOR:
+        if rb_byte(r, &dt) != 0: raise ValueError("truncated")
+        if rb_byte(r, &rk) != 0: raise ValueError("truncated")
+        shape = []
+        for i in range(rk):
+            if rb_uvarint(r, &uv) != 0: raise ValueError("truncated")
+            shape.append(<int>uv)
+        if rb_uvarint(r, &data_len) != 0: raise ValueError("truncated")
+        if rb_raw(r, <size_t>data_len, &raw) != 0: raise ValueError("truncated")
+        tensor_bytes = (<const char*>raw)[:data_len]
+        from cowrie.gen2 import DType as DT_enum
+        return _Value(Type_TENSOR, TensorData_cls(DT_enum(dt), shape, tensor_bytes))
+    else:
+        # Unsupported tag — fall back to pure Python
+        raise TypeError(f"Unsupported tag: 0x{tag:02x}")
+
+
+# Cached type constants for decode (avoid attribute lookups)
+cdef object Type_NULL, Type_BOOL, Type_INT64, Type_UINT64, Type_FLOAT64
+cdef object Type_STRING, Type_BYTES, Type_ARRAY, Type_OBJECT, Type_TENSOR
+cdef object TensorData_cls
+cdef bint _decode_cached = False
+
+cdef void _cache_decode():
+    global Type_NULL, Type_BOOL, Type_INT64, Type_UINT64, Type_FLOAT64
+    global Type_STRING, Type_BYTES, Type_ARRAY, Type_OBJECT, Type_TENSOR
+    global TensorData_cls, _decode_cached
+    if _decode_cached: return
+    from cowrie.gen2 import Type, TensorData
+    Type_NULL = Type.NULL; Type_BOOL = Type.BOOL; Type_INT64 = Type.INT64
+    Type_UINT64 = Type.UINT64; Type_FLOAT64 = Type.FLOAT64
+    Type_STRING = Type.STRING; Type_BYTES = Type.BYTES
+    Type_ARRAY = Type.ARRAY; Type_OBJECT = Type.OBJECT; Type_TENSOR = Type.TENSOR
+    TensorData_cls = TensorData
+    _decode_cached = True
+
+
+def cython_decode(bytes data):
+    """Decode cowrie bytes to a Python Value. Direct wire reader."""
+    _cache_decode()
+
+    cdef RBuf r
+    r.data = <const uint8_t*>data
+    r.pos = 0
+    r.len = len(data)
+
+    # Read header
+    cdef uint8_t m0, m1, ver, flags
+    if rb_byte(&r, &m0) != 0 or rb_byte(&r, &m1) != 0: raise ValueError("truncated header")
+    if m0 != 0x53 or m1 != 0x4A: raise ValueError("invalid magic")
+    if rb_byte(&r, &ver) != 0: raise ValueError("truncated header")
+    if ver != 0x02: raise ValueError(f"unsupported version: {ver}")
+    if rb_byte(&r, &flags) != 0: raise ValueError("truncated header")
+
+    # Skip column hints if present
+    cdef uint64_t uv, hint_count, shape_len
+    if flags & 0x08:
+        if rb_uvarint(&r, &hint_count) != 0: raise ValueError("truncated hints")
+        for i in range(<Py_ssize_t>hint_count):
+            if rb_uvarint(&r, &uv) != 0: raise ValueError("truncated")
+            r.pos += <size_t>uv  # skip field name
+            r.pos += 1  # skip type byte
+            if rb_uvarint(&r, &shape_len) != 0: raise ValueError("truncated")
+            for j in range(<Py_ssize_t>shape_len):
+                if rb_uvarint(&r, &uv) != 0: raise ValueError("truncated")
+            r.pos += 1  # skip flags
+
+    # Read dictionary
+    cdef uint64_t dict_len
+    if rb_uvarint(&r, &dict_len) != 0: raise ValueError("truncated dict")
+    cdef list dictionary = []
+    cdef const uint8_t *sraw
+    for i in range(<Py_ssize_t>dict_len):
+        if rb_uvarint(&r, &uv) != 0: raise ValueError("truncated dict entry")
+        if rb_raw(&r, <size_t>uv, &sraw) != 0: raise ValueError("truncated dict entry")
+        dictionary.append((<const char*>sraw)[:uv].decode('utf-8'))
+
+    # Decode root value
+    result = _read_value(&r, dictionary, 0)
+
+    # Verify all consumed
+    if r.pos < r.len:
+        raise ValueError(f"trailing data: {r.len - r.pos} bytes")
+
+    return result
