@@ -38,6 +38,22 @@ except ImportError:
     HAS_NUMPY = False
 
 import gzip
+import os as _os
+
+# Native C extension (optional — falls back to pure Python)
+# Priority: Cython > descriptor ring > pure Python
+_HAS_NATIVE = False
+_fast_encode = None
+if not _os.environ.get('COWRIE_PUREPYTHON'):
+    try:
+        from ._cext import cython_encode as _fast_encode
+        _HAS_NATIVE = True
+    except (ImportError, OSError):
+        try:
+            from ._fast import fast_encode as _fast_encode
+            _HAS_NATIVE = True
+        except (ImportError, OSError):
+            pass
 
 # Wire format constants
 MAGIC = b'SJ'
@@ -1283,6 +1299,11 @@ class Encoder:
 
 def encode(v: Value) -> bytes:
     """Encode a value to Cowrie v2 binary format."""
+    if _fast_encode is not None:
+        try:
+            return _fast_encode(v)
+        except (TypeError, RuntimeError):
+            pass  # fall back to pure Python for unsupported types
     return Encoder().encode(v)
 
 
@@ -1655,6 +1676,8 @@ def decode(data: bytes, on_unknown_ext: UnknownExtBehavior = UnknownExtBehavior.
         on_unknown_ext: Behavior for unknown extension types.
         opts: Optional decode security limits. Uses safe defaults if None.
     """
+    # Native decode disabled — C bridge doesn't yet handle all extension types
+    # (richtext, delta, bitmask, etc.). Enable once full type coverage is added.
     return Decoder(data, on_unknown_ext=on_unknown_ext, opts=opts).decode()
 
 

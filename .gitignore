@@ -37,3 +37,8 @@ c/bench_vllm
 
 # B2B pitch notebooks (not public yet)
 benchmarks/notebooks/
+
+# Cython build artifacts
+python/build/
+python/cowrie/_cext.c
+python/cowrie/*.so
