@@ -54,6 +54,9 @@ cdef extern from "cowrie_gen2.h":
                           COWRIEValue *value)
 
     int cowrie_encode(const COWRIEValue *root, COWRIEBuf *buf)
+    int cowrie_encode_with_dict(const COWRIEValue *root,
+                                const char **keys, const size_t *key_lens, size_t key_count,
+                                COWRIEBuf *buf)
     void cowrie_free(COWRIEValue *v)
 
     int cowrie_direct_encode_tensor(COWRIEBuf *buf, uint8_t dtype, uint8_t rank,
@@ -138,8 +141,8 @@ cdef void _ensure_imports():
 
 # ── Value tree builder (C-speed, msgpack-style dispatch) ──────────
 
-cdef COWRIEValue* _to_c(object obj) except NULL:
-    """Convert Python object to COWRIEValue*. Zero-overhead type dispatch."""
+cdef COWRIEValue* _to_c(object obj, list key_collector) except NULL:
+    """Convert Python object to COWRIEValue*. Collects object keys for single-pass encode."""
     cdef COWRIEValue *result
     cdef COWRIEValue *child
     cdef const char *utf8_ptr
@@ -177,15 +180,15 @@ cdef COWRIEValue* _to_c(object obj) except NULL:
         elif t == _T_ARRAY:
             result = cowrie_new_array()
             for item in d:
-                child = _to_c(item)
+                child = _to_c(item, key_collector)
                 cowrie_array_append(result, child)
             return result
         elif t == _T_OBJECT:
             result = cowrie_new_object()
             for k, v in d.items():
-                # Zero-copy string key
                 utf8_ptr = PyUnicode_AsUTF8AndSize(k, &utf8_len)
-                child = _to_c(v)
+                key_collector.append(k)  # collect for pre-built dictionary
+                child = _to_c(v, key_collector)
                 cowrie_object_set(result, utf8_ptr, <size_t>utf8_len, child)
             return result
         elif t == _T_TENSOR:
@@ -246,13 +249,14 @@ cdef COWRIEValue* _to_c(object obj) except NULL:
             else:
                 k = str(k)
                 utf8_ptr = PyUnicode_AsUTF8AndSize(k, &utf8_len)
-            child = _to_c(v)
+            key_collector.append(k)
+            child = _to_c(v, key_collector)
             cowrie_object_set(result, utf8_ptr, <size_t>utf8_len, child)
         return result
     if PyList_CheckExact(obj) or PyTuple_CheckExact(obj):
         result = cowrie_new_array()
         for item in obj:
-            child = _to_c(item)
+            child = _to_c(item, key_collector)
             cowrie_array_append(result, child)
         return result
 
@@ -275,7 +279,8 @@ cdef COWRIEValue* _to_c(object obj) except NULL:
 
 def cython_encode(obj) -> bytes:
     """Encode a Python Value/dict/list to cowrie bytes via Cython+C."""
-    cdef COWRIEValue *c_val = _to_c(obj)
+    cdef list key_collector = []
+    cdef COWRIEValue *c_val = _to_c(obj, key_collector)
     cdef COWRIEBuf buf
 
     cowrie_buf_init(&buf)

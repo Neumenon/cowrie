@@ -532,6 +532,14 @@ static inline void cowrie_encode_opts_init(COWRIEEncodeOpts *opts) {
  */
 int cowrie_encode(const COWRIEValue *root, COWRIEBuf *buf);
 
+/**
+ * Encode with pre-built dictionary (skips collect_keys pass).
+ * Used by Cython extension which collects keys during tree construction.
+ */
+int cowrie_encode_with_dict(const COWRIEValue *root,
+                            const char **keys, const size_t *key_lens, size_t key_count,
+                            COWRIEBuf *buf);
+
 /*
  * Encode with options (e.g., deterministic mode).
  * Returns 0 on success, -1 on error.

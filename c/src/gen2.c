@@ -1590,6 +1590,42 @@ fail:
     return -1;
 }
 
+int cowrie_encode_with_dict(const COWRIEValue *root,
+                            const char **keys, const size_t *key_lens, size_t key_count,
+                            COWRIEBuf *buf) {
+    cowrie_buf_init(buf);
+
+    /* Build dictionary from pre-collected keys (skip collect_keys pass) */
+    Dict dict;
+    dict_init(&dict);
+    for (size_t i = 0; i < key_count; i++) {
+        if (dict_add(&dict, keys[i], key_lens[i]) < 0) goto fail;
+    }
+
+    /* Write header */
+    if (buf_put_byte(buf, COWRIE_MAGIC_0) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_MAGIC_1) != 0) goto fail;
+    if (buf_put_byte(buf, COWRIE_VERSION) != 0) goto fail;
+    if (buf_put_byte(buf, 0) != 0) goto fail;
+
+    /* Write dictionary */
+    if (cowrie_put_uvarint(buf, dict.count) != 0) goto fail;
+    for (size_t i = 0; i < dict.count; i++) {
+        if (encode_string_raw(buf, dict.keys[i], dict.lens[i]) != 0) goto fail;
+    }
+
+    /* Write root value (single pass — no collect_keys needed) */
+    if (encode_value(buf, root, &dict) != 0) goto fail;
+
+    dict_free(&dict);
+    return 0;
+
+fail:
+    dict_free(&dict);
+    cowrie_buf_free(buf);
+    return -1;
+}
+
 int cowrie_encode_with_opts(const COWRIEValue *root, const COWRIEEncodeOpts *opts, COWRIEBuf *buf) {
     cowrie_buf_init(buf);
 
