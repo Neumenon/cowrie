@@ -597,6 +597,28 @@ int cowrie_direct_encode_tensor_field(COWRIEBuf *buf,
 void cowrie_buf_init(COWRIEBuf *buf);
 void cowrie_buf_free(COWRIEBuf *buf);
 
+/* ============================================================
+ * Descriptor Ring Encoder (io_uring-style one-call fast path)
+ * ============================================================
+ *
+ * Python packs a flat descriptor buffer describing the value tree,
+ * C processes it in a single call with dictionary coding + varints.
+ *
+ * Descriptor tags:
+ *   0x00=NULL, 0x01=FALSE, 0x02=TRUE, 0x03=INT64(i64 LE),
+ *   0x04=FLOAT64(f64 LE), 0x05=STRING(len:u32 LE + utf8),
+ *   0x06=BYTES(len:u32 LE + raw), 0x07=UINT64(u64 LE),
+ *   0x10=ARRAY(count:u32 LE + children), 0x11=OBJECT(count:u32 LE + [key_len:u16 + key + child]...),
+ *   0x20=TENSOR(dtype:u8 + rank:u8 + dims[rank]:u32 LE + ptr_index:u32 LE)
+ */
+int cowrie_encode_from_descriptor(
+    const uint8_t *desc, size_t desc_len,
+    const uint8_t **tensor_ptrs,
+    const size_t *tensor_lens,
+    size_t tensor_count,
+    COWRIEBuf *out
+);
+
 /* Varint encoding/decoding */
 int cowrie_put_uvarint(COWRIEBuf *buf, uint64_t v);
 int cowrie_get_uvarint(const uint8_t *data, size_t len, uint64_t *v, size_t *bytes_read);

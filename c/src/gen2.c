@@ -3831,3 +3831,217 @@ int cowrie_direct_encode_tensor_field(COWRIEBuf *buf,
     if (cowrie_put_uvarint(buf, data_len) != 0) return -1;
     return buf_put(buf, data, data_len);
 }
+
+/* ============================================================
+ * Descriptor Ring Encoder
+ * ============================================================
+ * One-call fast path: Python packs a flat descriptor buffer,
+ * C processes it with dictionary coding + varint encoding.
+ */
+
+#define DESC_NULL    0x00
+#define DESC_FALSE   0x01
+#define DESC_TRUE    0x02
+#define DESC_INT64   0x03
+#define DESC_FLOAT64 0x04
+#define DESC_STRING  0x05
+#define DESC_BYTES   0x06
+#define DESC_UINT64  0x07
+#define DESC_ARRAY   0x10
+#define DESC_OBJECT  0x11
+#define DESC_TENSOR  0x20
+
+typedef struct {
+    const uint8_t *data;
+    size_t len;
+    size_t pos;
+} DescReader;
+
+static int dr_u8(DescReader *r, uint8_t *out) {
+    if (r->pos >= r->len) return -1;
+    *out = r->data[r->pos++];
+    return 0;
+}
+static int dr_u16(DescReader *r, uint16_t *out) {
+    if (r->pos + 2 > r->len) return -1;
+    memcpy(out, r->data + r->pos, 2); r->pos += 2;
+    return 0;
+}
+static int dr_u32(DescReader *r, uint32_t *out) {
+    if (r->pos + 4 > r->len) return -1;
+    memcpy(out, r->data + r->pos, 4); r->pos += 4;
+    return 0;
+}
+static int dr_i64(DescReader *r, int64_t *out) {
+    if (r->pos + 8 > r->len) return -1;
+    memcpy(out, r->data + r->pos, 8); r->pos += 8;
+    return 0;
+}
+static int dr_u64(DescReader *r, uint64_t *out) {
+    if (r->pos + 8 > r->len) return -1;
+    memcpy(out, r->data + r->pos, 8); r->pos += 8;
+    return 0;
+}
+static int dr_f64(DescReader *r, double *out) {
+    if (r->pos + 8 > r->len) return -1;
+    memcpy(out, r->data + r->pos, 8); r->pos += 8;
+    return 0;
+}
+static int dr_ptr(DescReader *r, const uint8_t **out, size_t n) {
+    if (r->pos + n > r->len) return -1;
+    *out = r->data + r->pos; r->pos += n;
+    return 0;
+}
+
+static int desc_collect(DescReader *r, Dict *d) {
+    uint8_t tag;
+    if (dr_u8(r, &tag) != 0) return -1;
+    switch (tag) {
+    case DESC_NULL: case DESC_FALSE: case DESC_TRUE: return 0;
+    case DESC_INT64: case DESC_UINT64: case DESC_FLOAT64:
+        r->pos += 8; return r->pos <= r->len ? 0 : -1;
+    case DESC_STRING: case DESC_BYTES: {
+        uint32_t n; if (dr_u32(r, &n) != 0) return -1;
+        r->pos += n; return r->pos <= r->len ? 0 : -1;
+    }
+    case DESC_ARRAY: {
+        uint32_t cnt; if (dr_u32(r, &cnt) != 0) return -1;
+        for (uint32_t i = 0; i < cnt; i++)
+            if (desc_collect(r, d) != 0) return -1;
+        return 0;
+    }
+    case DESC_OBJECT: {
+        uint32_t cnt; if (dr_u32(r, &cnt) != 0) return -1;
+        for (uint32_t i = 0; i < cnt; i++) {
+            uint16_t kl; if (dr_u16(r, &kl) != 0) return -1;
+            const uint8_t *kp; if (dr_ptr(r, &kp, kl) != 0) return -1;
+            if (dict_add(d, (const char *)kp, kl) < 0) return -1;
+            if (desc_collect(r, d) != 0) return -1;
+        }
+        return 0;
+    }
+    case DESC_TENSOR: {
+        uint8_t dt, rk;
+        if (dr_u8(r, &dt) != 0 || dr_u8(r, &rk) != 0) return -1;
+        r->pos += rk * 4 + 4;
+        return r->pos <= r->len ? 0 : -1;
+    }
+    default: return -1;
+    }
+}
+
+static int desc_emit(DescReader *r, COWRIEBuf *b, const Dict *d,
+                     const uint8_t **tp, const size_t *tl, size_t tc) {
+    uint8_t tag;
+    if (dr_u8(r, &tag) != 0) return -1;
+    switch (tag) {
+    case DESC_NULL:  return buf_put_byte(b, SJT_NULL);
+    case DESC_FALSE: return buf_put_byte(b, SJT_FALSE);
+    case DESC_TRUE:  return buf_put_byte(b, SJT_TRUE);
+    case DESC_INT64: {
+        int64_t v; if (dr_i64(r, &v) != 0) return -1;
+        if (v >= 0 && v <= 127) return buf_put_byte(b, (uint8_t)(SJT_FIXINT_BASE + v));
+        if (v >= -16 && v < 0) return buf_put_byte(b, (uint8_t)(SJT_FIXNEG_BASE + (-1 - v)));
+        if (buf_put_byte(b, SJT_INT64) != 0) return -1;
+        return cowrie_put_uvarint(b, (uint64_t)((v << 1) ^ (v >> 63)));
+    }
+    case DESC_UINT64: {
+        uint64_t v; if (dr_u64(r, &v) != 0) return -1;
+        if (v <= 127) return buf_put_byte(b, (uint8_t)(SJT_FIXINT_BASE + v));
+        if (buf_put_byte(b, SJT_UINT64) != 0) return -1;
+        return cowrie_put_uvarint(b, v);
+    }
+    case DESC_FLOAT64: {
+        double v; if (dr_f64(r, &v) != 0) return -1;
+        float f = (float)v;
+        if ((double)f == v) {
+            if (buf_put_byte(b, SJT_FLOAT32) != 0) return -1;
+            return buf_put(b, &f, 4);
+        }
+        if (buf_put_byte(b, SJT_FLOAT64) != 0) return -1;
+        return buf_put(b, &v, 8);
+    }
+    case DESC_STRING: {
+        uint32_t n; if (dr_u32(r, &n) != 0) return -1;
+        const uint8_t *p; if (dr_ptr(r, &p, n) != 0) return -1;
+        if (buf_put_byte(b, SJT_STRING) != 0) return -1;
+        if (cowrie_put_uvarint(b, n) != 0) return -1;
+        return buf_put(b, p, n);
+    }
+    case DESC_BYTES: {
+        uint32_t n; if (dr_u32(r, &n) != 0) return -1;
+        const uint8_t *p; if (dr_ptr(r, &p, n) != 0) return -1;
+        if (buf_put_byte(b, SJT_BYTES) != 0) return -1;
+        if (cowrie_put_uvarint(b, n) != 0) return -1;
+        return buf_put(b, p, n);
+    }
+    case DESC_ARRAY: {
+        uint32_t cnt; if (dr_u32(r, &cnt) != 0) return -1;
+        if (cnt <= 15) { if (buf_put_byte(b, (uint8_t)(SJT_FIXARRAY_BASE + cnt)) != 0) return -1; }
+        else { if (buf_put_byte(b, SJT_ARRAY) != 0 || cowrie_put_uvarint(b, cnt) != 0) return -1; }
+        for (uint32_t i = 0; i < cnt; i++)
+            if (desc_emit(r, b, d, tp, tl, tc) != 0) return -1;
+        return 0;
+    }
+    case DESC_OBJECT: {
+        uint32_t cnt; if (dr_u32(r, &cnt) != 0) return -1;
+        if (cnt <= 15) { if (buf_put_byte(b, (uint8_t)(SJT_FIXMAP_BASE + cnt)) != 0) return -1; }
+        else { if (buf_put_byte(b, SJT_OBJECT) != 0 || cowrie_put_uvarint(b, cnt) != 0) return -1; }
+        for (uint32_t i = 0; i < cnt; i++) {
+            uint16_t kl; if (dr_u16(r, &kl) != 0) return -1;
+            const uint8_t *kp; if (dr_ptr(r, &kp, kl) != 0) return -1;
+            int ki = dict_find(d, (const char *)kp, kl);
+            if (ki < 0) return -1;
+            if (cowrie_put_uvarint(b, (uint64_t)ki) != 0) return -1;
+            if (desc_emit(r, b, d, tp, tl, tc) != 0) return -1;
+        }
+        return 0;
+    }
+    case DESC_TENSOR: {
+        uint8_t dt, rk;
+        if (dr_u8(r, &dt) != 0 || dr_u8(r, &rk) != 0) return -1;
+        if (rk > 32) return -1;
+        uint32_t dims[32];
+        for (uint8_t i = 0; i < rk; i++)
+            if (dr_u32(r, &dims[i]) != 0) return -1;
+        uint32_t pi; if (dr_u32(r, &pi) != 0) return -1;
+        if (pi >= tc) return -1;
+        if (buf_put_byte(b, SJT_TENSOR) != 0) return -1;
+        if (buf_put_byte(b, dt) != 0 || buf_put_byte(b, rk) != 0) return -1;
+        for (uint8_t i = 0; i < rk; i++)
+            if (cowrie_put_uvarint(b, dims[i]) != 0) return -1;
+        if (cowrie_put_uvarint(b, tl[pi]) != 0) return -1;
+        return buf_put(b, tp[pi], tl[pi]);
+    }
+    default: return -1;
+    }
+}
+
+int cowrie_encode_from_descriptor(
+    const uint8_t *desc, size_t desc_len,
+    const uint8_t **tensor_ptrs, const size_t *tensor_lens,
+    size_t tensor_count, COWRIEBuf *out)
+{
+    cowrie_buf_init(out);
+    Dict dict; dict_init(&dict);
+    DescReader r1 = { desc, desc_len, 0 };
+    if (desc_collect(&r1, &dict) != 0) goto fail;
+
+    if (buf_put_byte(out, COWRIE_MAGIC_0) != 0) goto fail;
+    if (buf_put_byte(out, COWRIE_MAGIC_1) != 0) goto fail;
+    if (buf_put_byte(out, COWRIE_VERSION) != 0) goto fail;
+    if (buf_put_byte(out, 0) != 0) goto fail;
+    if (cowrie_put_uvarint(out, dict.count) != 0) goto fail;
+    for (size_t i = 0; i < dict.count; i++)
+        if (encode_string_raw(out, dict.keys[i], dict.lens[i]) != 0) goto fail;
+
+    DescReader r2 = { desc, desc_len, 0 };
+    if (desc_emit(&r2, out, &dict, tensor_ptrs, tensor_lens, tensor_count) != 0) goto fail;
+
+    dict_free(&dict);
+    return 0;
+fail:
+    dict_free(&dict);
+    cowrie_buf_free(out);
+    return -1;
+}
