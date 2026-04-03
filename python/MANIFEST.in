@@ -1,0 +1,6 @@
+# Cython extension
+include cowrie/_cext.c
+include cowrie/_cext.pyx
+
+# Bundled C sources (mirrors ../c/ layout for #include compatibility)
+recursive-include csrc *.c *.h

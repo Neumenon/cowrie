@@ -2,8 +2,11 @@
 """Build script for cowrie-py with optional C extension.
 
 The C extension provides 10x faster encode/decode for common types.
-If compilation fails (no C compiler, PyPy, etc.), cowrie falls back
-to pure Python automatically.
+If compilation fails (no C compiler, missing zlib, etc.), cowrie falls
+back to pure Python automatically — no functionality is lost.
+
+C sources are bundled in csrc/ for sdist builds. In development,
+they're also found via ../c/.
 
 To regenerate _cext.c from _cext.pyx:
     pip install cython numpy
@@ -18,36 +21,37 @@ PYPY = hasattr(sys, "pypy_version_info")
 ext_modules = []
 
 if not PYPY and not os.environ.get("COWRIE_PUREPYTHON"):
-    # Find numpy include dir (needed for cimport numpy)
-    try:
-        import numpy as np
-        numpy_include = [np.get_include()]
-    except ImportError:
-        numpy_include = []
+    # Find C sources: csrc/ (sdist) or ../c/ (dev checkout)
+    # csrc/ mirrors ../c/ layout so #include "../include/..." works
+    if os.path.exists("csrc/src/gen2.c"):
+        c_sources = ["csrc/src/gen2.c", "csrc/src/json.c"]
+        c_include = ["csrc/include"]
+    elif os.path.exists("../c/src/gen2.c"):
+        c_sources = ["../c/src/gen2.c", "../c/src/json.c"]
+        c_include = ["../c/include"]
+    else:
+        c_sources = None
+        print("NOTE: C sources not found. Installing pure Python only.")
 
-    # C sources are in ../c/ relative to this setup.py
-    c_src = os.path.join("..", "c", "src")
-    c_inc = os.path.join("..", "c", "include")
+    if c_sources and os.path.exists("cowrie/_cext.c"):
+        # numpy include must go through -I flag (absolute paths in
+        # include_dirs are rejected by setuptools)
+        extra_cflags = ["-O2", "-std=c11", "-D_POSIX_C_SOURCE=200809L"]
+        try:
+            import numpy as np
+            extra_cflags.append(f"-I{np.get_include()}")
+        except ImportError:
+            pass
 
-    # Check if C sources exist (they won't in a PyPI sdist without them)
-    gen2_c = os.path.join(c_src, "gen2.c")
-    if os.path.exists(gen2_c):
         ext_modules.append(
             Extension(
                 "cowrie._cext",
-                sources=[
-                    os.path.join("cowrie", "_cext.c"),
-                    os.path.join(c_src, "gen2.c"),
-                    os.path.join(c_src, "json.c"),
-                ],
-                include_dirs=[c_inc] + numpy_include,
+                sources=["cowrie/_cext.c"] + c_sources,
+                include_dirs=c_include,
                 libraries=["z"],
-                extra_compile_args=["-O2", "-std=c11", "-D_POSIX_C_SOURCE=200809L"],
+                extra_compile_args=extra_cflags,
             )
         )
-    else:
-        print("NOTE: C sources not found (../c/src/gen2.c). "
-              "Building without C extension — pure Python only.")
 
 setup(
     ext_modules=ext_modules,
