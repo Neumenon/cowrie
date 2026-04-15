@@ -710,31 +710,6 @@ func BenchmarkCanonicalizeLoose_Allocs_Large(b *testing.B) {
 	}
 }
 
-// ============================================================
-// Helper Benchmarks - Individual Functions
-// ============================================================
-
-// BenchmarkBase64Encode_Small benchmarks the custom base64 encoder (small).
-func BenchmarkBase64Encode_Small(b *testing.B) {
-	data := []byte("hello world")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = base64Encode(data)
-	}
-}
-
-// BenchmarkBase64Encode_Large benchmarks the custom base64 encoder (large).
-func BenchmarkBase64Encode_Large(b *testing.B) {
-	data := make([]byte, 1024)
-	for i := range data {
-		data[i] = byte(i % 256)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = base64Encode(data)
-	}
-}
-
 // BenchmarkDetectTabular benchmarks tabular detection.
 func BenchmarkDetectTabular(b *testing.B) {
 	items := make([]*GValue, 100)

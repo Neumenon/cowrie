@@ -117,12 +117,6 @@ func writeCanonBytes(b *strings.Builder, data []byte) {
 	b.WriteByte('"')
 }
 
-// base64Encode encodes bytes to standard base64.
-// Deprecated: Use base64.StdEncoding.EncodeToString directly.
-func base64Encode(data []byte) string {
-	return base64.StdEncoding.EncodeToString(data)
-}
-
 // ============================================================
 // Loose Mode Hash/Fingerprint
 // ============================================================

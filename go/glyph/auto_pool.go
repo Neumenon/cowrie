@@ -1,6 +1,7 @@
 package glyph
 
 import (
+	"encoding/base64"
 	"fmt"
 	"sort"
 	"strconv"
@@ -273,7 +274,7 @@ func writeValueWithRefs(b *strings.Builder, gv *GValue, refMap map[string]string
 
 	case TypeBytes:
 		b.WriteString("b64\"")
-		b.WriteString(base64Encode(gv.bytesVal))
+		b.WriteString(base64.StdEncoding.EncodeToString(gv.bytesVal))
 		b.WriteString("\"")
 
 	case TypeTime:

@@ -2069,7 +2069,6 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 	off += 2
 
 	gs := GraphShard{}
-	var err error
 
 	maxArr := opts.MaxArrayLen
 	if maxArr <= 0 {
@@ -2331,9 +2330,6 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 			gs.EdgeLabels[i] = v
 		}
 	}
-
-	// Suppress unused variable warning
-	_ = err
 
 	return gs, off, nil
 }
