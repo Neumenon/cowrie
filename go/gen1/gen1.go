@@ -1530,7 +1530,7 @@ func readValue(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	}
 }
 
-func readObject(data []byte, off int, opts DecodeOptions) (any, int, error) {
+func readObject(data []byte, off int, opts DecodeOptions) (map[string]any, int, error) {
 	count, n, err := readUvarint(data, off)
 	if err != nil {
 		return nil, 0, err
@@ -1773,11 +1773,10 @@ func readNode(data []byte, off int, opts DecodeOptions) (any, int, error) {
 		return nil, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off, opts)
+	props, off, err := readObject(data, off, opts)
 	if err != nil {
 		return nil, 0, err
 	}
-	props := propsVal.(map[string]any)
 
 	return Node{ID: id, Labels: labels, Props: props}, off, nil
 }
@@ -1830,11 +1829,10 @@ func readNodeInline(data []byte, off int, opts DecodeOptions) (Node, int, error)
 		return Node{}, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off, opts)
+	props, off, err := readObject(data, off, opts)
 	if err != nil {
 		return Node{}, 0, err
 	}
-	props := propsVal.(map[string]any)
 
 	return Node{ID: id, Labels: labels, Props: props}, off, nil
 }
@@ -1894,11 +1892,10 @@ func readEdge(data []byte, off int, opts DecodeOptions) (any, int, error) {
 		return nil, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off, opts)
+	props, off, err := readObject(data, off, opts)
 	if err != nil {
 		return nil, 0, err
 	}
-	props := propsVal.(map[string]any)
 
 	return Edge{ID: id, Type: edgeType, From: from, To: to, Props: props}, off, nil
 }
@@ -2046,12 +2043,12 @@ func readEdgeBatch(data []byte, off int, opts DecodeOptions) (any, int, error) {
 				return nil, 0, ErrExpectedObjectTag
 			}
 			off++ // skip tagObject
-			propsVal, newOff, err := readObject(data, off, opts)
+			m, newOff, err := readObject(data, off, opts)
 			if err != nil {
 				return nil, 0, err
 			}
 			off = newOff
-			props[i] = propsVal.(map[string]any)
+			props[i] = m
 		}
 	}
 
@@ -2095,12 +2092,12 @@ func readGraphShard(data []byte, off int, opts DecodeOptions) (any, int, error) 
 			return nil, 0, ErrExpectedObjectTag
 		}
 		off++ // skip tagObject
-		metaVal, newOff, err := readObject(data, off, opts)
+		meta, newOff, err := readObject(data, off, opts)
 		if err != nil {
 			return nil, 0, err
 		}
 		off = newOff
-		gs.Metadata = metaVal.(map[string]any)
+		gs.Metadata = meta
 	}
 
 	// Nodes
@@ -2389,11 +2386,10 @@ func readEdgeInline(data []byte, off int, opts DecodeOptions) (Edge, int, error)
 		return Edge{}, 0, ErrExpectedObjectTag
 	}
 	off++ // skip tagObject
-	propsVal, off, err := readObject(data, off, opts)
+	props, off, err := readObject(data, off, opts)
 	if err != nil {
 		return Edge{}, 0, err
 	}
-	props := propsVal.(map[string]any)
 
 	return Edge{ID: id, Type: edgeType, From: from, To: to, Props: props}, off, nil
 }
