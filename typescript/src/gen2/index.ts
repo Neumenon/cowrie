@@ -27,7 +27,7 @@ const FLAG_HAS_COLUMN_HINTS = 0x08;
 const COMPRESS_THRESHOLD = 256;
 
 // Security limits - aligned with Go reference implementation
-const Limits = {
+export const Limits = {
   MAX_DEPTH: 1000,               // Maximum nesting depth
   MAX_ARRAY_LEN: 1_000_000,     // 1M elements (tightened: was 100M)
   MAX_OBJECT_LEN: 1_000_000,    // 1M fields (tightened: was 10M)
@@ -736,7 +736,10 @@ class Encoder {
           this.writeUvarint(entries.length);
         }
         for (const [key, val] of entries) {
-          const idx = this.dictLookup.get(key)!;
+          const idx = this.dictLookup.get(key);
+          if (idx === undefined) {
+            throw new Error(`Internal: object key "${key}" missing from dictionary`);
+          }
           this.writeUvarint(idx);
           this.encodeValue(val);
         }
@@ -935,7 +938,10 @@ class Encoder {
     const entries = Object.entries(props);
     this.writeUvarint(entries.length);
     for (const [key, val] of entries) {
-      const idx = this.dictLookup.get(key)!;
+      const idx = this.dictLookup.get(key);
+      if (idx === undefined) {
+        throw new Error(`Internal: graph prop key "${key}" missing from dictionary`);
+      }
       this.writeUvarint(idx);
       this.encodeValue(val);
     }
@@ -1520,7 +1526,8 @@ export function fromAny(v: unknown, fieldName = ""): Value {
 function inferStringType(s: string, fieldName: string): Value {
   const lowerField = fieldName.toLowerCase();
 
-  // Date inference
+  // Date inference. `new Date(s)` returns Invalid Date on bad input (NaN
+  // getTime) rather than throwing, so no try/catch is needed.
   if (
     lowerField.includes("time") ||
     lowerField.includes("date") ||
@@ -1528,30 +1535,22 @@ function inferStringType(s: string, fieldName: string): Value {
     ["created", "updated"].includes(lowerField)
   ) {
     if (ISO8601_PATTERN.test(s)) {
-      try {
-        const d = new Date(s);
-        if (!isNaN(d.getTime())) return SJ.datetime(d);
-      } catch {
-        /* ignore */
-      }
+      const d = new Date(s);
+      if (!isNaN(d.getTime())) return SJ.datetime(d);
     }
   }
 
-  // Pattern inference
   if (ISO8601_PATTERN.test(s)) {
-    try {
-      const d = new Date(s);
-      if (!isNaN(d.getTime())) return SJ.datetime(d);
-    } catch {
-      /* ignore */
-    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return SJ.datetime(d);
   }
 
   if (UUID_PATTERN.test(s)) {
     try {
       return SJ.uuid128(s);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      if (!(e instanceof RangeError || e instanceof TypeError)) throw e;
+      // Malformed UUID: fall through to plain string.
     }
   }
 
@@ -2191,7 +2190,7 @@ function fnvHashString(h: bigint, s: string): bigint {
  * Map Type enum to ordinal for cross-language fingerprint compatibility.
  * Matches Go's Type enum: Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
  * String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
- * Tensor=13, Image=14, Audio=15, TensorRef=16, Adjlist=17, RichText=18, Delta=19
+ * Tensor=13, TensorRef=14, Image=15, Audio=16, Adjlist=17, RichText=18, Delta=19
  */
 function typeToOrd(type: Type): number {
   switch (type) {
@@ -2223,11 +2222,11 @@ function typeToOrd(type: Type): number {
       return 12;
     case Type.TENSOR:
       return 13;
-    case Type.IMAGE:
-      return 14;
-    case Type.AUDIO:
-      return 15;
     case Type.TENSOR_REF:
+      return 14;
+    case Type.IMAGE:
+      return 15;
+    case Type.AUDIO:
       return 16;
     case Type.ADJLIST:
       return 17;
@@ -2553,14 +2552,8 @@ export function readMasterFrame(data: Uint8Array): [MasterFrame, number] {
     throw new Error("Truncated master frame");
   }
 
-  // Check magic
   if (!isMasterStream(data)) {
-    // Check for legacy Cowrie document
-    if (isCowrieDocument(data)) {
-      return readLegacyDocument(data);
-    }
-    // Try legacy stream format
-    return readLegacyStream(data);
+    throw new Error("Invalid master stream magic");
   }
 
   const version = data[4];
@@ -2622,56 +2615,6 @@ export function readMasterFrame(data: Uint8Array): [MasterFrame, number] {
   };
 
   return [{ header, meta, payload, typeId }, pos];
-}
-
-function readLegacyDocument(data: Uint8Array): [MasterFrame, number] {
-  const payload = decode(data);
-  const typeId = schemaFingerprint32(payload);
-
-  // Re-encode to find length (we need actual consumed bytes)
-  const reencoded = encode(payload);
-
-  const header: MasterFrameHeader = {
-    version: MASTER_VERSION,
-    flags: 0,
-    headerLen: 0,
-    typeId,
-    payloadLen: reencoded.length,
-    rawLen: 0,
-    metaLen: 0,
-  };
-
-  return [{ header, meta: null, payload, typeId }, reencoded.length];
-}
-
-function readLegacyStream(data: Uint8Array): [MasterFrame, number] {
-  if (data.length < 4) {
-    throw new Error("Truncated legacy stream");
-  }
-
-  const frameLen = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
-  if (frameLen === 0) {
-    throw new Error("Invalid legacy stream frame length");
-  }
-
-  if (4 + frameLen > data.length) {
-    throw new Error("Truncated legacy stream (payload)");
-  }
-
-  const payload = decode(data.slice(4, 4 + frameLen));
-  const typeId = schemaFingerprint32(payload);
-
-  const header: MasterFrameHeader = {
-    version: MASTER_VERSION,
-    flags: 0,
-    headerLen: 0,
-    typeId,
-    payloadLen: frameLen,
-    rawLen: 0,
-    metaLen: 0,
-  };
-
-  return [{ header, meta: null, payload, typeId }, 4 + frameLen];
 }
 
 // ============================================================

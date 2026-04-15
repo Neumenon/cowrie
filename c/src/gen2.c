@@ -967,13 +967,18 @@ static int dict_add(Dict *d, const char *key, size_t len) {
     int idx = dict_find(d, key, len);
     if (idx >= 0) return idx;
 
-    /* Grow keys array if needed */
+    /* Grow keys array if needed.
+     *
+     * Each realloc must be checked and assigned before the next, otherwise
+     * a failed second realloc would leave d->keys pointing to freed memory
+     * while d->lens still referred to the old block. */
     if (d->count >= d->cap) {
         size_t new_cap = d->cap ? d->cap * 2 : 16;
         char **new_keys = realloc(d->keys, new_cap * sizeof(char *));
-        size_t *new_lens = realloc(d->lens, new_cap * sizeof(size_t));
-        if (!new_keys || !new_lens) return -1;
+        if (!new_keys) return -1;
         d->keys = new_keys;
+        size_t *new_lens = realloc(d->lens, new_cap * sizeof(size_t));
+        if (!new_lens) return -1;
         d->lens = new_lens;
         d->cap = new_cap;
     }
@@ -3055,13 +3060,56 @@ static int key_compare(const void *a, const void *b) {
     return strcmp(ma->key, mb->key);
 }
 
+/* Map C enum type to Go's canonical Type ordinal for cross-language
+ * fingerprint compatibility. The C enum order is ABI-frozen (COWRIE_EXT
+ * at 11, arrays/objects follow) and does not match Go's iota order, so
+ * this helper is required to produce matching fingerprints.
+ *
+ * Canonical Go order: Null=0, Bool=1, Int64=2, Uint64=3, Float64=4,
+ * Decimal128=5, String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10,
+ * Array=11, Object=12, Tensor=13, TensorRef=14, Image=15, Audio=16,
+ * Adjlist=17, RichText=18, Delta=19, UnknownExt=20, Node=21, Edge=22,
+ * NodeBatch=23, EdgeBatch=24, GraphShard=25, Bitmask=26. */
+static uint8_t type_to_go_ord(COWRIEType t) {
+    switch (t) {
+    case COWRIE_NULL:        return 0;
+    case COWRIE_BOOL:        return 1;
+    case COWRIE_INT64:       return 2;
+    case COWRIE_UINT64:      return 3;
+    case COWRIE_FLOAT64:     return 4;
+    case COWRIE_DECIMAL128:  return 5;
+    case COWRIE_STRING:      return 6;
+    case COWRIE_BYTES:       return 7;
+    case COWRIE_DATETIME64:  return 8;
+    case COWRIE_UUID128:     return 9;
+    case COWRIE_BIGINT:      return 10;
+    case COWRIE_ARRAY:       return 11;
+    case COWRIE_OBJECT:      return 12;
+    case COWRIE_TENSOR:      return 13;
+    case COWRIE_TENSOR_REF:  return 14;
+    case COWRIE_IMAGE:       return 15;
+    case COWRIE_AUDIO:       return 16;
+    case COWRIE_ADJLIST:     return 17;
+    case COWRIE_RICH_TEXT:   return 18;
+    case COWRIE_DELTA:       return 19;
+    case COWRIE_EXT:         return 20;
+    case COWRIE_NODE:        return 21;
+    case COWRIE_EDGE:        return 22;
+    case COWRIE_NODE_BATCH:  return 23;
+    case COWRIE_EDGE_BATCH:  return 24;
+    case COWRIE_GRAPH_SHARD: return 25;
+    case COWRIE_BITMASK:     return 26;
+    }
+    return 0xff;
+}
+
 static uint64_t schema_fingerprint_impl(const COWRIEValue *v, uint64_t hash) {
     if (!v) {
-        return fnv1a_byte(hash, (uint8_t)COWRIE_NULL);
+        return fnv1a_byte(hash, (uint8_t)0);
     }
 
-    /* Hash the type ordinal */
-    hash = fnv1a_byte(hash, (uint8_t)v->type);
+    /* Hash the type ordinal (Go-canonical, not C-enum value) */
+    hash = fnv1a_byte(hash, type_to_go_ord(v->type));
 
     switch (v->type) {
     case COWRIE_NULL:
