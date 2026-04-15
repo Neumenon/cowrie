@@ -423,6 +423,11 @@ static COWRIEValue* handle_special_object(COWRIEValue *obj) {
         else if (dl == 4 && memcmp(ds, "bool", 4) == 0) dtype = COWRIE_DTYPE_BOOL;
         else if (dl == 8 && memcmp(ds, "bfloat16", 8) == 0) dtype = COWRIE_DTYPE_BFLOAT16;
         else if (dl == 7 && memcmp(ds, "float16", 7) == 0) dtype = COWRIE_DTYPE_FLOAT16;
+        else if (dl == 5 && memcmp(ds, "qint2", 5) == 0) dtype = COWRIE_DTYPE_QINT2;
+        else if (dl == 5 && memcmp(ds, "qint3", 5) == 0) dtype = COWRIE_DTYPE_QINT3;
+        else if (dl == 5 && memcmp(ds, "qint4", 5) == 0) dtype = COWRIE_DTYPE_QINT4;
+        else if (dl == 7 && memcmp(ds, "ternary", 7) == 0) dtype = COWRIE_DTYPE_TERNARY;
+        else if (dl == 6 && memcmp(ds, "binary", 6) == 0) dtype = COWRIE_DTYPE_BINARY;
         else return NULL;
 
         /* Parse dims */
@@ -719,6 +724,11 @@ static int write_value(COWRIEBuf *buf, const COWRIEValue *v, int pretty, int dep
                 case COWRIE_DTYPE_BOOL: dtype_str = "bool"; break;
                 case COWRIE_DTYPE_BFLOAT16: dtype_str = "bfloat16"; break;
                 case COWRIE_DTYPE_FLOAT16: dtype_str = "float16"; break;
+                case COWRIE_DTYPE_QINT2: dtype_str = "qint2"; break;
+                case COWRIE_DTYPE_QINT3: dtype_str = "qint3"; break;
+                case COWRIE_DTYPE_QINT4: dtype_str = "qint4"; break;
+                case COWRIE_DTYPE_TERNARY: dtype_str = "ternary"; break;
+                case COWRIE_DTYPE_BINARY: dtype_str = "binary"; break;
                 default: dtype_str = "unknown";
             }
 
