@@ -79,16 +79,6 @@ func TestSupportedModels(t *testing.T) {
 	}
 }
 
-func TestIsONNXEnabled(t *testing.T) {
-	// When built without -tags onnx, this should be false
-	if IsONNXEnabled() {
-		t.Log("ONNX is enabled (built with -tags onnx)")
-	} else {
-		t.Log("ONNX is not enabled (stub)")
-	}
-	// This test passes either way, just logs the state
-}
-
 func TestFallbackClassify(t *testing.T) {
 	// Build a simple graph: 0 -> 1 -> 2
 	indPtr := []int64{0, 1, 2, 2}

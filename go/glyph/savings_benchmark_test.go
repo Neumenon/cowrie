@@ -6,40 +6,6 @@ import (
 	"testing"
 )
 
-// TestFullSavingsSummary shows all savings across the codec suite
-func TestFullSavingsSummary(t *testing.T) {
-	t.Log("")
-	t.Log("═══════════════════════════════════════════════════════════════════════")
-	t.Log("              COMPLETE GLYPH/Cowrie CODEC SAVINGS SUMMARY")
-	t.Log("═══════════════════════════════════════════════════════════════════════")
-	t.Log("")
-	t.Log("BINARY FORMATS (for storage/transfer):")
-	t.Log("───────────────────────────────────────────────────────────────────────")
-	t.Log("  Cowrie Gen1 Binary vs JSON:     48% savings (52% of original size)")
-	t.Log("  Cowrie Gen2 + zstd:             95% savings (5% of original size)")
-	t.Log("  Cowrie Gen2 + gzip:             93% savings (7% of original size)")
-	t.Log("")
-	t.Log("SPECIALIZED ENCODINGS:")
-	t.Log("───────────────────────────────────────────────────────────────────────")
-	t.Log("  Sparse Tensor (COO+RLE):       79% savings (21% of original size)")
-	t.Log("  Delta Encoding (monotonic):    50% savings (50% of original size)")
-	t.Log("  SIMD Group Varint (small):     68% savings (32% of original size)")
-	t.Log("")
-	t.Log("TEXT FORMATS (for LLM/human use):")
-	t.Log("───────────────────────────────────────────────────────────────────────")
-	t.Log("  Text GLYPH vs JSON:            24% byte savings")
-	t.Log("  Packed Structs vs JSON:        46% byte savings")
-	t.Log("  Tabular Format vs JSON:        52% byte savings")
-	t.Log("  Token-Aware Abbreviations:     19% token savings")
-	t.Log("")
-	t.Log("STREAMING OPTIMIZATIONS:")
-	t.Log("───────────────────────────────────────────────────────────────────────")
-	t.Log("  Dictionary Encoding:           11% additional savings on repeated keys")
-	t.Log("  String Interning:              Memory deduplication for decoding")
-	t.Log("═══════════════════════════════════════════════════════════════════════")
-	t.Log("")
-}
-
 // TestComprehensiveSavings measures savings across different data types and encodings
 func TestComprehensiveSavings(t *testing.T) {
 	results := []struct {

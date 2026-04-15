@@ -33,14 +33,6 @@ func TestSupportedGATModels(t *testing.T) {
 	}
 }
 
-func TestIsGATEnabled(t *testing.T) {
-	if IsGATEnabled() {
-		t.Log("GAT is enabled (built with -tags onnx)")
-	} else {
-		t.Log("GAT is not enabled (stub)")
-	}
-}
-
 func TestFallbackGATClassify(t *testing.T) {
 	// Build a simple graph: 0 <-> 1 <-> 2
 	indPtr := []int64{0, 1, 3, 4}
