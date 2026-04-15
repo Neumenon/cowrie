@@ -272,9 +272,13 @@ func TestSizeComparison_SmallGraph(t *testing.T) {
 	t.Logf("  JSON+gzip:     %8d bytes", len(jsonGz))
 	t.Logf("  Cowrie-GNN:     %8d bytes", len(gnnData))
 	t.Logf("  Cowrie-GNN+gz:  %8d bytes", len(gnnGz))
-	t.Logf("")
-	t.Logf("  GNN vs JSON:        %.2fx smaller", float64(len(jsonData))/float64(len(gnnData)))
-	t.Logf("  GNN+gz vs JSON+gz:  %.2fx smaller", float64(len(jsonGz))/float64(len(gnnGz)))
+
+	if len(gnnData) == 0 {
+		t.Fatal("Cowrie-GNN produced empty output")
+	}
+	if len(gnnData) >= len(jsonData) {
+		t.Errorf("Cowrie-GNN (%d) not smaller than JSON (%d)", len(gnnData), len(jsonData))
+	}
 }
 
 func TestSizeComparison_CoraLike(t *testing.T) {
@@ -291,9 +295,13 @@ func TestSizeComparison_CoraLike(t *testing.T) {
 	t.Logf("  JSON+gzip:     %8d bytes (%.1f MB)", len(jsonGz), float64(len(jsonGz))/1e6)
 	t.Logf("  Cowrie-GNN:     %8d bytes (%.1f MB)", len(gnnData), float64(len(gnnData))/1e6)
 	t.Logf("  Cowrie-GNN+gz:  %8d bytes (%.1f MB)", len(gnnGz), float64(len(gnnGz))/1e6)
-	t.Logf("")
-	t.Logf("  GNN vs JSON:        %.2fx smaller", float64(len(jsonData))/float64(len(gnnData)))
-	t.Logf("  GNN+gz vs JSON+gz:  %.2fx smaller", float64(len(jsonGz))/float64(len(gnnGz)))
+
+	if len(gnnData) == 0 {
+		t.Fatal("Cowrie-GNN produced empty output")
+	}
+	if len(gnnData) >= len(jsonData) {
+		t.Errorf("Cowrie-GNN (%d) not smaller than JSON (%d)", len(gnnData), len(jsonData))
+	}
 }
 
 func TestSizeComparison_MediumGraph(t *testing.T) {
@@ -310,9 +318,13 @@ func TestSizeComparison_MediumGraph(t *testing.T) {
 	t.Logf("  JSON+gzip:     %8d bytes (%.1f MB)", len(jsonGz), float64(len(jsonGz))/1e6)
 	t.Logf("  Cowrie-GNN:     %8d bytes (%.1f MB)", len(gnnData), float64(len(gnnData))/1e6)
 	t.Logf("  Cowrie-GNN+gz:  %8d bytes (%.1f MB)", len(gnnGz), float64(len(gnnGz))/1e6)
-	t.Logf("")
-	t.Logf("  GNN vs JSON:        %.2fx smaller", float64(len(jsonData))/float64(len(gnnData)))
-	t.Logf("  GNN+gz vs JSON+gz:  %.2fx smaller", float64(len(jsonGz))/float64(len(gnnGz)))
+
+	if len(gnnData) == 0 {
+		t.Fatal("Cowrie-GNN produced empty output")
+	}
+	if len(gnnData) >= len(jsonData) {
+		t.Errorf("Cowrie-GNN (%d) not smaller than JSON (%d)", len(gnnData), len(jsonData))
+	}
 }
 
 // Compression Battle: Can we beat JSON+gzip?
