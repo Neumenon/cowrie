@@ -324,7 +324,6 @@ class TestErrorHandling:
         with pytest.raises(EOFError):
             decode(b"")
 
-    @pytest.mark.xfail(reason="gen1 decoder silently returns '' for truncated string payload; tracked bug")
     def test_truncated_string(self):
         """String with length but no data."""
         data = bytes([0x05, 10])

@@ -116,6 +116,13 @@ def _write_uvarint(w: io.BytesIO, n: int) -> None:
     w.write(bytes(buf))
 
 
+def _read_exact(r: io.BytesIO, n: int) -> bytes:
+    data = r.read(n)
+    if len(data) != n:
+        raise EOFError(f"Truncated payload: expected {n} bytes, got {len(data)}")
+    return data
+
+
 def _read_uvarint(r: io.BytesIO) -> int:
     """Read unsigned varint.
 
@@ -321,17 +328,17 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
     elif tag == TAG_INT64:
         return _zigzag_decode(_read_uvarint(r))
     elif tag == TAG_FLOAT64:
-        return struct.unpack('<d', r.read(8))[0]
+        return struct.unpack('<d', _read_exact(r, 8))[0]
     elif tag == TAG_STRING:
         length = _read_uvarint(r)
         if length > MAX_STRING_LEN:
             raise SecurityLimitExceeded(f"String too long: {length} > {MAX_STRING_LEN}")
-        return r.read(length).decode('utf-8')
+        return _read_exact(r, length).decode('utf-8')
     elif tag == TAG_BYTES:
         length = _read_uvarint(r)
         if length > MAX_BYTES_LEN:
             raise SecurityLimitExceeded(f"Bytes too long: {length} > {MAX_BYTES_LEN}")
-        return r.read(length)
+        return _read_exact(r, length)
     elif tag == TAG_ARRAY:
         count = _read_uvarint(r)
         if count > MAX_ARRAY_LEN:
@@ -346,19 +353,19 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
             key_len = _read_uvarint(r)
             if key_len > MAX_STRING_LEN:
                 raise SecurityLimitExceeded(f"String too long: {key_len} > {MAX_STRING_LEN}")
-            key = r.read(key_len).decode('utf-8')
+            key = _read_exact(r, key_len).decode('utf-8')
             result[key] = _decode_value(r, depth + 1)
         return result
     elif tag == TAG_INT64_ARRAY:
         count = _read_uvarint(r)
         if count > MAX_ARRAY_LEN:
             raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
-        return [struct.unpack('<q', r.read(8))[0] for _ in range(count)]
+        return [struct.unpack('<q', _read_exact(r, 8))[0] for _ in range(count)]
     elif tag == TAG_FLOAT64_ARRAY:
         count = _read_uvarint(r)
         if count > MAX_ARRAY_LEN:
             raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
-        return [struct.unpack('<d', r.read(8))[0] for _ in range(count)]
+        return [struct.unpack('<d', _read_exact(r, 8))[0] for _ in range(count)]
     elif tag == TAG_STRING_ARRAY:
         count = _read_uvarint(r)
         if count > MAX_ARRAY_LEN:
@@ -366,59 +373,59 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
         result = []
         for _ in range(count):
             length = _read_uvarint(r)
-            result.append(r.read(length).decode('utf-8'))
+            result.append(_read_exact(r, length).decode('utf-8'))
         return result
     elif tag == TAG_UINT64:
         return _read_uvarint(r)
     elif tag == TAG_DECIMAL128:
-        scale = r.read(1)[0]
-        coefficient = r.read(16)
+        scale = _read_exact(r, 1)[0]
+        coefficient = _read_exact(r, 16)
         return {"scale": scale, "coefficient": coefficient}
     elif tag == TAG_DATETIME64:
-        raw = r.read(8)
+        raw = _read_exact(r, 8)
         return struct.unpack('<q', raw)[0]
     elif tag == TAG_UUID128:
-        return r.read(16)
+        return _read_exact(r, 16)
     elif tag == TAG_BIGINT:
         length = _read_uvarint(r)
-        payload = r.read(length)
+        payload = _read_exact(r, length)
         return int.from_bytes(payload, byteorder='big', signed=True)
     elif tag == TAG_EXTENSION:
         ext_type = _read_uvarint(r)
         length = _read_uvarint(r)
-        data = r.read(length)
+        data = _read_exact(r, length)
         return {"ext_type": ext_type, "data": data}
     elif tag == TAG_FLOAT32:
-        return struct.unpack('<f', r.read(4))[0]
+        return struct.unpack('<f', _read_exact(r, 4))[0]
     elif tag == TAG_NODE:
         node_id = _zigzag_decode(_read_uvarint(r))
         label_len = _read_uvarint(r)
-        label = r.read(label_len).decode('utf-8')
+        label = _read_exact(r, label_len).decode('utf-8')
         prop_count = _read_uvarint(r)
         if prop_count > MAX_OBJECT_LEN:
             raise SecurityLimitExceeded(f"Properties too large: {prop_count} > {MAX_OBJECT_LEN}")
         properties = {}
         for _ in range(prop_count):
             key_len = _read_uvarint(r)
-            key = r.read(key_len).decode('utf-8')
+            key = _read_exact(r, key_len).decode('utf-8')
             properties[key] = _decode_value(r, depth + 1)
         return Node(id=node_id, label=label, properties=properties)
     elif tag == TAG_EDGE:
         src = _zigzag_decode(_read_uvarint(r))
         dst = _zigzag_decode(_read_uvarint(r))
         label_len = _read_uvarint(r)
-        label = r.read(label_len).decode('utf-8')
+        label = _read_exact(r, label_len).decode('utf-8')
         prop_count = _read_uvarint(r)
         if prop_count > MAX_OBJECT_LEN:
             raise SecurityLimitExceeded(f"Properties too large: {prop_count} > {MAX_OBJECT_LEN}")
         properties = {}
         for _ in range(prop_count):
             key_len = _read_uvarint(r)
-            key = r.read(key_len).decode('utf-8')
+            key = _read_exact(r, key_len).decode('utf-8')
             properties[key] = _decode_value(r, depth + 1)
         return Edge(src=src, dst=dst, label=label, properties=properties)
     elif tag == TAG_ADJLIST:
-        id_width = r.read(1)[0]
+        id_width = _read_exact(r, 1)[0]
         node_count = _read_uvarint(r)
         if node_count > MAX_ARRAY_LEN:
             raise SecurityLimitExceeded(f"AdjList node_count too large: {node_count} > {MAX_ARRAY_LEN}")
@@ -427,7 +434,7 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
             raise SecurityLimitExceeded(f"AdjList edge_count too large: {edge_count} > {MAX_ARRAY_LEN}")
         row_offsets = [_read_uvarint(r) for _ in range(node_count + 1)]
         col_bytes_len = edge_count * (4 if id_width == 1 else 8)
-        col_indices = r.read(col_bytes_len)
+        col_indices = _read_exact(r, col_bytes_len)
         return AdjList(
             id_width=id_width,
             node_count=node_count,
@@ -460,7 +467,7 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
         meta = {}
         for _ in range(meta_count):
             key_len = _read_uvarint(r)
-            key = r.read(key_len).decode('utf-8')
+            key = _read_exact(r, key_len).decode('utf-8')
             meta[key] = _decode_value(r, depth + 1)
         return GraphShard(nodes=nodes, edges=edges, meta=meta)
     else:
