@@ -35,7 +35,7 @@ import (
 
 // sortableMapEntryPool provides reusable slices for map sorting.
 var sortableMapEntryPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		slice := make([]sortableMapEntry, 0, 32)
 		return &slice
 	},
@@ -43,7 +43,7 @@ var sortableMapEntryPool = sync.Pool{
 
 // sortableColPool provides reusable slices for column sorting.
 var sortableColPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		slice := make([]sortableCol, 0, 32)
 		return &slice
 	},
@@ -51,7 +51,7 @@ var sortableColPool = sync.Pool{
 
 // stringBuilderPool provides reusable string builders.
 var stringBuilderPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &strings.Builder{}
 	},
 }

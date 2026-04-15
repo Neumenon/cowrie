@@ -134,7 +134,7 @@ func (ts TypeSpec) String() string {
 // Constraint represents a validation constraint.
 type Constraint struct {
 	Kind  ConstraintKind
-	Value interface{} // Type depends on Kind
+	Value any // Type depends on Kind
 }
 
 // ConstraintKind indicates the type of constraint.

@@ -153,7 +153,7 @@ type StreamingValidator struct {
 
 	// Parsed data
 	toolName     string
-	parsedFields map[string]interface{}
+	parsedFields map[string]any
 	errors       []StreamValidationError
 
 	// Timing instrumentation
@@ -190,7 +190,7 @@ type TimelineEvent struct {
 func NewStreamingValidator(registry *ToolRegistry) *StreamingValidator {
 	return &StreamingValidator{
 		registry:      registry,
-		parsedFields:  make(map[string]interface{}),
+		parsedFields:  make(map[string]any),
 		maxBufferSize: DefaultMaxBuffer,
 		maxFieldCount: DefaultMaxFields,
 		maxErrorCount: DefaultMaxErrors,
@@ -222,7 +222,7 @@ func (v *StreamingValidator) Reset() {
 	v.currentVal.Reset()
 	v.hasKey = false
 	v.toolName = ""
-	v.parsedFields = make(map[string]interface{})
+	v.parsedFields = make(map[string]any)
 	v.errors = nil
 	v.tokenCount = 0
 	v.charCount = 0
@@ -438,7 +438,7 @@ func (v *StreamingValidator) finishField() {
 	v.hasKey = false
 }
 
-func (v *StreamingValidator) parseValue(s string) interface{} {
+func (v *StreamingValidator) parseValue(s string) any {
 	// Boolean
 	if s == "t" || s == "true" {
 		return true
@@ -466,7 +466,7 @@ func (v *StreamingValidator) parseValue(s string) interface{} {
 	return s
 }
 
-func (v *StreamingValidator) validateField(key string, value interface{}) {
+func (v *StreamingValidator) validateField(key string, value any) {
 	if key == "action" || key == "tool" {
 		return
 	}
@@ -578,7 +578,7 @@ func (v *StreamingValidator) validateComplete() {
 	}
 }
 
-func toFloat64(v interface{}) (float64, bool) {
+func toFloat64(v any) (float64, bool) {
 	switch val := v.(type) {
 	case int64:
 		return float64(val), true
@@ -602,7 +602,7 @@ type StreamValidationResult struct {
 	ToolName    string                  // Detected tool name (may be empty)
 	ToolAllowed *bool                   // Whether tool is in allow list (nil if unknown)
 	Errors      []StreamValidationError // Accumulated errors
-	Fields      map[string]interface{}  // Parsed fields so far
+	Fields      map[string]any  // Parsed fields so far
 	TokenCount  int                     // Tokens processed
 	CharCount   int                     // Characters processed
 	Timeline    []TimelineEvent         // Significant events
@@ -623,7 +623,7 @@ func (v *StreamingValidator) GetResult() *StreamValidationResult {
 		Valid:               len(v.errors) == 0,
 		ToolName:            v.toolName,
 		Errors:              append([]StreamValidationError{}, v.errors...),
-		Fields:              make(map[string]interface{}, len(v.parsedFields)),
+		Fields:              make(map[string]any, len(v.parsedFields)),
 		TokenCount:          v.tokenCount,
 		CharCount:           v.charCount,
 		Timeline:            append([]TimelineEvent{}, v.timeline...),

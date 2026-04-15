@@ -345,7 +345,7 @@ func coefToInt(coef []byte) *big.Int {
 }
 
 // DecimalFromAny creates a Decimal128 from various types.
-func DecimalFromAny(value interface{}) (Decimal128, error) {
+func DecimalFromAny(value any) (Decimal128, error) {
 	switch v := value.(type) {
 	case Decimal128:
 		return v, nil

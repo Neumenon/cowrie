@@ -154,7 +154,7 @@ func EmitError(code, msg string, sid, seq uint64) []byte {
 // ============================================================
 
 // ParseUIEvent parses a UI event payload and returns its type and fields.
-func ParseUIEvent(payload []byte) (typeName string, fields map[string]interface{}, err error) {
+func ParseUIEvent(payload []byte) (typeName string, fields map[string]any, err error) {
 	result, err := glyph.Parse(string(payload))
 	if err != nil {
 		return "", nil, fmt.Errorf("parse ui event: %w", err)
@@ -176,7 +176,7 @@ func ParseUIEvent(payload []byte) (typeName string, fields map[string]interface{
 		return "", nil, fmt.Errorf("parse ui event struct: %w", err)
 	}
 	typeName = sv.TypeName
-	fields = make(map[string]interface{})
+	fields = make(map[string]any)
 
 	for _, f := range sv.Fields {
 		switch f.Value.Type() {

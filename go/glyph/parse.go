@@ -500,14 +500,14 @@ func (p *Parser) skipSchemaBlock() {
 
 // Error handling
 
-func (p *Parser) addError(pos Position, format string, args ...interface{}) {
+func (p *Parser) addError(pos Position, format string, args ...any) {
 	p.errors = append(p.errors, ParseError{
 		Message: fmt.Sprintf(format, args...),
 		Pos:     pos,
 	})
 }
 
-func (p *Parser) addWarning(pos Position, format string, args ...interface{}) {
+func (p *Parser) addWarning(pos Position, format string, args ...any) {
 	p.warnings = append(p.warnings, ParseError{
 		Message: fmt.Sprintf(format, args...),
 		Pos:     pos,

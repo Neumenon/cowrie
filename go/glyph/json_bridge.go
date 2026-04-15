@@ -41,24 +41,24 @@ func FromJSONLoose(data []byte) (*GValue, error) {
 
 // FromJSONLooseWithOpts converts JSON bytes to a GValue with options.
 func FromJSONLooseWithOpts(data []byte, opts BridgeOpts) (*GValue, error) {
-	var v interface{}
+	var v any
 	if err := json.Unmarshal(data, &v); err != nil {
 		return nil, fmt.Errorf("JSON parse error: %w", err)
 	}
 	return fromJSONValue(v, opts)
 }
 
-// FromJSONValueLoose converts a Go interface{} (from json.Unmarshal) to GValue.
-func FromJSONValueLoose(v interface{}) (*GValue, error) {
+// FromJSONValueLoose converts a Go any (from json.Unmarshal) to GValue.
+func FromJSONValueLoose(v any) (*GValue, error) {
 	return fromJSONValue(v, DefaultBridgeOpts())
 }
 
-// FromJSONValueLooseWithOpts converts a Go interface{} to GValue with options.
-func FromJSONValueLooseWithOpts(v interface{}, opts BridgeOpts) (*GValue, error) {
+// FromJSONValueLooseWithOpts converts a Go any to GValue with options.
+func FromJSONValueLooseWithOpts(v any, opts BridgeOpts) (*GValue, error) {
 	return fromJSONValue(v, opts)
 }
 
-func fromJSONValue(v interface{}, opts BridgeOpts) (*GValue, error) {
+func fromJSONValue(v any, opts BridgeOpts) (*GValue, error) {
 	if v == nil {
 		return Null(), nil
 	}
@@ -84,7 +84,7 @@ func fromJSONValue(v interface{}, opts BridgeOpts) (*GValue, error) {
 	case string:
 		return Str(val), nil
 
-	case []interface{}:
+	case []any:
 		items := make([]*GValue, 0, len(val))
 		for i, elem := range val {
 			gv, err := fromJSONValue(elem, opts)
@@ -95,7 +95,7 @@ func fromJSONValue(v interface{}, opts BridgeOpts) (*GValue, error) {
 		}
 		return List(items...), nil
 
-	case map[string]interface{}:
+	case map[string]any:
 		// Check for extended markers
 		if opts.Extended {
 			if glyph, ok := val["$glyph"].(string); ok {
@@ -119,7 +119,7 @@ func fromJSONValue(v interface{}, opts BridgeOpts) (*GValue, error) {
 	}
 }
 
-func fromGlyphMarker(markerType string, obj map[string]interface{}) (*GValue, error) {
+func fromGlyphMarker(markerType string, obj map[string]any) (*GValue, error) {
 	switch markerType {
 	case "time":
 		value, ok := obj["value"].(string)
@@ -187,17 +187,17 @@ func ToJSONLooseWithOpts(v *GValue, opts BridgeOpts) ([]byte, error) {
 	return json.Marshal(jsonVal)
 }
 
-// ToJSONValueLoose converts a GValue to a Go interface{} suitable for json.Marshal.
-func ToJSONValueLoose(v *GValue) (interface{}, error) {
+// ToJSONValueLoose converts a GValue to a Go any suitable for json.Marshal.
+func ToJSONValueLoose(v *GValue) (any, error) {
 	return toJSONValue(v, DefaultBridgeOpts())
 }
 
-// ToJSONValueLooseWithOpts converts a GValue to interface{} with options.
-func ToJSONValueLooseWithOpts(v *GValue, opts BridgeOpts) (interface{}, error) {
+// ToJSONValueLooseWithOpts converts a GValue to any with options.
+func ToJSONValueLooseWithOpts(v *GValue, opts BridgeOpts) (any, error) {
 	return toJSONValue(v, opts)
 }
 
-func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
+func toJSONValue(v *GValue, opts BridgeOpts) (any, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -223,7 +223,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 
 	case TypeBytes:
 		if opts.Extended {
-			return map[string]interface{}{
+			return map[string]any{
 				"$glyph": "bytes",
 				"base64": base64.StdEncoding.EncodeToString(v.bytesVal),
 			}, nil
@@ -232,7 +232,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 
 	case TypeTime:
 		if opts.Extended {
-			return map[string]interface{}{
+			return map[string]any{
 				"$glyph": "time",
 				"value":  v.timeVal.Format(time.RFC3339),
 			}, nil
@@ -242,7 +242,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 	case TypeID:
 		idStr := canonRef(v.idVal)
 		if opts.Extended {
-			return map[string]interface{}{
+			return map[string]any{
 				"$glyph": "id",
 				"value":  idStr,
 			}, nil
@@ -250,7 +250,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 		return idStr, nil
 
 	case TypeList:
-		items := make([]interface{}, 0, len(v.listVal))
+		items := make([]any, 0, len(v.listVal))
 		for _, elem := range v.listVal {
 			jsonElem, err := toJSONValue(elem, opts)
 			if err != nil {
@@ -261,7 +261,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 		return items, nil
 
 	case TypeMap:
-		obj := make(map[string]interface{}, len(v.mapVal))
+		obj := make(map[string]any, len(v.mapVal))
 		for _, entry := range v.mapVal {
 			jsonVal, err := toJSONValue(entry.Value, opts)
 			if err != nil {
@@ -273,7 +273,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 
 	case TypeStruct:
 		// Structs become objects with fields as properties
-		obj := make(map[string]interface{}, len(v.structVal.Fields))
+		obj := make(map[string]any, len(v.structVal.Fields))
 		for _, field := range v.structVal.Fields {
 			jsonVal, err := toJSONValue(field.Value, opts)
 			if err != nil {
@@ -289,7 +289,7 @@ func toJSONValue(v *GValue, opts BridgeOpts) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{
+		return map[string]any{
 			v.sumVal.Tag: tagVal,
 		}, nil
 
@@ -314,7 +314,7 @@ func JSONRoundTripLoose(data []byte) ([]byte, error) {
 
 // JSONEqual checks if two JSON byte slices represent equal values.
 func JSONEqual(a, b []byte) (bool, error) {
-	var va, vb interface{}
+	var va, vb any
 	if err := json.Unmarshal(a, &va); err != nil {
 		return false, fmt.Errorf("parse a: %w", err)
 	}
@@ -324,7 +324,7 @@ func JSONEqual(a, b []byte) (bool, error) {
 	return jsonValueEqual(va, vb), nil
 }
 
-func jsonValueEqual(a, b interface{}) bool {
+func jsonValueEqual(a, b any) bool {
 	if a == nil && b == nil {
 		return true
 	}
@@ -342,8 +342,8 @@ func jsonValueEqual(a, b interface{}) bool {
 	case string:
 		vb, ok := b.(string)
 		return ok && va == vb
-	case []interface{}:
-		vb, ok := b.([]interface{})
+	case []any:
+		vb, ok := b.([]any)
 		if !ok || len(va) != len(vb) {
 			return false
 		}
@@ -353,8 +353,8 @@ func jsonValueEqual(a, b interface{}) bool {
 			}
 		}
 		return true
-	case map[string]interface{}:
-		vb, ok := b.(map[string]interface{})
+	case map[string]any:
+		vb, ok := b.(map[string]any)
 		if !ok || len(va) != len(vb) {
 			return false
 		}

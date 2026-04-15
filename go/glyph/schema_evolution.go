@@ -76,7 +76,7 @@ type EvolvingField struct {
 	Name         string            // Field name
 	Type         EvolvingFieldType // Field type
 	Required     bool              // Whether field is required
-	Default      interface{}       // Default value if any
+	Default      any       // Default value if any
 	AddedIn      string            // Version when field was added (e.g., "1.0")
 	DeprecatedIn string            // Version when field was deprecated (empty if not deprecated)
 	RenamedFrom  string            // Previous field name if renamed
@@ -106,7 +106,7 @@ func (f *EvolvingField) IsDeprecatedIn(version string) bool {
 
 // ValidateValue validates a value against this field schema.
 // Returns error message if invalid, empty string if valid.
-func (f *EvolvingField) ValidateValue(value interface{}) string {
+func (f *EvolvingField) ValidateValue(value any) string {
 	if value == nil {
 		if f.Required {
 			return fmt.Sprintf("field %s is required", f.Name)
@@ -144,7 +144,7 @@ func (f *EvolvingField) ValidateValue(value interface{}) string {
 		}
 	case FieldTypeList:
 		switch value.(type) {
-		case []interface{}, []string, []int, []int64, []float64:
+		case []any, []string, []int, []int64, []float64:
 			// OK
 		default:
 			return fmt.Sprintf("field %s must be list", f.Name)
@@ -187,7 +187,7 @@ func (vs *VersionSchema) GetField(name string) *EvolvingField {
 
 // Validate validates data against this schema version.
 // Returns error message if invalid, empty string if valid.
-func (vs *VersionSchema) Validate(data map[string]interface{}) string {
+func (vs *VersionSchema) Validate(data map[string]any) string {
 	// Check required fields
 	for fieldName, fieldSchema := range vs.Fields {
 		if fieldSchema.Required {
@@ -236,7 +236,7 @@ func NewVersionedSchema(name string) *VersionedSchema {
 type FieldConfig struct {
 	Type         EvolvingFieldType
 	Required     bool
-	Default      interface{}
+	Default      any
 	AddedIn      string
 	DeprecatedIn string
 	RenamedFrom  string
@@ -290,11 +290,11 @@ func (vs *VersionedSchema) GetVersion(version string) *VersionSchema {
 // EvolutionParseResult holds the result of parsing versioned data.
 type EvolutionParseResult struct {
 	Error string
-	Data  map[string]interface{}
+	Data  map[string]any
 }
 
 // Parse parses data from a specific version.
-func (vs *VersionedSchema) Parse(data map[string]interface{}, fromVersion string) EvolutionParseResult {
+func (vs *VersionedSchema) Parse(data map[string]any, fromVersion string) EvolutionParseResult {
 	schema := vs.GetVersion(fromVersion)
 	if schema == nil {
 		return EvolutionParseResult{Error: fmt.Sprintf("unknown version: %s", fromVersion)}
@@ -320,7 +320,7 @@ func (vs *VersionedSchema) Parse(data map[string]interface{}, fromVersion string
 	if vs.Mode == ModeTolerant {
 		targetSchema := vs.GetVersion(vs.LatestVersion)
 		if targetSchema != nil {
-			filtered := make(map[string]interface{})
+			filtered := make(map[string]any)
 			for k, v := range result {
 				if _, exists := targetSchema.Fields[k]; exists {
 					filtered[k] = v
@@ -340,7 +340,7 @@ type EvolutionEmitResult struct {
 }
 
 // Emit emits data for a specific version.
-func (vs *VersionedSchema) Emit(data map[string]interface{}, version string) EvolutionEmitResult {
+func (vs *VersionedSchema) Emit(data map[string]any, version string) EvolutionEmitResult {
 	if version == "" {
 		version = vs.LatestVersion
 	}
@@ -361,7 +361,7 @@ func (vs *VersionedSchema) Emit(data map[string]interface{}, version string) Evo
 }
 
 // migrate migrates data from one version to another.
-func (vs *VersionedSchema) migrate(data map[string]interface{}, fromVersion, toVersion string) (map[string]interface{}, string) {
+func (vs *VersionedSchema) migrate(data map[string]any, fromVersion, toVersion string) (map[string]any, string) {
 	currentVersion := fromVersion
 	currentData := copyMap(data)
 
@@ -385,7 +385,7 @@ func (vs *VersionedSchema) migrate(data map[string]interface{}, fromVersion, toV
 }
 
 // migrateStep migrates data from one version to the next.
-func (vs *VersionedSchema) migrateStep(data map[string]interface{}, fromVersion, toVersion string) (map[string]interface{}, string) {
+func (vs *VersionedSchema) migrateStep(data map[string]any, fromVersion, toVersion string) (map[string]any, string) {
 	fromSchema := vs.GetVersion(fromVersion)
 	toSchema := vs.GetVersion(toVersion)
 
@@ -421,7 +421,7 @@ func (vs *VersionedSchema) migrateStep(data map[string]interface{}, fromVersion,
 
 	// 3. Remove unknown fields (tolerant mode)
 	if vs.Mode == ModeTolerant {
-		filtered := make(map[string]interface{})
+		filtered := make(map[string]any)
 		for k, v := range result {
 			if _, exists := toSchema.Fields[k]; exists {
 				filtered[k] = v
@@ -585,8 +585,8 @@ func parseVersionParts(version string) []int {
 }
 
 // copyMap creates a shallow copy of a map.
-func copyMap(m map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{}, len(m))
+func copyMap(m map[string]any) map[string]any {
+	result := make(map[string]any, len(m))
 	for k, v := range m {
 		result[k] = v
 	}

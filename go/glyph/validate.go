@@ -417,7 +417,7 @@ func (v *Validator) getCompiledPattern(pattern string) *regexp.Regexp {
 	return re
 }
 
-func (v *Validator) addError(path, code, format string, args ...interface{}) {
+func (v *Validator) addError(path, code, format string, args ...any) {
 	v.errors = append(v.errors, ValidationError{
 		Path:    path,
 		Code:    code,
@@ -425,7 +425,7 @@ func (v *Validator) addError(path, code, format string, args ...interface{}) {
 	})
 }
 
-func (v *Validator) addWarning(path, code, format string, args ...interface{}) {
+func (v *Validator) addWarning(path, code, format string, args ...any) {
 	v.warnings = append(v.warnings, ValidationError{
 		Path:    path,
 		Code:    code,
