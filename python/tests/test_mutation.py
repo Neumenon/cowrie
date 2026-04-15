@@ -1,14 +1,19 @@
 """Suite 4: Mutation/Corruption Tests for cowrie Python.
 
 Programmatic corruption of valid fixtures — verifies the decoder
-never crashes on corrupted input (only returns errors).
+raises a structured decode error on corrupted input. Unexpected
+exceptions (MemoryError, RecursionError, AttributeError) propagate
+and fail the test.
 """
 
+import struct
 from pathlib import Path
 
 import pytest
 
 from cowrie import gen2
+
+_EXPECTED_DECODE_ERRORS = (ValueError, TypeError, struct.error, IndexError)
 
 
 def _repo_root() -> Path:
@@ -35,7 +40,7 @@ def _load_fixture(name: str) -> bytes:
 
 
 class TestTruncation:
-    """Decoding truncated data must raise, never crash."""
+    """Decoding truncated data must raise a structured error, never crash."""
 
     @pytest.mark.parametrize("fixture", CORE_FIXTURES)
     def test_truncation_at_every_offset(self, fixture: str):
@@ -44,12 +49,12 @@ class TestTruncation:
             truncated = data[:i]
             try:
                 gen2.decode(truncated)
-            except Exception:
-                pass  # Any exception is fine — no crash
+            except _EXPECTED_DECODE_ERRORS:
+                pass
 
 
 class TestBitFlip:
-    """Single-byte XOR corruption must not crash the decoder."""
+    """Single-byte XOR corruption must raise a structured error, never crash."""
 
     @pytest.mark.parametrize("fixture", CORE_FIXTURES)
     def test_bitflip_at_every_offset(self, fixture: str):
@@ -59,12 +64,12 @@ class TestBitFlip:
             corrupted[i] ^= 0xFF
             try:
                 gen2.decode(bytes(corrupted))
-            except Exception:
-                pass  # Any exception is fine — no crash
+            except _EXPECTED_DECODE_ERRORS:
+                pass
 
 
 class TestHeaderCorruption:
-    """Corrupting header bytes must not crash."""
+    """Corrupting header bytes must raise a structured error, never crash."""
 
     @pytest.mark.parametrize("fixture", CORE_FIXTURES[:3])  # subset for speed
     def test_magic_byte_corruption(self, fixture: str):
@@ -75,7 +80,7 @@ class TestHeaderCorruption:
                 corrupted[pos] = val
                 try:
                     gen2.decode(bytes(corrupted))
-                except Exception:
+                except _EXPECTED_DECODE_ERRORS:
                     pass
 
 
@@ -83,24 +88,20 @@ class TestEmptyAndMinimal:
     """Edge-case inputs."""
 
     def test_empty_input(self):
-        with pytest.raises(Exception):
+        with pytest.raises(_EXPECTED_DECODE_ERRORS):
             gen2.decode(b"")
 
     def test_single_byte(self):
         for b in range(256):
             try:
                 gen2.decode(bytes([b]))
-            except Exception:
+            except _EXPECTED_DECODE_ERRORS:
                 pass
 
     def test_just_magic(self):
-        try:
+        with pytest.raises(_EXPECTED_DECODE_ERRORS):
             gen2.decode(b"SJ")
-        except Exception:
-            pass
 
     def test_magic_plus_version(self):
-        try:
+        with pytest.raises(_EXPECTED_DECODE_ERRORS):
             gen2.decode(b"SJ\x02\x00")
-        except Exception:
-            pass

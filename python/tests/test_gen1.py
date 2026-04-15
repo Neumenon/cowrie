@@ -324,21 +324,12 @@ class TestErrorHandling:
         with pytest.raises(EOFError):
             decode(b"")
 
+    @pytest.mark.xfail(reason="gen1 decoder silently returns '' for truncated string payload; tracked bug")
     def test_truncated_string(self):
         """String with length but no data."""
-        # TAG_STRING(0x05) + length=10 but no data follows
-        import io
-        buf = io.BytesIO()
-        buf.write(bytes([0x05]))
-        buf.write(bytes([10]))  # length = 10
-        data = buf.getvalue()
-        # This should either raise or return garbage; at minimum not crash
-        # The _read_uvarint and r.read will handle this
-        # Depending on implementation, it may return short data or raise
-        try:
+        data = bytes([0x05, 10])
+        with pytest.raises((ValueError, TypeError, struct.error, IndexError, EOFError)):
             decode(data)
-        except Exception:
-            pass  # Expected to fail on truncated data
 
     def test_varint_overflow(self):
         """Varint with too many continuation bytes should raise."""

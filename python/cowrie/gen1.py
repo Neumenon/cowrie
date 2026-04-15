@@ -17,7 +17,7 @@ Example
 
 import struct
 import io
-from typing import Any, Dict, List, Union, Tuple, Optional
+from typing import Any
 from dataclasses import dataclass
 
 # Type tags — core types (0x00–0x08)
@@ -68,7 +68,7 @@ class Node:
     """Graph node with id, label, and properties."""
     id: int
     label: str
-    properties: Dict[str, Any]
+    properties: dict[str, Any]
 
 
 @dataclass
@@ -77,7 +77,7 @@ class Edge:
     src: int
     dst: int
     label: str
-    properties: Dict[str, Any]
+    properties: dict[str, Any]
 
 
 @dataclass
@@ -86,16 +86,16 @@ class AdjList:
     id_width: int  # 1=int32, 2=int64
     node_count: int
     edge_count: int
-    row_offsets: List[int]
+    row_offsets: list[int]
     col_indices: bytes
 
 
 @dataclass
 class GraphShard:
     """Graph shard with nodes, edges, and metadata."""
-    nodes: List[Node]
-    edges: List[Edge]
-    meta: Dict[str, Any]
+    nodes: list[Node]
+    edges: list[Edge]
+    meta: dict[str, Any]
 
 
 def _write_uvarint(w: io.BytesIO, n: int) -> None:

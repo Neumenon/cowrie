@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 from enum import IntEnum
 
 try:
@@ -258,7 +258,7 @@ class TensorData:
     Supports zero-copy views via NumPy when available and alignment permits.
     """
     dtype: DType
-    shape: List[int]
+    shape: list[int]
     data: bytes  # Raw tensor data in little-endian format
 
     def __post_init__(self):
@@ -403,7 +403,7 @@ class TensorData:
 
     # Copy methods (always work, return new arrays)
 
-    def copy_float32(self) -> Optional[List[float]]:
+    def copy_float32(self) -> Optional[list[float]]:
         """Copy data to a new list of float32 values."""
         if self.dtype != DType.FLOAT32:
             return None
@@ -412,7 +412,7 @@ class TensorData:
         count = len(self.data) // 4
         return list(struct.unpack(f'<{count}f', self.data))
 
-    def copy_float64(self) -> Optional[List[float]]:
+    def copy_float64(self) -> Optional[list[float]]:
         """Copy data to a new list of float64 values."""
         if self.dtype != DType.FLOAT64:
             return None
@@ -421,7 +421,7 @@ class TensorData:
         count = len(self.data) // 8
         return list(struct.unpack(f'<{count}d', self.data))
 
-    def copy_int32(self) -> Optional[List[int]]:
+    def copy_int32(self) -> Optional[list[int]]:
         """Copy data to a new list of int32 values."""
         if self.dtype != DType.INT32:
             return None
@@ -430,7 +430,7 @@ class TensorData:
         count = len(self.data) // 4
         return list(struct.unpack(f'<{count}i', self.data))
 
-    def copy_int64(self) -> Optional[List[int]]:
+    def copy_int64(self) -> Optional[list[int]]:
         """Copy data to a new list of int64 values."""
         if self.dtype != DType.INT64:
             return None
@@ -606,7 +606,7 @@ class AdjlistData:
     id_width: IDWidth    # 1=int32, 2=int64
     node_count: int
     edge_count: int
-    row_offsets: List[int]  # [node_count + 1] offsets into col_indices
+    row_offsets: list[int]  # [node_count + 1] offsets into col_indices
     col_indices: bytes      # Edge destinations (int32/int64 LE based on id_width)
 
     @property
@@ -633,8 +633,8 @@ class RichTextData:
                  spanCount:varint | spans:[(start:varint, end:varint, kind:varint)...]
     """
     text: str
-    tokens: Optional[List[int]] = None  # Token IDs (e.g., BPE tokens)
-    spans: Optional[List[RichTextSpan]] = None  # Annotated spans
+    tokens: Optional[list[int]] = None  # Token IDs (e.g., BPE tokens)
+    spans: Optional[list[RichTextSpan]] = None  # Annotated spans
 
 
 @dataclass
@@ -654,7 +654,7 @@ class DeltaData:
                  ops:[(opCode:u8, fieldID:varint, [value])...]
     """
     base_id: int       # Reference to base object
-    ops: List[DeltaOp] # Operations
+    ops: list[DeltaOp] # Operations
 
 
 # ============================================================
@@ -671,8 +671,8 @@ class NodeData:
                  propCount:varint | (dictIdx:varint + value)*
     """
     id: str
-    labels: List[str]
-    props: Dict[str, Any]  # Keys are dictionary-coded
+    labels: list[str]
+    props: dict[str, Any]  # Keys are dictionary-coded
 
 
 @dataclass
@@ -687,7 +687,7 @@ class EdgeData:
     from_id: str
     to_id: str
     edge_type: str
-    props: Dict[str, Any]  # Keys are dictionary-coded
+    props: dict[str, Any]  # Keys are dictionary-coded
 
 
 @dataclass
@@ -697,7 +697,7 @@ class NodeBatchData:
 
     Wire format: Tag(0x37) | count:varint | Node[count]
     """
-    nodes: List[NodeData]
+    nodes: list[NodeData]
 
 
 @dataclass
@@ -707,7 +707,7 @@ class EdgeBatchData:
 
     Wire format: Tag(0x38) | count:varint | Edge[count]
     """
-    edges: List[EdgeData]
+    edges: list[EdgeData]
 
 
 @dataclass
@@ -720,9 +720,9 @@ class GraphShardData:
                  edgeCount:varint | Edge* |
                  metaCount:varint | (dictIdx:varint + value)*
     """
-    nodes: List[NodeData]
-    edges: List[EdgeData]
-    metadata: Dict[str, Any]  # Keys are dictionary-coded
+    nodes: list[NodeData]
+    edges: list[EdgeData]
+    metadata: dict[str, Any]  # Keys are dictionary-coded
 
 
 @dataclass
@@ -740,7 +740,7 @@ class BitmaskData:
             raise IndexError(f"bitmask index {i} out of bounds (count={self.count})")
         return (self.bits[i // 8] & (1 << (i % 8))) != 0
 
-    def to_bools(self) -> List[bool]:
+    def to_bools(self) -> list[bool]:
         """Convert to a list of booleans."""
         return [self.get(i) for i in range(self.count)]
 
@@ -814,15 +814,15 @@ class Value:
         return Value(Type.BIGINT, b)
 
     @staticmethod
-    def array(items: List[Value]) -> Value:
+    def array(items: list[Value]) -> Value:
         return Value(Type.ARRAY, items)
 
     @staticmethod
-    def object(members: Dict[str, Value]) -> Value:
+    def object(members: dict[str, Value]) -> Value:
         return Value(Type.OBJECT, members)
 
     @staticmethod
-    def tensor(dtype: DType, shape: List[int], data: bytes) -> Value:
+    def tensor(dtype: DType, shape: list[int], data: bytes) -> Value:
         """Create a tensor value."""
         return Value(Type.TENSOR, TensorData(dtype=dtype, shape=shape, data=data))
 
@@ -848,7 +848,7 @@ class Value:
 
     @staticmethod
     def adjlist(id_width: IDWidth, node_count: int, edge_count: int,
-                row_offsets: List[int], col_indices: bytes) -> Value:
+                row_offsets: list[int], col_indices: bytes) -> Value:
         """Create an adjacency list value for graph data (CSR format)."""
         return Value(Type.ADJLIST, AdjlistData(
             id_width=id_width,
@@ -859,38 +859,38 @@ class Value:
         ))
 
     @staticmethod
-    def richtext(text: str, tokens: Optional[List[int]] = None,
-                 spans: Optional[List[RichTextSpan]] = None) -> Value:
+    def richtext(text: str, tokens: Optional[list[int]] = None,
+                 spans: Optional[list[RichTextSpan]] = None) -> Value:
         """Create a rich text value with optional tokens and spans."""
         return Value(Type.RICHTEXT, RichTextData(text=text, tokens=tokens, spans=spans))
 
     @staticmethod
-    def delta(base_id: int, ops: List[DeltaOp]) -> Value:
+    def delta(base_id: int, ops: list[DeltaOp]) -> Value:
         """Create a delta value representing changes to an object."""
         return Value(Type.DELTA, DeltaData(base_id=base_id, ops=ops))
 
     @staticmethod
-    def node(id: str, labels: List[str], props: Dict[str, 'Value']) -> 'Value':
+    def node(id: str, labels: list[str], props: dict[str, 'Value']) -> 'Value':
         """Create a graph node value."""
         return Value(Type.NODE, NodeData(id=id, labels=labels, props=props))
 
     @staticmethod
-    def edge(from_id: str, to_id: str, edge_type: str, props: Dict[str, 'Value']) -> 'Value':
+    def edge(from_id: str, to_id: str, edge_type: str, props: dict[str, 'Value']) -> 'Value':
         """Create a graph edge value."""
         return Value(Type.EDGE, EdgeData(from_id=from_id, to_id=to_id, edge_type=edge_type, props=props))
 
     @staticmethod
-    def node_batch(nodes: List[NodeData]) -> 'Value':
+    def node_batch(nodes: list[NodeData]) -> 'Value':
         """Create a batch of nodes."""
         return Value(Type.NODE_BATCH, NodeBatchData(nodes=nodes))
 
     @staticmethod
-    def edge_batch(edges: List[EdgeData]) -> 'Value':
+    def edge_batch(edges: list[EdgeData]) -> 'Value':
         """Create a batch of edges."""
         return Value(Type.EDGE_BATCH, EdgeBatchData(edges=edges))
 
     @staticmethod
-    def graph_shard(nodes: List[NodeData], edges: List[EdgeData], metadata: Dict[str, 'Value']) -> 'Value':
+    def graph_shard(nodes: list[NodeData], edges: list[EdgeData], metadata: dict[str, 'Value']) -> 'Value':
         """Create a graph shard containing nodes, edges, and metadata."""
         return Value(Type.GRAPH_SHARD, GraphShardData(nodes=nodes, edges=edges, metadata=metadata))
 
@@ -900,7 +900,7 @@ class Value:
         return Value(Type.BITMASK, BitmaskData(count=count, bits=bits))
 
     @staticmethod
-    def bitmask_from_bools(bools: List[bool]) -> 'Value':
+    def bitmask_from_bools(bools: list[bool]) -> 'Value':
         """Create a bitmask value from a list of booleans."""
         count = len(bools)
         byte_len = (count + 7) // 8
@@ -996,8 +996,8 @@ def zigzag_decode(n: int) -> int:
 class Encoder:
     def __init__(self):
         self.buf = io.BytesIO()
-        self.dict_keys: List[str] = []
-        self.dict_lookup: Dict[str, int] = {}
+        self.dict_keys: list[str] = []
+        self.dict_lookup: dict[str, int] = {}
 
     def _add_key(self, key: str) -> int:
         if key in self.dict_lookup:
@@ -1039,7 +1039,7 @@ class Encoder:
                 self._collect_props_keys(edge.props)
             self._collect_props_keys(v.data.metadata)
 
-    def _collect_props_keys(self, props: Dict[str, Value]):
+    def _collect_props_keys(self, props: dict[str, Value]):
         """Collect keys from a properties dict."""
         for key, val in props.items():
             self._add_key(key)
@@ -1270,7 +1270,7 @@ class Encoder:
         self._write_string(edge.edge_type)
         self._encode_props(edge.props)
 
-    def _encode_props(self, props: Dict[str, Value]):
+    def _encode_props(self, props: dict[str, Value]):
         """Encode dictionary-coded properties."""
         self._write_uvarint(len(props))
         for key, val in props.items():
@@ -1317,7 +1317,7 @@ class Decoder:
                  opts: Optional[DecodeOptions] = None):
         self.data = data
         self.pos = 0
-        self.dict: List[str] = []
+        self.dict: list[str] = []
         self.depth = 0
         self.on_unknown_ext = on_unknown_ext
         self.opts = opts if opts is not None else DecodeOptions()
@@ -1605,7 +1605,7 @@ class Decoder:
         props = self._decode_props()
         return EdgeData(from_id=from_id, to_id=to_id, edge_type=edge_type, props=props)
 
-    def _decode_props(self) -> Dict[str, Value]:
+    def _decode_props(self) -> dict[str, Value]:
         """Decode dictionary-coded properties."""
         prop_count = self._read_uvarint()
         if prop_count > self.opts.max_object_len:
@@ -1829,7 +1829,7 @@ def from_any(v: Any, field_name: str = "") -> Value:
                 ext_type = int(v.get("ext_type"))
                 payload = base64.b64decode(v.get("payload"))
                 return Value.unknown_ext(ext_type, payload)
-            except Exception:
+            except (ValueError, TypeError):
                 pass
         members = {}
         for key, val in v.items():
@@ -2472,7 +2472,7 @@ def schema_equals(a: Value, b: Value) -> bool:
 CRC32_POLYNOMIAL = 0xEDB88320
 
 
-def _build_crc32_table() -> List[int]:
+def _build_crc32_table() -> list[int]:
     """Build CRC32 lookup table."""
     table = []
     for i in range(256):
