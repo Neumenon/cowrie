@@ -1435,8 +1435,7 @@ describe('gen2 master stream edge cases', () => {
     assert.strictEqual(isCowrieDocument(new Uint8Array([0x00, 0x00, 0x00, 0x00])), false);
   });
 
-  it('readMasterFrame from legacy cowrie document', () => {
-    // readMasterFrame requires >= 24 bytes. Build an object large enough.
+  it('readMasterFrame rejects bare cowrie document (legacy format removed)', () => {
     const v = SJ.object({
       x: SJ.int64(42),
       padding1: SJ.string('abcdefghij'),
@@ -1444,38 +1443,29 @@ describe('gen2 master stream edge cases', () => {
     });
     const enc = encode(v);
     assert.ok(enc.length >= 24, `encoded length ${enc.length} must be >= 24`);
-    const [frame, consumed] = readMasterFrame(enc);
-    assert.strictEqual((frame.payload.data as Record<string, Value>)['x'].data, 42n);
-    assert.ok(consumed > 0);
+    assert.throws(() => readMasterFrame(enc), /master stream magic/);
   });
 
-  it('readMasterFrame from legacy stream (length-prefixed)', () => {
+  it('readMasterFrame rejects length-prefixed legacy stream', () => {
     const v = SJ.object({
       y: SJ.int64(99),
       padding1: SJ.string('abcdefghij'),
       padding2: SJ.string('klmnopqrst'),
     });
     const enc = encode(v);
-    // Build legacy stream: 4-byte LE length + cowrie data
     const legacy = new Uint8Array(4 + enc.length);
     const dv = new DataView(legacy.buffer);
     dv.setUint32(0, enc.length, true);
     legacy.set(enc, 4);
-    assert.ok(legacy.length >= 24, `legacy length ${legacy.length} must be >= 24`);
-    const [frame, consumed] = readMasterFrame(legacy);
-    assert.strictEqual((frame.payload.data as Record<string, Value>)['y'].data, 99n);
-    assert.strictEqual(consumed, 4 + enc.length);
+    assert.throws(() => readMasterFrame(legacy), /master stream magic/);
   });
 
   it('readMasterFrame truncated throws', () => {
     assert.throws(() => readMasterFrame(new Uint8Array(10)));
   });
 
-  it('readMasterFrame invalid legacy stream length=0 throws', () => {
-    // 24 bytes of zeros: not master magic, not cowrie magic, falls to legacy stream
-    // with length=0 which is invalid
-    const data = new Uint8Array(24);
-    assert.throws(() => readMasterFrame(data));
+  it('readMasterFrame zero-filled bytes throw', () => {
+    assert.throws(() => readMasterFrame(new Uint8Array(24)));
   });
 });
 

@@ -12,7 +12,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { encode, decode, encodeJson, decodeJson } from './index.ts';
+import { encode, decode, encodeJson, decodeJson, Limits as Gen1Limits } from './index.ts';
+import { Limits as Gen2Limits } from '../gen2/index.ts';
 
 describe('Gen1 encodeJson / decodeJson', () => {
   it('encodeJson roundtrips simple object', () => {
@@ -32,16 +33,6 @@ describe('Gen1 encodeJson / decodeJson', () => {
     assert.strictEqual(parsed.x, 1);
     assert.strictEqual(parsed.y, 'hello');
     assert.strictEqual(parsed.z, true);
-  });
-});
-
-describe('Gen1 bytes type', () => {
-  it('should roundtrip Uint8Array via bytes tag', () => {
-    // Gen1 doesn't encode Uint8Array natively from encode() since it
-    // takes JsonValue which doesn't include Uint8Array. But we can test
-    // the decode path by encoding an object that maps to bytes.
-    // Actually, let's just verify that null and primitives work.
-    assert.strictEqual(decode(encode(null)), null);
   });
 });
 
@@ -241,4 +232,22 @@ describe('Gen1 truncated input invariant', () => {
       }
     });
   }
+});
+
+describe('Gen1 vs Gen2 security-limit lockstep', () => {
+  // Mirrors go/limits_drift_test.go. If either gen tightens or relaxes a
+  // limit, both must move together (or the divergence must be justified
+  // with a test update).
+  it('MAX_DEPTH matches gen2', () => {
+    assert.strictEqual(Gen1Limits.MAX_DEPTH, Gen2Limits.MAX_DEPTH);
+  });
+  it('MAX_ARRAY_LEN matches gen2', () => {
+    assert.strictEqual(Gen1Limits.MAX_ARRAY_LEN, Gen2Limits.MAX_ARRAY_LEN);
+  });
+  it('MAX_OBJECT_LEN matches gen2', () => {
+    assert.strictEqual(Gen1Limits.MAX_OBJECT_LEN, Gen2Limits.MAX_OBJECT_LEN);
+  });
+  it('MAX_STRING_LEN matches gen2', () => {
+    assert.strictEqual(Gen1Limits.MAX_STRING_LEN, Gen2Limits.MAX_STRING_LEN);
+  });
 });

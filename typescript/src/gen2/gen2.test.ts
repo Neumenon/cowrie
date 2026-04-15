@@ -4,11 +4,13 @@
  * Tests deterministic encoding, schema fingerprinting, and master stream
  * against Go-generated golden files.
  *
- * Run: npx ts-node cowrie.test.ts
+ * Run: node --import tsx --test src/gen2/gen2.test.ts
  */
 
+import { test } from "node:test";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
 import {
   SJ,
   Value,
@@ -25,22 +27,9 @@ import {
   crc32,
 } from "./index.ts";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const TESTDATA_DIR = path.join(__dirname, "..", "..", "..", "testdata", "gen2");
-
-let passed = 0;
-let failed = 0;
-
-function test(name: string, fn: () => void): void {
-  try {
-    fn();
-    console.log(`  PASS: ${name}`);
-    passed++;
-  } catch (e: any) {
-    console.log(`  FAIL: ${name}`);
-    console.log(`        ${e.message}`);
-    failed++;
-  }
-}
 
 function assertEqual<T>(actual: T, expected: T, msg: string): void {
   if (actual !== expected) {
@@ -499,15 +488,3 @@ test("varint at exactly 2^53-1 does not throw for safe integer check", () => {
   }
 });
 
-// ============================================================
-// Summary
-// ============================================================
-
-console.log("\n========================================");
-console.log(`PASSED: ${passed}`);
-console.log(`FAILED: ${failed}`);
-console.log("========================================\n");
-
-if (failed > 0) {
-  process.exit(1);
-}

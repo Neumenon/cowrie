@@ -48,12 +48,16 @@ export const Tags = {
   GRAPH_SHARD: 0x39,
 } as const;
 
-// Security limits - prevent DoS from malicious input
+// Security limits - prevent DoS from malicious input.
+// Must stay in lockstep with Go gen1 DefaultMax* (see go/gen1/gen1.go)
+// and with typescript/src/gen2 Limits (see go/limits_drift_test.go for
+// the Go-side equivalent lockstep). A drift test in gen1.test.ts asserts
+// these match gen2 defaults.
 export const Limits = {
   MAX_DEPTH: 1000,
-  MAX_ARRAY_LEN: 100_000_000,  // 100M elements
-  MAX_OBJECT_LEN: 10_000_000,  // 10M fields
-  MAX_STRING_LEN: 500_000_000, // 500MB
+  MAX_ARRAY_LEN: 1_000_000,   // 1M elements (was 100M)
+  MAX_OBJECT_LEN: 1_000_000,  // 1M fields (was 10M)
+  MAX_STRING_LEN: 10_000_000, // 10MB (was 500MB)
 } as const;
 
 export class SecurityLimitExceeded extends Error {
