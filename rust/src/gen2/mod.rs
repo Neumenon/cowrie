@@ -9,6 +9,7 @@
 //! - JSON bridge
 
 pub mod types;
+pub(crate) mod tags;
 pub mod encode;
 pub mod decode;
 pub mod schema;
