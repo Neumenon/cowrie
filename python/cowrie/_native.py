@@ -20,36 +20,23 @@ from ctypes import (
 
 import numpy as np
 
-# ── DType mapping (mirrors COWRIEDType enum) ──────────────────────
-
-COWRIE_DTYPE_FLOAT32  = 0x01
-COWRIE_DTYPE_FLOAT16  = 0x02
-COWRIE_DTYPE_BFLOAT16 = 0x03
-COWRIE_DTYPE_INT8     = 0x04
-COWRIE_DTYPE_INT16    = 0x05
-COWRIE_DTYPE_INT32    = 0x06
-COWRIE_DTYPE_INT64    = 0x07
-COWRIE_DTYPE_UINT8    = 0x08
-COWRIE_DTYPE_UINT16   = 0x09
-COWRIE_DTYPE_UINT32   = 0x0A
-COWRIE_DTYPE_UINT64   = 0x0B
-COWRIE_DTYPE_FLOAT64  = 0x0C
-COWRIE_DTYPE_BOOL     = 0x0D
-
-_NP_TO_COWRIE_DTYPE = {
-    np.dtype('float32'):  COWRIE_DTYPE_FLOAT32,
-    np.dtype('float64'):  COWRIE_DTYPE_FLOAT64,
-    np.dtype('float16'):  COWRIE_DTYPE_FLOAT16,
-    np.dtype('int8'):     COWRIE_DTYPE_INT8,
-    np.dtype('int16'):    COWRIE_DTYPE_INT16,
-    np.dtype('int32'):    COWRIE_DTYPE_INT32,
-    np.dtype('int64'):    COWRIE_DTYPE_INT64,
-    np.dtype('uint8'):    COWRIE_DTYPE_UINT8,
-    np.dtype('uint16'):   COWRIE_DTYPE_UINT16,
-    np.dtype('uint32'):   COWRIE_DTYPE_UINT32,
-    np.dtype('uint64'):   COWRIE_DTYPE_UINT64,
-    np.dtype('bool'):     COWRIE_DTYPE_BOOL,
-}
+# DType mapping mirrors COWRIEDType enum; canonical map lives in _wire_constants.
+from ._wire_constants import (
+    NP_TO_WIRE_DTYPE as _NP_TO_COWRIE_DTYPE,
+    WIRE_FLOAT32 as COWRIE_DTYPE_FLOAT32,
+    WIRE_FLOAT16 as COWRIE_DTYPE_FLOAT16,
+    WIRE_BFLOAT16 as COWRIE_DTYPE_BFLOAT16,
+    WIRE_INT8 as COWRIE_DTYPE_INT8,
+    WIRE_INT16 as COWRIE_DTYPE_INT16,
+    WIRE_INT32 as COWRIE_DTYPE_INT32,
+    WIRE_INT64 as COWRIE_DTYPE_INT64,
+    WIRE_UINT8 as COWRIE_DTYPE_UINT8,
+    WIRE_UINT16 as COWRIE_DTYPE_UINT16,
+    WIRE_UINT32 as COWRIE_DTYPE_UINT32,
+    WIRE_UINT64 as COWRIE_DTYPE_UINT64,
+    WIRE_FLOAT64 as COWRIE_DTYPE_FLOAT64,
+    WIRE_BOOL as COWRIE_DTYPE_BOOL,
+)
 
 # COWRIEType enum values (from cowrie_gen2.h — matches C enum order)
 COWRIE_NULL = 0

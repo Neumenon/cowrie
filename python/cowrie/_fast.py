@@ -90,12 +90,8 @@ def _pack_value(obj, parts, tensors):
                 arr = np.ascontiguousarray(arr)
                 dtype_code = _NP_TO_COWRIE_DTYPE.get(arr.dtype, 0x01)
             else:
-                _DTYPE_MAP = {
-                    DType.FLOAT32: 0x01, DType.FLOAT64: 0x0C, DType.FLOAT16: 0x02,
-                    DType.INT8: 0x04, DType.INT32: 0x06, DType.INT64: 0x07,
-                    DType.UINT8: 0x08,
-                }
-                dtype_code = _DTYPE_MAP.get(td.dtype, 0x01)
+                # DType is an IntEnum whose value is the wire code.
+                dtype_code = int(td.dtype)
                 arr = None
 
             shape = td.shape if arr is None else arr.shape
