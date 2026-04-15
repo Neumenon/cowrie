@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// ============================================================
 // compress.go: decompressGzip, decompressZstd edge cases
-// ============================================================
 
 func TestDecompressGzipRoundtrip2(t *testing.T) {
 	original := []byte("hello gzip, this is a roundtrip test with enough data to compress")
@@ -95,9 +93,7 @@ func TestDecompressZstdInvalid2(t *testing.T) {
 	}
 }
 
-// ============================================================
 // column_reader.go: Root, Len, Stats via EncodeWithHints
-// ============================================================
 
 func TestColumnReaderWithHints(t *testing.T) {
 	items := Array(
@@ -148,9 +144,7 @@ func TestColumnReaderWithHints(t *testing.T) {
 	}
 }
 
-// ============================================================
 // schema.go: fnvHashBytes
-// ============================================================
 
 func TestFnvHashBytes2(t *testing.T) {
 	h := uint64(fnvOffsetBasis64)
@@ -165,9 +159,7 @@ func TestFnvHashBytes2(t *testing.T) {
 	}
 }
 
-// ============================================================
 // hints.go: uvarintBytes
-// ============================================================
 
 func TestUvarintBytes2(t *testing.T) {
 	b := uvarintBytes(0)
@@ -184,9 +176,7 @@ func TestUvarintBytes2(t *testing.T) {
 	}
 }
 
-// ============================================================
 // EncodeFramed / DecodeFramedWithLimit roundtrip
-// ============================================================
 
 func TestFramedCompressRoundtrip2(t *testing.T) {
 	v := Object(
@@ -233,9 +223,7 @@ func TestFramedCompressRoundtrip2(t *testing.T) {
 	}
 }
 
-// ============================================================
 // decode.go: security limits
-// ============================================================
 
 func TestDecodeSecurityLimits(t *testing.T) {
 	// Test with deep nesting
@@ -266,9 +254,7 @@ func TestDecodeStringLimit(t *testing.T) {
 	}
 }
 
-// ============================================================
 // any_api.go: EncodeAnyWithOptions
-// ============================================================
 
 func TestEncodeAnyWithOptionsEnriched(t *testing.T) {
 	type Custom struct {
@@ -286,9 +272,7 @@ func TestEncodeAnyWithOptionsEnriched(t *testing.T) {
 	}
 }
 
-// ============================================================
 // DecodeFrom with reader
-// ============================================================
 
 func TestDecodeFromReader(t *testing.T) {
 	v := Object(

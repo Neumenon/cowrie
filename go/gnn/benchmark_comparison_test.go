@@ -105,12 +105,10 @@ func deltaDecode(data []byte, count int) []int64 {
 	return result
 }
 
-// =============================================================================
 // Real-world comparison: Cowrie-GNN vs JSON for GNN data
 //
 // The question: If someone stores a GNN dataset as JSON (common practice),
 // how much better is Cowrie-GNN?
-// =============================================================================
 
 // JSONGraph represents how GNN data is often stored in JSON
 type JSONGraph struct {
@@ -258,9 +256,7 @@ func encodeAsCowrieGNN(g JSONGraph) []byte {
 	return data
 }
 
-// =============================================================================
 // Size Comparison Tests
-// =============================================================================
 
 func TestSizeComparison_SmallGraph(t *testing.T) {
 	// Small graph: 100 nodes, 500 edges, 64-dim features
@@ -319,9 +315,7 @@ func TestSizeComparison_MediumGraph(t *testing.T) {
 	t.Logf("  GNN+gz vs JSON+gz:  %.2fx smaller", float64(len(jsonGz))/float64(len(gnnGz)))
 }
 
-// =============================================================================
 // Compression Battle: Can we beat JSON+gzip?
-// =============================================================================
 
 func TestCompressionBattle(t *testing.T) {
 	// Cora-like dataset
@@ -958,9 +952,7 @@ func encodeOptimizedGNN(g JSONGraph) []byte {
 	return data
 }
 
-// =============================================================================
 // Speed Comparison Benchmarks
-// =============================================================================
 
 func BenchmarkEncode_JSON_SmallGraph(b *testing.B) {
 	g := createTestGraph(100, 500, 64)

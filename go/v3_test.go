@@ -8,9 +8,7 @@ import (
 	"unsafe"
 )
 
-// ============================================================
 // v3 Inline Types: FIXINT
-// ============================================================
 
 func TestFixintRoundTrip(t *testing.T) {
 	for _, val := range []int64{0, 1, 42, 100, 127} {
@@ -73,9 +71,7 @@ func TestFixintZeroWireSize(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Inline Types: FIXNEG
-// ============================================================
 
 func TestFixnegRoundTrip(t *testing.T) {
 	for _, val := range []int64{-1, -5, -10, -16} {
@@ -122,9 +118,7 @@ func TestFixnegBoundary(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Inline Types: FIXARRAY
-// ============================================================
 
 func TestFixarrayRoundTrip(t *testing.T) {
 	arr := Array(Int64(1), Int64(2), Int64(3))
@@ -192,9 +186,7 @@ func TestFixarrayFallback(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Inline Types: FIXMAP
-// ============================================================
 
 func TestFixmapRoundTrip(t *testing.T) {
 	obj := Object(Member{Key: "a", Value: Int64(1)})
@@ -252,9 +244,7 @@ func TestFixmapFallback(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 BITMASK
-// ============================================================
 
 func TestBitmaskRoundTrip(t *testing.T) {
 	bools := []bool{true, false, true, true, false, false, true, false, true}
@@ -377,9 +367,7 @@ func TestBitmaskCount1(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Wire Size Regression
-// ============================================================
 
 func TestWireSizeFixint(t *testing.T) {
 	// Fixint 42: header(5) + 1 byte = 6
@@ -408,9 +396,7 @@ func TestWireSizeFixarray(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Zero-Copy String Decode
-// ============================================================
 
 func TestUnsafeStrings(t *testing.T) {
 	original := String("hello world")
@@ -447,9 +433,7 @@ func TestUnsafeStringsDefault(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Streaming Tensor Decode
-// ============================================================
 
 type testTensorSink struct {
 	dtype DType
@@ -499,9 +483,7 @@ func TestTensorSink(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 iovec Scatter-Gather
-// ============================================================
 
 func TestEncodeToWriterMatchesEncode(t *testing.T) {
 	// Scalar
@@ -556,9 +538,7 @@ func TestEncodeToWriterNested(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Format Detection (3-byte check)
-// ============================================================
 
 func TestFormatDetection3Byte(t *testing.T) {
 	// Gen2 header: "SJ" + 0x02
@@ -576,9 +556,7 @@ func TestFormatDetection3Byte(t *testing.T) {
 	}
 }
 
-// ============================================================
 // v3 Int Boundary Exhaustive
-// ============================================================
 
 func TestFixintAllValues(t *testing.T) {
 	// Test all 128 fixint values
