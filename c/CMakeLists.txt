@@ -61,9 +61,16 @@ install(FILES
     DESTINATION include
 )
 
-# Tests
+# Enable testing early so subdirectories can register tests
 if(BUILD_TESTS)
     enable_testing()
+endif()
+
+# GLYPH codec sub-library
+add_subdirectory(glyph)
+
+# Tests
+if(BUILD_TESTS)
 
     # Gen1 tests
     add_executable(test_gen1 tests/test_gen1.c)
