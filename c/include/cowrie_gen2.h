@@ -64,16 +64,11 @@ typedef enum {
     SJT_TENSOR_REF  = 0x21,   /* store_id:u8 + key_len:uvarint + key[] */
     SJT_IMAGE       = 0x22,   /* format:u8 + width:u16 + height:u16 + data_len:uvarint + data */
     SJT_AUDIO       = 0x23,   /* encoding:u8 + sample_rate:u32 + channels:u8 + data_len:uvarint + data */
-    /* v2.1 Graph/Delta extensions (0x30-0x3F) */
-    SJT_ADJLIST     = 0x30,   /* id_width:u8 + node_count:uvarint + edge_count:uvarint + CSR data */
-    SJT_RICH_TEXT   = 0x31,   /* text_len:uvarint + text + flags:u8 + optional tokens/spans */
-    SJT_DELTA       = 0x32,   /* base_id:uvarint + op_count:uvarint + ops[] */
     /* v2.1 Graph types (0x35-0x39) */
     SJT_NODE        = 0x35,   /* id:string + labelCount:uvarint + labels:string* + propCount:uvarint + (dictIdx:uvarint + value)* */
     SJT_EDGE        = 0x36,   /* srcId:string + dstId:string + type:string + propCount:uvarint + (dictIdx:uvarint + value)* */
     SJT_NODE_BATCH  = 0x37,   /* count:uvarint + Node[count] */
     SJT_EDGE_BATCH  = 0x38,   /* count:uvarint + Edge[count] */
-    SJT_GRAPH_SHARD = 0x39,   /* nodeCount:uvarint + Node* + edgeCount:uvarint + Edge* + metaCount:uvarint + (dictIdx:uvarint + value)* */
     /* v3 types */
     SJT_BITMASK     = 0x24    /* count:uvarint + ceil(count/8) packed bytes */
 } COWRIETag;
@@ -128,19 +123,6 @@ typedef enum {
     COWRIE_AUD_AAC         = 0x04
 } COWRIEAudioEncoding;
 
-/* ADJLIST id_width enum */
-typedef enum {
-    COWRIE_ID_INT32 = 0x01,
-    COWRIE_ID_INT64 = 0x02
-} COWRIEIdWidth;
-
-/* DELTA op codes */
-typedef enum {
-    COWRIE_DELTA_SET_FIELD    = 0x01,
-    COWRIE_DELTA_DELETE_FIELD = 0x02,
-    COWRIE_DELTA_APPEND_ARRAY = 0x03
-} COWRIEDeltaOp;
-
 /* Value types for the AST */
 typedef enum {
     COWRIE_NULL,
@@ -162,15 +144,11 @@ typedef enum {
     COWRIE_TENSOR_REF,
     COWRIE_IMAGE,
     COWRIE_AUDIO,
-    COWRIE_ADJLIST,
-    COWRIE_RICH_TEXT,
-    COWRIE_DELTA,
     /* v2.1 Graph types */
     COWRIE_NODE,
     COWRIE_EDGE,
     COWRIE_NODE_BATCH,
     COWRIE_EDGE_BATCH,
-    COWRIE_GRAPH_SHARD,
     /* v3 types */
     COWRIE_BITMASK
 } COWRIEType;
@@ -178,8 +156,6 @@ typedef enum {
 /* Forward declarations */
 typedef struct COWRIEValue COWRIEValue;
 typedef struct COWRIEMember COWRIEMember;
-typedef struct COWRIEDeltaOp_t COWRIEDeltaOp_t;
-typedef struct COWRIERichTextSpan COWRIERichTextSpan;
 
 /* Decimal128: value = coef * 10^(-scale) */
 typedef struct {
@@ -232,46 +208,6 @@ typedef struct {
     size_t data_len;
 } COWRIEAudio;
 
-/* Adjlist: CSR adjacency list for graphs/GNNs */
-typedef struct {
-    uint8_t id_width;      /* COWRIEIdWidth: 1=int32, 2=int64 */
-    size_t node_count;
-    size_t edge_count;
-    size_t *row_offsets;   /* [node_count + 1] */
-    void *col_indices;     /* int32_t* or int64_t* based on id_width */
-} COWRIEAdjlist;
-
-/* RichTextSpan: annotated span within rich text */
-struct COWRIERichTextSpan {
-    size_t start;          /* byte offset */
-    size_t end;            /* byte offset */
-    size_t kind_id;        /* application-defined */
-};
-
-/* RichText: text with optional token IDs and spans */
-typedef struct {
-    char *text;
-    size_t text_len;
-    int32_t *tokens;       /* int32 token IDs, or NULL */
-    size_t token_count;
-    COWRIERichTextSpan *spans;  /* annotated spans, or NULL */
-    size_t span_count;
-} COWRIERichText;
-
-/* DeltaOp: single operation in a delta patch */
-struct COWRIEDeltaOp_t {
-    uint8_t op_code;       /* COWRIEDeltaOp enum */
-    size_t field_id;       /* dictionary-coded field ID */
-    COWRIEValue *value;     /* for SET_FIELD and APPEND_ARRAY */
-};
-
-/* Delta: semantic diff/patch vs previous state */
-typedef struct {
-    size_t base_id;        /* reference to base object */
-    COWRIEDeltaOp_t *ops;
-    size_t op_count;
-} COWRIEDelta;
-
 /* ============================================================
  * v2.1 Graph Type Structs
  * ============================================================ */
@@ -310,16 +246,6 @@ typedef struct {
     COWRIEEdge *edges;
     size_t edge_count;
 } COWRIEEdgeBatch;
-
-/* GraphShard: self-contained subgraph */
-typedef struct {
-    COWRIENode *nodes;
-    size_t node_count;
-    COWRIEEdge *edges;
-    size_t edge_count;
-    COWRIEMember *metadata; /* dictionary-coded metadata */
-    size_t meta_count;
-} COWRIEGraphShard;
 
 /* Bitmask: packed boolean array (v3) */
 typedef struct {
@@ -372,15 +298,11 @@ struct COWRIEValue {
         COWRIETensorRef tensor_ref;      /* COWRIE_TENSOR_REF */
         COWRIEImage image;               /* COWRIE_IMAGE */
         COWRIEAudio audio;               /* COWRIE_AUDIO */
-        COWRIEAdjlist adjlist;           /* COWRIE_ADJLIST */
-        COWRIERichText rich_text;        /* COWRIE_RICH_TEXT */
-        COWRIEDelta delta;               /* COWRIE_DELTA */
         /* v2.1 Graph types */
         COWRIENode node;                 /* COWRIE_NODE */
         COWRIEEdge edge;                 /* COWRIE_EDGE */
         COWRIENodeBatch node_batch;      /* COWRIE_NODE_BATCH */
         COWRIEEdgeBatch edge_batch;      /* COWRIE_EDGE_BATCH */
-        COWRIEGraphShard graph_shard;    /* COWRIE_GRAPH_SHARD */
         /* v3 types */
         COWRIEBitmask bitmask;           /* COWRIE_BITMASK */
     } as;
@@ -471,13 +393,6 @@ COWRIEValue *cowrie_new_image(uint8_t format, uint16_t width, uint16_t height,
                              const uint8_t *data, size_t data_len);
 COWRIEValue *cowrie_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t channels,
                              const uint8_t *data, size_t data_len);
-COWRIEValue *cowrie_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_count,
-                               const size_t *row_offsets, const void *col_indices);
-COWRIEValue *cowrie_new_rich_text(const char *text, size_t text_len,
-                                 const int32_t *tokens, size_t token_count,
-                                 const COWRIERichTextSpan *spans, size_t span_count);
-COWRIEValue *cowrie_new_delta(size_t base_id, const COWRIEDeltaOp_t *ops, size_t op_count);
-
 /* v2.1 Graph Type Constructors */
 COWRIEValue *cowrie_new_node(const char *id, size_t id_len,
                            const char **labels, const size_t *label_lens, size_t label_count,
@@ -488,9 +403,6 @@ COWRIEValue *cowrie_new_edge(const char *from_id, size_t from_id_len,
                            const COWRIEMember *props, size_t prop_count);
 COWRIEValue *cowrie_new_node_batch(const COWRIENode *nodes, size_t node_count);
 COWRIEValue *cowrie_new_edge_batch(const COWRIEEdge *edges, size_t edge_count);
-COWRIEValue *cowrie_new_graph_shard(const COWRIENode *nodes, size_t node_count,
-                                   const COWRIEEdge *edges, size_t edge_count,
-                                   const COWRIEMember *metadata, size_t meta_count);
 
 /* ============================================================
  * Value Manipulation

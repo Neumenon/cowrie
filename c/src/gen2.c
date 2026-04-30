@@ -350,113 +350,6 @@ COWRIEValue *cowrie_new_audio(uint8_t encoding, uint32_t sample_rate, uint8_t ch
     return v;
 }
 
-COWRIEValue *cowrie_new_adjlist(uint8_t id_width, size_t node_count, size_t edge_count,
-                               const size_t *row_offsets, const void *col_indices) {
-    COWRIEValue *v = alloc_value(COWRIE_ADJLIST);
-    if (!v) return NULL;
-
-    v->as.adjlist.id_width = id_width;
-    v->as.adjlist.node_count = node_count;
-    v->as.adjlist.edge_count = edge_count;
-
-    /* Allocate and copy row_offsets */
-    size_t ro_size = (node_count + 1) * sizeof(size_t);
-    v->as.adjlist.row_offsets = malloc(ro_size);
-    if (!v->as.adjlist.row_offsets) { free(v); return NULL; }
-    memcpy(v->as.adjlist.row_offsets, row_offsets, ro_size);
-
-    /* Allocate and copy col_indices */
-    size_t ci_elem_size = (id_width == COWRIE_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
-    size_t ci_size = edge_count * ci_elem_size;
-    if (edge_count > 0) {
-        v->as.adjlist.col_indices = malloc(ci_size);
-        if (!v->as.adjlist.col_indices) {
-            free(v->as.adjlist.row_offsets);
-            free(v);
-            return NULL;
-        }
-        memcpy(v->as.adjlist.col_indices, col_indices, ci_size);
-    } else {
-        v->as.adjlist.col_indices = NULL;
-    }
-
-    return v;
-}
-
-COWRIEValue *cowrie_new_rich_text(const char *text, size_t text_len,
-                                 const int32_t *tokens, size_t token_count,
-                                 const COWRIERichTextSpan *spans, size_t span_count) {
-    COWRIEValue *v = alloc_value(COWRIE_RICH_TEXT);
-    if (!v) return NULL;
-
-    v->as.rich_text.text_len = text_len;
-    v->as.rich_text.token_count = token_count;
-    v->as.rich_text.span_count = span_count;
-
-    /* Allocate and copy text */
-    v->as.rich_text.text = malloc(text_len + 1);
-    if (!v->as.rich_text.text) { free(v); return NULL; }
-    memcpy(v->as.rich_text.text, text, text_len);
-    v->as.rich_text.text[text_len] = '\0';
-
-    /* Allocate and copy tokens */
-    if (tokens && token_count > 0) {
-        v->as.rich_text.tokens = malloc(token_count * sizeof(int32_t));
-        if (!v->as.rich_text.tokens) {
-            free(v->as.rich_text.text);
-            free(v);
-            return NULL;
-        }
-        memcpy(v->as.rich_text.tokens, tokens, token_count * sizeof(int32_t));
-    } else {
-        v->as.rich_text.tokens = NULL;
-    }
-
-    /* Allocate and copy spans */
-    if (spans && span_count > 0) {
-        v->as.rich_text.spans = malloc(span_count * sizeof(COWRIERichTextSpan));
-        if (!v->as.rich_text.spans) {
-            free(v->as.rich_text.tokens);
-            free(v->as.rich_text.text);
-            free(v);
-            return NULL;
-        }
-        memcpy(v->as.rich_text.spans, spans, span_count * sizeof(COWRIERichTextSpan));
-    } else {
-        v->as.rich_text.spans = NULL;
-    }
-
-    return v;
-}
-
-COWRIEValue *cowrie_new_delta(size_t base_id, const COWRIEDeltaOp_t *ops, size_t op_count) {
-    COWRIEValue *v = alloc_value(COWRIE_DELTA);
-    if (!v) return NULL;
-
-    v->as.delta.base_id = base_id;
-    v->as.delta.op_count = op_count;
-
-    if (op_count > 0) {
-        v->as.delta.ops = malloc(op_count * sizeof(COWRIEDeltaOp_t));
-        if (!v->as.delta.ops) { free(v); return NULL; }
-
-        /* 
-         * Copy ops - takes OWNERSHIP of value pointers.
-         * The caller should pass values that this delta will own.
-         * cowrie_free() will free all op values when delta is freed.
-         */
-        for (size_t i = 0; i < op_count; i++) {
-            v->as.delta.ops[i].op_code = ops[i].op_code;
-            v->as.delta.ops[i].field_id = ops[i].field_id;
-            v->as.delta.ops[i].value = ops[i].value;  /* Takes ownership */
-        }
-    } else {
-        v->as.delta.ops = NULL;
-    }
-
-    return v;
-}
-
 /* ============================================================
  * v2.1 Graph Type Constructors
  * ============================================================ */
@@ -645,68 +538,6 @@ COWRIEValue *cowrie_new_edge_batch(const COWRIEEdge *edges, size_t edge_count) {
     return v;
 }
 
-COWRIEValue *cowrie_new_graph_shard(const COWRIENode *nodes, size_t node_count,
-                                   const COWRIEEdge *edges, size_t edge_count,
-                                   const COWRIEMember *metadata, size_t meta_count) {
-    COWRIEValue *v = alloc_value(COWRIE_GRAPH_SHARD);
-    if (!v) return NULL;
-
-    /* Copy nodes */
-    v->as.graph_shard.node_count = node_count;
-    if (node_count > 0) {
-        v->as.graph_shard.nodes = malloc(node_count * sizeof(COWRIENode));
-        if (!v->as.graph_shard.nodes) { free(v); return NULL; }
-        memcpy(v->as.graph_shard.nodes, nodes, node_count * sizeof(COWRIENode));
-    } else {
-        v->as.graph_shard.nodes = NULL;
-    }
-
-    /* Copy edges */
-    v->as.graph_shard.edge_count = edge_count;
-    if (edge_count > 0) {
-        v->as.graph_shard.edges = malloc(edge_count * sizeof(COWRIEEdge));
-        if (!v->as.graph_shard.edges) {
-            free(v->as.graph_shard.nodes);
-            free(v);
-            return NULL;
-        }
-        memcpy(v->as.graph_shard.edges, edges, edge_count * sizeof(COWRIEEdge));
-    } else {
-        v->as.graph_shard.edges = NULL;
-    }
-
-    /* Copy metadata */
-    v->as.graph_shard.meta_count = meta_count;
-    if (meta_count > 0) {
-        v->as.graph_shard.metadata = malloc(meta_count * sizeof(COWRIEMember));
-        if (!v->as.graph_shard.metadata) {
-            free(v->as.graph_shard.edges);
-            free(v->as.graph_shard.nodes);
-            free(v);
-            return NULL;
-        }
-        for (size_t i = 0; i < meta_count; i++) {
-            v->as.graph_shard.metadata[i].key = malloc(metadata[i].key_len + 1);
-            if (!v->as.graph_shard.metadata[i].key) {
-                for (size_t j = 0; j < i; j++) free(v->as.graph_shard.metadata[j].key);
-                free(v->as.graph_shard.metadata);
-                free(v->as.graph_shard.edges);
-                free(v->as.graph_shard.nodes);
-                free(v);
-                return NULL;
-            }
-            memcpy(v->as.graph_shard.metadata[i].key, metadata[i].key, metadata[i].key_len);
-            v->as.graph_shard.metadata[i].key[metadata[i].key_len] = '\0';
-            v->as.graph_shard.metadata[i].key_len = metadata[i].key_len;
-            v->as.graph_shard.metadata[i].value = metadata[i].value;  /* Takes ownership */
-        }
-    } else {
-        v->as.graph_shard.metadata = NULL;
-    }
-
-    return v;
-}
-
 /* ============================================================
  * Value Manipulation
  * ============================================================ */
@@ -834,22 +665,6 @@ void cowrie_free(COWRIEValue *v) {
     case COWRIE_AUDIO:
         free(v->as.audio.data);
         break;
-    case COWRIE_ADJLIST:
-        free(v->as.adjlist.row_offsets);
-        free(v->as.adjlist.col_indices);
-        break;
-    case COWRIE_RICH_TEXT:
-        free(v->as.rich_text.text);
-        free(v->as.rich_text.tokens);
-        free(v->as.rich_text.spans);
-        break;
-    case COWRIE_DELTA:
-        /* Delta owns its op values - free them */
-        for (size_t i = 0; i < v->as.delta.op_count; i++) {
-            cowrie_free(v->as.delta.ops[i].value);
-        }
-        free(v->as.delta.ops);
-        break;
     /* v2.1 Graph types */
     case COWRIE_NODE:
         free(v->as.node.id);
@@ -881,16 +696,6 @@ void cowrie_free(COWRIEValue *v) {
     case COWRIE_EDGE_BATCH:
         /* Note: shallow copy, don't free edge internals */
         free(v->as.edge_batch.edges);
-        break;
-    case COWRIE_GRAPH_SHARD:
-        /* Note: shallow copy, don't free node/edge internals */
-        free(v->as.graph_shard.nodes);
-        free(v->as.graph_shard.edges);
-        for (size_t i = 0; i < v->as.graph_shard.meta_count; i++) {
-            free(v->as.graph_shard.metadata[i].key);
-            cowrie_free(v->as.graph_shard.metadata[i].value);
-        }
-        free(v->as.graph_shard.metadata);
         break;
     default:
         break;
@@ -1080,26 +885,6 @@ static void collect_keys(const COWRIEValue *v, Dict *d) {
             }
         }
         break;
-    case COWRIE_GRAPH_SHARD:
-        for (size_t i = 0; i < v->as.graph_shard.node_count; i++) {
-            COWRIENode *n = &v->as.graph_shard.nodes[i];
-            for (size_t j = 0; j < n->prop_count; j++) {
-                dict_add(d, n->props[j].key, n->props[j].key_len);
-                collect_keys(n->props[j].value, d);
-            }
-        }
-        for (size_t i = 0; i < v->as.graph_shard.edge_count; i++) {
-            COWRIEEdge *e = &v->as.graph_shard.edges[i];
-            for (size_t j = 0; j < e->prop_count; j++) {
-                dict_add(d, e->props[j].key, e->props[j].key_len);
-                collect_keys(e->props[j].value, d);
-            }
-        }
-        for (size_t i = 0; i < v->as.graph_shard.meta_count; i++) {
-            dict_add(d, v->as.graph_shard.metadata[i].key, v->as.graph_shard.metadata[i].key_len);
-            collect_keys(v->as.graph_shard.metadata[i].value, d);
-        }
-        break;
     default:
         break;
     }
@@ -1244,70 +1029,6 @@ static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict) 
         return buf_put(buf, v->as.audio.data, v->as.audio.data_len);
     }
 
-    case COWRIE_ADJLIST: {
-        if (buf_put_byte(buf, SJT_ADJLIST) != 0) return -1;
-        if (buf_put_byte(buf, v->as.adjlist.id_width) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.adjlist.node_count) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.adjlist.edge_count) != 0) return -1;
-        /* row_offsets as uvarint */
-        for (size_t i = 0; i <= v->as.adjlist.node_count; i++) {
-            if (cowrie_put_uvarint(buf, v->as.adjlist.row_offsets[i]) != 0) return -1;
-        }
-        /* col_indices as fixed-width LE */
-        if (v->as.adjlist.id_width == COWRIE_ID_INT64) {
-            int64_t *cols = (int64_t *)v->as.adjlist.col_indices;
-            for (size_t i = 0; i < v->as.adjlist.edge_count; i++) {
-                if (buf_put(buf, &cols[i], sizeof(int64_t)) != 0) return -1;
-            }
-        } else {
-            int32_t *cols = (int32_t *)v->as.adjlist.col_indices;
-            for (size_t i = 0; i < v->as.adjlist.edge_count; i++) {
-                if (buf_put(buf, &cols[i], sizeof(int32_t)) != 0) return -1;
-            }
-        }
-        return 0;
-    }
-
-    case COWRIE_RICH_TEXT: {
-        if (buf_put_byte(buf, SJT_RICH_TEXT) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.rich_text.text_len) != 0) return -1;
-        if (buf_put(buf, v->as.rich_text.text, v->as.rich_text.text_len) != 0) return -1;
-        uint8_t flags = 0;
-        if (v->as.rich_text.tokens && v->as.rich_text.token_count > 0) flags |= 0x01;
-        if (v->as.rich_text.spans && v->as.rich_text.span_count > 0) flags |= 0x02;
-        if (buf_put_byte(buf, flags) != 0) return -1;
-        if (flags & 0x01) {
-            if (cowrie_put_uvarint(buf, v->as.rich_text.token_count) != 0) return -1;
-            for (size_t i = 0; i < v->as.rich_text.token_count; i++) {
-                if (buf_put(buf, &v->as.rich_text.tokens[i], sizeof(int32_t)) != 0) return -1;
-            }
-        }
-        if (flags & 0x02) {
-            if (cowrie_put_uvarint(buf, v->as.rich_text.span_count) != 0) return -1;
-            for (size_t i = 0; i < v->as.rich_text.span_count; i++) {
-                if (cowrie_put_uvarint(buf, v->as.rich_text.spans[i].start) != 0) return -1;
-                if (cowrie_put_uvarint(buf, v->as.rich_text.spans[i].end) != 0) return -1;
-                if (cowrie_put_uvarint(buf, v->as.rich_text.spans[i].kind_id) != 0) return -1;
-            }
-        }
-        return 0;
-    }
-
-    case COWRIE_DELTA: {
-        if (buf_put_byte(buf, SJT_DELTA) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.delta.base_id) != 0) return -1;
-        if (cowrie_put_uvarint(buf, v->as.delta.op_count) != 0) return -1;
-        for (size_t i = 0; i < v->as.delta.op_count; i++) {
-            COWRIEDeltaOp_t *op = &v->as.delta.ops[i];
-            if (buf_put_byte(buf, op->op_code) != 0) return -1;
-            if (cowrie_put_uvarint(buf, op->field_id) != 0) return -1;
-            if (op->op_code == COWRIE_DELTA_SET_FIELD || op->op_code == COWRIE_DELTA_APPEND_ARRAY) {
-                if (encode_value(buf, op->value, dict) != 0) return -1;
-            }
-        }
-        return 0;
-    }
-
     /* v2.1 Graph types */
     case COWRIE_NODE: {
         if (buf_put_byte(buf, SJT_NODE) != 0) return -1;
@@ -1384,51 +1105,6 @@ static int encode_value(COWRIEBuf *buf, const COWRIEValue *v, const Dict *dict) 
                 if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
                 if (encode_value(buf, e->props[j].value, dict) != 0) return -1;
             }
-        }
-        return 0;
-    }
-
-    case COWRIE_GRAPH_SHARD: {
-        if (buf_put_byte(buf, SJT_GRAPH_SHARD) != 0) return -1;
-        /* nodeCount:uvarint + Node* */
-        if (cowrie_put_uvarint(buf, v->as.graph_shard.node_count) != 0) return -1;
-        for (size_t i = 0; i < v->as.graph_shard.node_count; i++) {
-            COWRIENode *n = &v->as.graph_shard.nodes[i];
-            if (encode_string_raw(buf, n->id, n->id_len) != 0) return -1;
-            if (cowrie_put_uvarint(buf, n->label_count) != 0) return -1;
-            for (size_t j = 0; j < n->label_count; j++) {
-                if (encode_string_raw(buf, n->labels[j], n->label_lens[j]) != 0) return -1;
-            }
-            if (cowrie_put_uvarint(buf, n->prop_count) != 0) return -1;
-            for (size_t j = 0; j < n->prop_count; j++) {
-                int idx = dict_find(dict, n->props[j].key, n->props[j].key_len);
-                if (idx < 0) return -1;
-                if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
-                if (encode_value(buf, n->props[j].value, dict) != 0) return -1;
-            }
-        }
-        /* edgeCount:uvarint + Edge* */
-        if (cowrie_put_uvarint(buf, v->as.graph_shard.edge_count) != 0) return -1;
-        for (size_t i = 0; i < v->as.graph_shard.edge_count; i++) {
-            COWRIEEdge *e = &v->as.graph_shard.edges[i];
-            if (encode_string_raw(buf, e->from_id, e->from_id_len) != 0) return -1;
-            if (encode_string_raw(buf, e->to_id, e->to_id_len) != 0) return -1;
-            if (encode_string_raw(buf, e->edge_type, e->edge_type_len) != 0) return -1;
-            if (cowrie_put_uvarint(buf, e->prop_count) != 0) return -1;
-            for (size_t j = 0; j < e->prop_count; j++) {
-                int idx = dict_find(dict, e->props[j].key, e->props[j].key_len);
-                if (idx < 0) return -1;
-                if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
-                if (encode_value(buf, e->props[j].value, dict) != 0) return -1;
-            }
-        }
-        /* metaCount:uvarint + (dictIdx:uvarint + value)* */
-        if (cowrie_put_uvarint(buf, v->as.graph_shard.meta_count) != 0) return -1;
-        for (size_t i = 0; i < v->as.graph_shard.meta_count; i++) {
-            int idx = dict_find(dict, v->as.graph_shard.metadata[i].key, v->as.graph_shard.metadata[i].key_len);
-            if (idx < 0) return -1;
-            if (cowrie_put_uvarint(buf, (uint64_t)idx) != 0) return -1;
-            if (encode_value(buf, v->as.graph_shard.metadata[i].value, dict) != 0) return -1;
         }
         return 0;
     }
@@ -1809,44 +1485,6 @@ static int validate_utf8(const char *data, size_t len) {
 static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **out);
 static int decode_string_raw(Reader *r, char **out, size_t *out_len);
 
-static int skip_hints(Reader *r) {
-    uint64_t count;
-    if (rd_get_uvarint(r, &count) != 0) return -1;
-
-    /* Enforce hint count limit to prevent CPU spin attacks */
-    if (r->opts.max_hint_count > 0 && count > r->opts.max_hint_count) return -1;
-
-    /* Sanity check: each hint is at least 3 bytes (1 field name len + 1 type + 1 flags) */
-    if (count > 0 && count * 3 > rd_remaining(r)) return -1;
-
-    for (uint64_t i = 0; i < count; i++) {
-        /* Skip field name */
-        char *field = NULL;
-        size_t field_len = 0;
-        if (decode_string_raw(r, &field, &field_len) != 0) return -1;
-        free(field);
-
-        /* Skip type (1 byte) */
-        uint8_t typ;
-        if (rd_get_byte(r, &typ) != 0) return -1;
-
-        /* Skip shape */
-        uint64_t shape_len;
-        if (rd_get_uvarint(r, &shape_len) != 0) return -1;
-        if (r->opts.max_rank > 0 && shape_len > (uint64_t)r->opts.max_rank) return -1;
-        for (uint64_t j = 0; j < shape_len; j++) {
-            uint64_t dim;
-            if (rd_get_uvarint(r, &dim) != 0) return -1;
-        }
-
-        /* Skip flags (1 byte) */
-        uint8_t flags;
-        if (rd_get_byte(r, &flags) != 0) return -1;
-    }
-
-    return 0;
-}
-
 static int decode_string_raw(Reader *r, char **out, size_t *out_len) {
     uint64_t len;
     if (rd_get_uvarint(r, &len) != 0) return -1;
@@ -2220,160 +1858,6 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         return *out ? 0 : -1;
     }
 
-    case SJT_ADJLIST: {
-        uint8_t id_width;
-        if (rd_get_byte(r, &id_width) != 0) return -1;
-
-        uint64_t node_count, edge_count;
-        if (rd_get_uvarint(r, &node_count) != 0) return -1;
-        if (rd_get_uvarint(r, &edge_count) != 0) return -1;
-
-        /* Overflow-safe allocation: node_count + 1 could wrap, then * sizeof could overflow */
-        size_t ro_count;
-        if (safe_add((size_t)node_count, 1, &ro_count) != 0) return -1;
-        size_t ro_alloc;
-        if (safe_mul(ro_count, sizeof(size_t), &ro_alloc) != 0) return -1;
-        /* Sanity check: nodeCount+1 offsets, each uvarint is at least 1 byte */
-        if (ro_count > rd_remaining(r)) return -1;
-        size_t *row_offsets = malloc(ro_alloc);
-        if (!row_offsets) return -1;
-        for (size_t i = 0; i <= (size_t)node_count; i++) {
-            uint64_t off;
-            if (rd_get_uvarint(r, &off) != 0) { free(row_offsets); return -1; }
-            row_offsets[i] = (size_t)off;
-        }
-
-        void *col_indices = NULL;
-        if (edge_count > 0) {
-            size_t elem_size = (id_width == COWRIE_ID_INT64) ? sizeof(int64_t) : sizeof(int32_t);
-            size_t ci_alloc;
-            if (safe_mul((size_t)edge_count, elem_size, &ci_alloc) != 0) { free(row_offsets); return -1; }
-            if (ci_alloc > rd_remaining(r)) { free(row_offsets); return -1; }
-            col_indices = malloc(ci_alloc);
-            if (!col_indices) { free(row_offsets); return -1; }
-            if (rd_get(r, col_indices, ci_alloc) != 0) {
-                free(col_indices);
-                free(row_offsets);
-                return -1;
-            }
-        }
-
-        *out = cowrie_new_adjlist(id_width, (size_t)node_count, (size_t)edge_count, row_offsets, col_indices);
-        free(row_offsets);
-        free(col_indices);
-        return *out ? 0 : -1;
-    }
-
-    case SJT_RICH_TEXT: {
-        uint64_t text_len;
-        if (rd_get_uvarint(r, &text_len) != 0) return -1;
-        if (text_len > SIZE_MAX - 1) return -1;
-        if (text_len > rd_remaining(r)) return -1;
-
-        char *text = malloc((size_t)text_len + 1);
-        if (!text) return -1;
-        if (text_len > 0 && rd_get(r, text, (size_t)text_len) != 0) { free(text); return -1; }
-        text[text_len] = '\0';
-
-        uint8_t flags;
-        if (rd_get_byte(r, &flags) != 0) { free(text); return -1; }
-
-        int32_t *tokens = NULL;
-        size_t token_count = 0;
-        if (flags & 0x01) {
-            uint64_t tc;
-            if (rd_get_uvarint(r, &tc) != 0) { free(text); return -1; }
-            token_count = (size_t)tc;
-            if (token_count > 0) {
-                size_t tok_alloc;
-                if (safe_mul(token_count, sizeof(int32_t), &tok_alloc) != 0) { free(text); return -1; }
-                if (tok_alloc > rd_remaining(r)) { free(text); return -1; }
-                tokens = malloc(tok_alloc);
-                if (!tokens) { free(text); return -1; }
-                if (rd_get(r, tokens, tok_alloc) != 0) {
-                    free(tokens);
-                    free(text);
-                    return -1;
-                }
-            }
-        }
-
-        COWRIERichTextSpan *spans = NULL;
-        size_t span_count = 0;
-        if (flags & 0x02) {
-            uint64_t sc;
-            if (rd_get_uvarint(r, &sc) != 0) { free(tokens); free(text); return -1; }
-            span_count = (size_t)sc;
-            if (span_count > 0) {
-                size_t span_alloc;
-                if (safe_mul(span_count, sizeof(COWRIERichTextSpan), &span_alloc) != 0) { free(tokens); free(text); return -1; }
-                spans = malloc(span_alloc);
-                if (!spans) { free(tokens); free(text); return -1; }
-                for (size_t i = 0; i < span_count; i++) {
-                    uint64_t start, end, kind_id;
-                    if (rd_get_uvarint(r, &start) != 0 ||
-                        rd_get_uvarint(r, &end) != 0 ||
-                        rd_get_uvarint(r, &kind_id) != 0) {
-                        free(spans);
-                        free(tokens);
-                        free(text);
-                        return -1;
-                    }
-                    spans[i].start = (size_t)start;
-                    spans[i].end = (size_t)end;
-                    spans[i].kind_id = (size_t)kind_id;
-                }
-            }
-        }
-
-        *out = cowrie_new_rich_text(text, (size_t)text_len, tokens, token_count, spans, span_count);
-        free(spans);
-        free(tokens);
-        free(text);
-        return *out ? 0 : -1;
-    }
-
-    case SJT_DELTA: {
-        uint64_t base_id, op_count;
-        if (rd_get_uvarint(r, &base_id) != 0) return -1;
-        if (rd_get_uvarint(r, &op_count) != 0) return -1;
-
-        COWRIEDeltaOp_t *ops = NULL;
-        if (op_count > 0) {
-            size_t ops_alloc;
-            if (safe_mul((size_t)op_count, sizeof(COWRIEDeltaOp_t), &ops_alloc) != 0) return -1;
-            ops = malloc(ops_alloc);
-            if (!ops) return -1;
-
-            for (size_t i = 0; i < (size_t)op_count; i++) {
-                uint8_t op_code;
-                uint64_t field_id;
-                if (rd_get_byte(r, &op_code) != 0) { free(ops); return -1; }
-                if (rd_get_uvarint(r, &field_id) != 0) { free(ops); return -1; }
-
-                ops[i].op_code = op_code;
-                ops[i].field_id = (size_t)field_id;
-                ops[i].value = NULL;
-
-                if (op_code == COWRIE_DELTA_SET_FIELD || op_code == COWRIE_DELTA_APPEND_ARRAY) {
-                    if (decode_value(r, dict, dict_len, &ops[i].value) != 0) {
-                        /* Free previously allocated values */
-                        for (size_t j = 0; j < i; j++) {
-                            cowrie_free(ops[j].value);
-                        }
-                        free(ops);
-                        return -1;
-                    }
-                }
-            }
-        }
-
-        *out = cowrie_new_delta((size_t)base_id, ops, (size_t)op_count);
-        /* Note: cowrie_new_delta takes ownership of value pointers */
-        free(ops);  /* Free the array but not the values */
-        return *out ? 0 : -1;
-    }
-
     /* v2.1 Graph types */
     case SJT_NODE: {
         /* id:string */
@@ -2646,134 +2130,6 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
         return -1;
     }
 
-    case SJT_GRAPH_SHARD: {
-        /* nodeCount:uvarint + Node* */
-        uint64_t node_count;
-        if (rd_get_uvarint(r, &node_count) != 0) return -1;
-        /* Security limit check */
-        if (r->opts.max_array_len > 0 && node_count > r->opts.max_array_len) return -1;
-
-        COWRIENode *nodes = NULL;
-        if (node_count > 0) {
-            nodes = calloc((size_t)node_count, sizeof(COWRIENode));
-            if (!nodes) return -1;
-        }
-
-        for (size_t i = 0; i < (size_t)node_count; i++) {
-            if (decode_string_raw(r, &nodes[i].id, &nodes[i].id_len) != 0) goto shard_fail;
-            uint64_t lc;
-            if (rd_get_uvarint(r, &lc) != 0) goto shard_fail;
-            nodes[i].label_count = (size_t)lc;
-            if (lc > 0) {
-                size_t sl_a, sll_a;
-                if (safe_mul((size_t)lc, sizeof(char *), &sl_a) != 0 ||
-                    safe_mul((size_t)lc, sizeof(size_t), &sll_a) != 0) goto shard_fail;
-                nodes[i].labels = malloc(sl_a);
-                nodes[i].label_lens = malloc(sll_a);
-                if (!nodes[i].labels || !nodes[i].label_lens) goto shard_fail;
-                for (size_t j = 0; j < (size_t)lc; j++) {
-                    if (decode_string_raw(r, &nodes[i].labels[j], &nodes[i].label_lens[j]) != 0) goto shard_fail;
-                }
-            }
-            uint64_t pc;
-            if (rd_get_uvarint(r, &pc) != 0) goto shard_fail;
-            nodes[i].prop_count = (size_t)pc;
-            if (pc > 0) {
-                size_t sp_a;
-                if (safe_mul((size_t)pc, sizeof(COWRIEMember), &sp_a) != 0) goto shard_fail;
-                nodes[i].props = malloc(sp_a);
-                if (!nodes[i].props) goto shard_fail;
-                for (size_t j = 0; j < (size_t)pc; j++) {
-                    uint64_t fid;
-                    if (rd_get_uvarint(r, &fid) != 0 || fid >= dict_len) goto shard_fail;
-                    nodes[i].props[j].key = strdup(dict[fid]);
-                    nodes[i].props[j].key_len = strlen(dict[fid]);
-                    if (decode_value(r, dict, dict_len, &nodes[i].props[j].value) != 0) goto shard_fail;
-                }
-            }
-        }
-
-        /* edgeCount:uvarint + Edge* */
-        uint64_t edge_count;
-        if (rd_get_uvarint(r, &edge_count) != 0) goto shard_fail;
-        /* Security limit check */
-        if (r->opts.max_array_len > 0 && edge_count > r->opts.max_array_len) goto shard_fail;
-
-        COWRIEEdge *edges = NULL;
-        if (edge_count > 0) {
-            edges = calloc((size_t)edge_count, sizeof(COWRIEEdge));
-            if (!edges) goto shard_fail;
-        }
-
-        for (size_t i = 0; i < (size_t)edge_count; i++) {
-            if (decode_string_raw(r, &edges[i].from_id, &edges[i].from_id_len) != 0) goto shard_fail2;
-            if (decode_string_raw(r, &edges[i].to_id, &edges[i].to_id_len) != 0) goto shard_fail2;
-            if (decode_string_raw(r, &edges[i].edge_type, &edges[i].edge_type_len) != 0) goto shard_fail2;
-            uint64_t pc;
-            if (rd_get_uvarint(r, &pc) != 0) goto shard_fail2;
-            edges[i].prop_count = (size_t)pc;
-            if (pc > 0) {
-                size_t sep_a;
-                if (safe_mul((size_t)pc, sizeof(COWRIEMember), &sep_a) != 0) goto shard_fail2;
-                edges[i].props = malloc(sep_a);
-                if (!edges[i].props) goto shard_fail2;
-                for (size_t j = 0; j < (size_t)pc; j++) {
-                    uint64_t fid;
-                    if (rd_get_uvarint(r, &fid) != 0 || fid >= dict_len) goto shard_fail2;
-                    edges[i].props[j].key = strdup(dict[fid]);
-                    edges[i].props[j].key_len = strlen(dict[fid]);
-                    if (decode_value(r, dict, dict_len, &edges[i].props[j].value) != 0) goto shard_fail2;
-                }
-            }
-        }
-
-        /* metaCount:uvarint + (dictIdx:uvarint + value)* */
-        uint64_t meta_count;
-        if (rd_get_uvarint(r, &meta_count) != 0) goto shard_fail2;
-
-        COWRIEMember *metadata = NULL;
-        if (meta_count > 0) {
-            size_t meta_alloc;
-            if (safe_mul((size_t)meta_count, sizeof(COWRIEMember), &meta_alloc) != 0) goto shard_fail2;
-            metadata = malloc(meta_alloc);
-            if (!metadata) goto shard_fail2;
-            for (size_t i = 0; i < (size_t)meta_count; i++) {
-                uint64_t fid;
-                if (rd_get_uvarint(r, &fid) != 0 || fid >= dict_len) {
-                    for (size_t j = 0; j < i; j++) {
-                        free(metadata[j].key);
-                        cowrie_free(metadata[j].value);
-                    }
-                    free(metadata);
-                    goto shard_fail2;
-                }
-                metadata[i].key = strdup(dict[fid]);
-                metadata[i].key_len = strlen(dict[fid]);
-                if (decode_value(r, dict, dict_len, &metadata[i].value) != 0) {
-                    free(metadata[i].key);
-                    for (size_t j = 0; j < i; j++) {
-                        free(metadata[j].key);
-                        cowrie_free(metadata[j].value);
-                    }
-                    free(metadata);
-                    goto shard_fail2;
-                }
-            }
-        }
-
-        *out = cowrie_new_graph_shard(nodes, (size_t)node_count, edges, (size_t)edge_count, metadata, (size_t)meta_count);
-        free(nodes); free(edges);
-        for (size_t i = 0; i < (size_t)meta_count; i++) free(metadata[i].key);
-        free(metadata);
-        return *out ? 0 : -1;
-
-    shard_fail2:
-        free(edges);
-    shard_fail:
-        free(nodes);
-        return -1;
-    }
-
     case SJT_BITMASK: {
         uint64_t count;
         if (rd_get_uvarint(r, &count) != 0) return -1;
@@ -2867,6 +2223,18 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
             *out = cowrie_new_int64((int64_t)(-1) - (int64_t)(tag - SJT_FIXNEG_BASE));
             return *out ? 0 : -1;
         }
+        /* Unknown tag in reserved/extension range: try to skip as length-prefixed blob.
+         * Tags 0x30-0x3F (parked graph/delta extensions) and any unrecognized tag
+         * may carry a uvarint length prefix followed by that many bytes.
+         * Silently skip and return a null placeholder so the stream can continue. */
+        if (tag >= 0x30 && tag <= 0x3F) {
+            uint64_t skip_len;
+            if (rd_get_uvarint(r, &skip_len) != 0) return -1;
+            if (skip_len > rd_remaining(r)) return -1;
+            r->pos += (size_t)skip_len;
+            *out = cowrie_new_null();
+            return *out ? 0 : -1;
+        }
         /* Tags 0xF0-0xFF and anything else: invalid */
         return -1;
     }
@@ -2909,9 +2277,6 @@ int cowrie_decode_with_opts(const uint8_t *data, size_t len,
 
     if (rd_get_byte(&r, &flags) != 0) return -1;
     /* For now, we don't handle compression here - use cowrie_decode_framed */
-    if (flags & COWRIE_FLAG_HAS_COLUMN_HINTS) {
-        if (skip_hints(&r) != 0) return -1;
-    }
 
     /* Read dictionary */
     uint64_t dict_len;
@@ -3089,15 +2454,11 @@ static uint8_t type_to_go_ord(COWRIEType t) {
     case COWRIE_TENSOR_REF:  return 14;
     case COWRIE_IMAGE:       return 15;
     case COWRIE_AUDIO:       return 16;
-    case COWRIE_ADJLIST:     return 17;
-    case COWRIE_RICH_TEXT:   return 18;
-    case COWRIE_DELTA:       return 19;
     case COWRIE_EXT:         return 20;
     case COWRIE_NODE:        return 21;
     case COWRIE_EDGE:        return 22;
     case COWRIE_NODE_BATCH:  return 23;
     case COWRIE_EDGE_BATCH:  return 24;
-    case COWRIE_GRAPH_SHARD: return 25;
     case COWRIE_BITMASK:     return 26;
     }
     return 0xff;
@@ -3185,29 +2546,6 @@ static uint64_t schema_fingerprint_impl(const COWRIEValue *v, uint64_t hash) {
         hash = fnv1a_byte(hash, v->as.audio.channels);
         break;
 
-    case COWRIE_ADJLIST:
-        /* Adjlist: include ID width */
-        hash = fnv1a_byte(hash, v->as.adjlist.id_width);
-        break;
-
-    case COWRIE_RICH_TEXT: {
-        /* RichText: include presence of tokens and spans */
-        uint8_t flags = 0;
-        if (v->as.rich_text.token_count > 0) flags |= 0x01;
-        if (v->as.rich_text.span_count > 0) flags |= 0x02;
-        hash = fnv1a_byte(hash, flags);
-        break;
-    }
-
-    case COWRIE_DELTA:
-        /* Delta: include base ID and ops */
-        hash = fnv1a_uint64(hash, v->as.delta.base_id);
-        hash = fnv1a_uint64(hash, v->as.delta.op_count);
-        for (size_t i = 0; i < v->as.delta.op_count; i++) {
-            hash = fnv1a_byte(hash, v->as.delta.ops[i].op_code);
-            hash = schema_fingerprint_impl(v->as.delta.ops[i].value, hash);
-        }
-        break;
     }
 
     return hash;
