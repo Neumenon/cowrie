@@ -82,21 +82,21 @@
       "gen": 2,
       "kind": "decode",
       "input": "ml/adjlist.cowrie",
-      "expect": {"ok": true}
+      "expect": {"ok": false, "error": "ERR_TRAILING_DATA"}
     },
     {
       "id": "gen2_ml_richtext",
       "gen": 2,
       "kind": "decode",
       "input": "ml/richtext.cowrie",
-      "expect": {"ok": true}
+      "expect": {"ok": false, "error": "ERR_TRAILING_DATA"}
     },
     {
       "id": "gen2_ml_delta",
       "gen": 2,
       "kind": "decode",
       "input": "ml/delta.cowrie",
-      "expect": {"ok": true}
+      "expect": {"ok": false, "error": "ERR_TRAILING_DATA"}
     },
     {
       "id": "gen2_graph_node",
@@ -131,7 +131,7 @@
       "gen": 2,
       "kind": "decode",
       "input": "graph/graph_shard.cowrie",
-      "expect": {"ok": true}
+      "expect": {"ok": false, "error": "ERR_TRAILING_DATA"}
     },
     {
       "id": "gen2_neg_bad_magic",

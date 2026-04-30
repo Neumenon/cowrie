@@ -61,6 +61,7 @@ fn map_error_code(err: &CowrieError) -> &'static str {
         CowrieError::InvalidUtf8 => "ERR_INVALID_UTF8",
         CowrieError::TooDeep => "ERR_TOO_DEEP",
         CowrieError::TooLarge => "ERR_TOO_LARGE",
+        CowrieError::TrailingData { .. } => "ERR_TRAILING_DATA",
         _ => "",
     }
 }

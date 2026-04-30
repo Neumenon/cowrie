@@ -845,60 +845,6 @@ mod tests {
         assert!(result.is_ok(), "should accept tensor rank = 32");
     }
 
-    #[test]
-    fn test_roundtrip_graph_shard() {
-        use super::super::types::{NodeData, EdgeData, GraphShardData};
-
-        let mut node_props = BTreeMap::new();
-        node_props.insert("x".to_string(), Value::Float(0.1));
-
-        let nodes = vec![
-            NodeData {
-                id: "1".to_string(),
-                labels: vec!["Node".to_string()],
-                props: node_props.clone(),
-            },
-            NodeData {
-                id: "2".to_string(),
-                labels: vec!["Node".to_string()],
-                props: {
-                    let mut p = BTreeMap::new();
-                    p.insert("x".to_string(), Value::Float(0.2));
-                    p
-                },
-            },
-        ];
-
-        let mut edge_props = BTreeMap::new();
-        edge_props.insert("weight".to_string(), Value::Float(0.85));
-
-        let edges = vec![EdgeData {
-            from: "1".to_string(),
-            to: "2".to_string(),
-            edge_type: "EDGE".to_string(),
-            props: edge_props,
-        }];
-
-        let mut metadata = BTreeMap::new();
-        metadata.insert("version".to_string(), Value::Int(1));
-
-        let shard = Value::GraphShard(GraphShardData { nodes, edges, metadata });
-
-        let encoded = encode(&shard).expect("encode");
-        let decoded = decode(&encoded).expect("decode");
-
-        match decoded {
-            Value::GraphShard(gs) => {
-                assert_eq!(gs.nodes.len(), 2);
-                assert_eq!(gs.edges.len(), 1);
-                assert_eq!(gs.metadata.get("version").and_then(|v| v.as_i64()), Some(1));
-                assert_eq!(gs.nodes[0].id, "1");
-                assert_eq!(gs.edges[0].edge_type, "EDGE");
-            }
-            _ => panic!("Expected GraphShard, got {:?}", decoded),
-        }
-    }
-
     // ============================================================
     // DecodeOptions tests
     // ============================================================

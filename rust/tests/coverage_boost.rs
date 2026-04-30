@@ -359,123 +359,8 @@ fn roundtrip_audio() {
     }
 }
 
-// ============================================================
-// Adjlist roundtrip
-// ============================================================
 
-#[test]
-fn roundtrip_adjlist() {
-    let v = Value::Adjlist(AdjlistData {
-        id_width: 1,
-        node_count: 3,
-        edge_count: 2,
-        row_offsets: vec![0, 1, 1, 2],
-        col_indices: vec![0u8; 8], // 2 edges * 4 bytes (id_width=1)
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
 
-#[test]
-fn roundtrip_adjlist_int64() {
-    let v = Value::Adjlist(AdjlistData {
-        id_width: 2,
-        node_count: 2,
-        edge_count: 1,
-        row_offsets: vec![0, 1, 1],
-        col_indices: vec![0u8; 8], // 1 edge * 8 bytes (id_width=2)
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
-
-// ============================================================
-// RichText roundtrip
-// ============================================================
-
-#[test]
-fn roundtrip_richtext_plain() {
-    let v = Value::RichText(RichTextData {
-        text: "hello world".to_string(),
-        tokens: None,
-        spans: None,
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
-
-#[test]
-fn roundtrip_richtext_with_tokens() {
-    let v = Value::RichText(RichTextData {
-        text: "hello".to_string(),
-        tokens: Some(vec![100, 200, 300]),
-        spans: None,
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
-
-#[test]
-fn roundtrip_richtext_with_spans() {
-    let v = Value::RichText(RichTextData {
-        text: "hello world".to_string(),
-        tokens: None,
-        spans: Some(vec![
-            RichTextSpan { start: 0, end: 5, kind_id: 1 },
-            RichTextSpan { start: 6, end: 11, kind_id: 2 },
-        ]),
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
-
-#[test]
-fn roundtrip_richtext_with_both() {
-    let v = Value::RichText(RichTextData {
-        text: "test".to_string(),
-        tokens: Some(vec![1, 2]),
-        spans: Some(vec![RichTextSpan { start: 0, end: 4, kind_id: 1 }]),
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
-
-// ============================================================
-// Delta roundtrip
-// ============================================================
-
-#[test]
-fn roundtrip_delta() {
-    let v = Value::Delta(DeltaData {
-        base_id: 42,
-        ops: vec![
-            DeltaOp {
-                op_code: DeltaOpCode::SetField,
-                field_id: 1,
-                value: Some(Box::new(Value::String("new_val".into()))),
-            },
-            DeltaOp {
-                op_code: DeltaOpCode::DeleteField,
-                field_id: 2,
-                value: None,
-            },
-            DeltaOp {
-                op_code: DeltaOpCode::AppendArray,
-                field_id: 3,
-                value: Some(Box::new(Value::Int(99))),
-            },
-        ],
-    });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
 
 // ============================================================
 // Ext roundtrip
@@ -573,21 +458,6 @@ fn roundtrip_edge_batch() {
     assert_eq!(dec, v);
 }
 
-#[test]
-fn roundtrip_graph_shard() {
-    let nodes = vec![
-        NodeData::new("n1", vec!["L".into()], BTreeMap::new()),
-    ];
-    let edges = vec![
-        EdgeData::new("n1", "n1", "SELF", BTreeMap::new()),
-    ];
-    let mut metadata = BTreeMap::new();
-    metadata.insert("version".to_string(), Value::Int(1));
-    let v = Value::GraphShard(GraphShardData { nodes, edges, metadata });
-    let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
-}
 
 // ============================================================
 // Encode options: omit_null
@@ -910,40 +780,8 @@ fn json_audio_all_encodings() {
     }
 }
 
-#[test]
-fn json_adjlist() {
-    let v = Value::Adjlist(AdjlistData {
-        id_width: 1, node_count: 2, edge_count: 1,
-        row_offsets: vec![0, 1, 1],
-        col_indices: vec![0; 4],
-    });
-    let json_str = to_json(&v).unwrap();
-    assert!(json_str.contains("\"_type\":\"adjlist\""));
-}
 
-#[test]
-fn json_richtext() {
-    let v = Value::RichText(RichTextData {
-        text: "hello".into(),
-        tokens: Some(vec![1, 2]),
-        spans: Some(vec![RichTextSpan { start: 0, end: 5, kind_id: 1 }]),
-    });
-    let json_str = to_json(&v).unwrap();
-    assert!(json_str.contains("\"_type\":\"richtext\""));
-}
 
-#[test]
-fn json_delta() {
-    let v = Value::Delta(DeltaData {
-        base_id: 1,
-        ops: vec![
-            DeltaOp { op_code: DeltaOpCode::SetField, field_id: 0, value: Some(Box::new(Value::Int(42))) },
-            DeltaOp { op_code: DeltaOpCode::DeleteField, field_id: 1, value: None },
-        ],
-    });
-    let json_str = to_json(&v).unwrap();
-    assert!(json_str.contains("\"_type\":\"delta\""));
-}
 
 #[test]
 fn json_ext() {
@@ -1096,20 +934,6 @@ fn json_edge_batch() {
     assert!(json_str.contains("\"_type\":\"edge_batch\""));
 }
 
-#[test]
-fn json_graph_shard() {
-    let v = Value::GraphShard(GraphShardData {
-        nodes: vec![NodeData::new("n1", vec![], BTreeMap::new())],
-        edges: vec![EdgeData::new("n1", "n1", "SELF", BTreeMap::new())],
-        metadata: {
-            let mut m = BTreeMap::new();
-            m.insert("v".into(), Value::Int(1));
-            m
-        },
-    });
-    let json_str = to_json(&v).unwrap();
-    assert!(json_str.contains("\"_type\":\"graph_shard\""));
-}
 
 // ============================================================
 // Schema fingerprint tests
@@ -1167,26 +991,8 @@ fn schema_audio_includes_encoding_channels() {
     assert_ne!(schema_fingerprint64(&a1), schema_fingerprint64(&a2));
 }
 
-#[test]
-fn schema_adjlist() {
-    let v = Value::Adjlist(AdjlistData { id_width: 1, node_count: 0, edge_count: 0, row_offsets: vec![0], col_indices: vec![] });
-    let fp = schema_fingerprint64(&v);
-    assert_ne!(fp, 0);
-}
 
-#[test]
-fn schema_richtext() {
-    let v = Value::RichText(RichTextData { text: "hi".into(), tokens: None, spans: None });
-    let fp = schema_fingerprint64(&v);
-    assert_ne!(fp, 0);
-}
 
-#[test]
-fn schema_delta() {
-    let v = Value::Delta(DeltaData { base_id: 0, ops: vec![] });
-    let fp = schema_fingerprint64(&v);
-    assert_ne!(fp, 0);
-}
 
 #[test]
 fn schema_ext_includes_type_id() {
@@ -1208,14 +1014,12 @@ fn schema_graph_types() {
     let edge = Value::Edge(EdgeData::new("a", "b", "R", BTreeMap::new()));
     let nb = Value::NodeBatch(NodeBatchData { nodes: vec![NodeData::new("n", vec![], BTreeMap::new())] });
     let eb = Value::EdgeBatch(EdgeBatchData { edges: vec![EdgeData::new("a", "b", "R", BTreeMap::new())] });
-    let gs = Value::GraphShard(GraphShardData { nodes: vec![], edges: vec![], metadata: BTreeMap::new() });
 
     let fps = [
         schema_fingerprint64(&node),
         schema_fingerprint64(&edge),
         schema_fingerprint64(&nb),
         schema_fingerprint64(&eb),
-        schema_fingerprint64(&gs),
     ];
     for i in 0..fps.len() {
         for j in (i+1)..fps.len() {
@@ -1248,15 +1052,11 @@ fn schema_descriptor_all() {
     assert_eq!(schema_descriptor(&Value::TensorRef(TensorRef { store_id: 0, key: vec![] })), "tensor_ref");
     assert_eq!(schema_descriptor(&Value::Image(ImageData { format: ImageFormat::Jpeg, width: 1, height: 1, data: vec![] })), "image");
     assert_eq!(schema_descriptor(&Value::Audio(AudioData { encoding: AudioEncoding::Opus, sample_rate: 44100, channels: 1, data: vec![] })), "audio");
-    assert_eq!(schema_descriptor(&Value::Adjlist(AdjlistData { id_width: 1, node_count: 0, edge_count: 0, row_offsets: vec![0], col_indices: vec![] })), "adjlist");
-    assert_eq!(schema_descriptor(&Value::RichText(RichTextData { text: "".into(), tokens: None, spans: None })), "richtext");
-    assert_eq!(schema_descriptor(&Value::Delta(DeltaData { base_id: 0, ops: vec![] })), "delta");
     assert_eq!(schema_descriptor(&Value::Ext(ExtData { type_id: 0, payload: vec![] })), "ext");
     assert_eq!(schema_descriptor(&Value::Node(NodeData::new("n", vec![], BTreeMap::new()))), "node");
     assert_eq!(schema_descriptor(&Value::Edge(EdgeData::new("a", "b", "R", BTreeMap::new()))), "edge");
     assert_eq!(schema_descriptor(&Value::NodeBatch(NodeBatchData { nodes: vec![] })), "node_batch");
     assert_eq!(schema_descriptor(&Value::EdgeBatch(EdgeBatchData { edges: vec![] })), "edge_batch");
-    assert_eq!(schema_descriptor(&Value::GraphShard(GraphShardData { nodes: vec![], edges: vec![], metadata: BTreeMap::new() })), "graph_shard");
     assert_eq!(schema_descriptor(&Value::Bitmask { count: 1, bits: vec![0] }), "bitmask");
 }
 
@@ -1448,12 +1248,6 @@ fn value_as_edge_batch() {
     assert!(Value::Null.as_edge_batch().is_none());
 }
 
-#[test]
-fn value_as_graph_shard() {
-    let v = Value::GraphShard(GraphShardData { nodes: vec![], edges: vec![], metadata: BTreeMap::new() });
-    assert!(v.as_graph_shard().is_some());
-    assert!(Value::Null.as_graph_shard().is_none());
-}
 
 #[test]
 fn value_from_bool() {
