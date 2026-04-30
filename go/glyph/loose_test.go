@@ -92,6 +92,7 @@ func TestCanonicalizeLoose_Scalars(t *testing.T) {
 		{"string_empty", Str(""), `""`},
 		{"string_reserved_t", Str("t"), `"t"`},
 		{"string_reserved_f", Str("f"), `"f"`},
+		{"string_reserved_underscore", Str("_"), `"_"`},
 		{"string_reserved_null", Str("null"), `"null"`},
 		{"id_simple", ID("user", "123"), "^user:123"},
 	}
@@ -137,17 +138,15 @@ func TestCanonicalizeLoose_Maps(t *testing.T) {
 	}{
 		{"empty", Map(), "{}"},
 		{"single", Map(MapEntry{Key: "a", Value: Int(1)}), "{a=1}"},
-		// Keys should be sorted: A < _ < a < aa < b (bytewise UTF-8 of bare strings)
-		// But wait - "A" and "_" and "a" are bare safe, so they're compared as-is
-		// UTF-8 bytewise: "A"=0x41, "_"=0x5F, "a"=0x61, "aa", "b"
-		// So order should be: A < _ < a < aa < b
+		// Keys are sorted by bytewise UTF-8 of canonical key strings.
+		// "_" is quoted because bare "_" is the null token, so it sorts before A.
 		{"sorted_keys", Map(
 			MapEntry{Key: "b", Value: Int(1)},
 			MapEntry{Key: "a", Value: Int(2)},
 			MapEntry{Key: "aa", Value: Int(3)},
 			MapEntry{Key: "A", Value: Int(4)},
 			MapEntry{Key: "_", Value: Int(5)},
-		), "{A=4 _=5 a=2 aa=3 b=1}"},
+		), "{\"_\"=5 A=4 a=2 aa=3 b=1}"},
 		{"nested", Map(
 			MapEntry{Key: "inner", Value: Map(MapEntry{Key: "x", Value: Int(1)})},
 		), "{inner={x=1}}"},
@@ -341,8 +340,8 @@ func TestJSONCorpus_KeyOrdering(t *testing.T) {
 
 	canon := CanonicalizeLoose(gv)
 
-	// Expected order: A (0x41) < _ (0x5F) < a (0x61) < aa < b
-	expected := "{A=4 _=5 a=2 aa=3 b=1}"
+	// Expected order: quoted "_" starts with 0x22, then A, a, aa, b.
+	expected := "{\"_\"=5 A=4 a=2 aa=3 b=1}"
 	if canon != expected {
 		t.Errorf("Key ordering incorrect\nGot: %s\nWant: %s", canon, expected)
 	}

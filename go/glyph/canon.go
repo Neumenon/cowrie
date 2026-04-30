@@ -89,7 +89,7 @@ func canonRef(r RefID) string {
 
 // isBareSafeV2 checks if a string can be represented without quotes.
 // Pattern: ^[A-Za-z_][A-Za-z0-9_\-./]*$
-// Must not be a reserved word: t, f, ∅, null, none, nil, true, false
+// Must not be a reserved word: t, f, _, null, none, nil, true, false
 func isBareSafeV2(s string) bool {
 	if len(s) == 0 {
 		return false
@@ -97,7 +97,7 @@ func isBareSafeV2(s string) bool {
 
 	// Check reserved words
 	switch s {
-	case "t", "f", "true", "false", "null", "none", "nil":
+	case "t", "f", "_", "true", "false", "null", "none", "nil":
 		return false
 	}
 

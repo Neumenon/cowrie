@@ -523,15 +523,12 @@ with open("checkpoint.glyph") as f:
 
 ## Examples
 
-See [`examples/`](./examples/) for complete runnable code:
+This Cowrie-local copy is legacy documentation. Current examples live in the
+standalone GLYPH docs:
 
-| Example | Description |
-|---------|-------------|
-| [tool-calling](./examples/tool-calling/) | Streaming validation for LLM tool calls |
-| [langchain-integration](./examples/langchain/) | GLYPH with LangChain agents |
-| [data-pipeline](./examples/data-pipeline/) | Tabular mode for batch processing |
-| [agent-streaming](./examples/agent-streaming/) | GS1 with progress events |
-| [json-migration](./examples/json-migration/) | Gradual migration from JSON |
+- [Quickstart](../../../glyph/docs/QUICKSTART.md)
+- [Cookbook](../../../glyph/docs/COOKBOOK.md)
+- [Agent Patterns](../../../glyph/docs/AGENTS.md)
 
 ---
 
@@ -1024,12 +1021,12 @@ stream/
 
 ## Examples
 
-See [`examples/`](./examples/) for complete examples:
+This Cowrie-local copy is legacy documentation. Current examples live in the
+standalone GLYPH docs:
 
-- **[tool-calling](./examples/tool-calling/)** — Streaming validation for LLM tool calls
-- **[data-pipeline](./examples/data-pipeline/)** — Tabular mode for bulk data
-- **[agent-streaming](./examples/agent-streaming/)** — GS1 with progress events
-- **[json-migration](./examples/json-migration/)** — Drop-in JSON replacement
+- [Quickstart](../../../glyph/docs/QUICKSTART.md)
+- [Cookbook](../../../glyph/docs/COOKBOOK.md)
+- [Agent Patterns](../../../glyph/docs/AGENTS.md)
 
 ---
 
@@ -1084,7 +1081,7 @@ cd typescript/glyph && npm test
 
 ## License
 
-MIT License. See [LICENSE](./LICENSE).
+MIT License. See [LICENSE](../../LICENSE).
 
 ---
 

@@ -43,7 +43,7 @@ A string is "bare-safe" (unquoted) if:
 1. Non-empty
 2. First character: Unicode letter or `_`
 3. Remaining characters: Unicode letter, digit, `_`, `-`, `.`, `/`
-4. Not a reserved word: `t`, `f`, `true`, `false`, `null`, `none`, `nil`
+4. Not a reserved word: `t`, `f`, `_`, `true`, `false`, `null`, `none`, `nil`
 
 Otherwise, the string is quoted with minimal escapes.
 
@@ -70,10 +70,11 @@ Map keys are sorted by **bytewise UTF-8 comparison** of their canonical string f
 
 ```
 Input:  {"b":1,"a":2,"aa":3,"A":4,"_":5}
-Output: {A=4 _=5 a=2 aa=3 b=1}
+Output: {"_"=5 A=4 a=2 aa=3 b=1}
 ```
 
-UTF-8 byte order: `A` (0x41) < `_` (0x5F) < `a` (0x61) < ...
+UTF-8 byte order is applied to the canonical key strings. Since bare `_` is
+reserved for null, the key `_` canonicalizes as `"_"` and sorts before `A`.
 
 ### Duplicate Keys
 

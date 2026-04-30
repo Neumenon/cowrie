@@ -425,4 +425,4 @@ id:      ^prefix:value
 
 - [README](./README.md) - Full documentation
 - [LOOSE_MODE_SPEC](./LOOSE_MODE_SPEC.md) - Canonical encoding rules
-- [GS1_SPEC](./stream/GS1_SPEC.md) - Streaming protocol
+- [GS1_SPEC](./GS1_SPEC.md) - Streaming protocol

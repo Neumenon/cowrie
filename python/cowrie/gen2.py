@@ -2357,7 +2357,7 @@ def _type_to_ord(t: Type) -> int:
 
     Matches Go's Type enum: Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
     String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12, Tensor=13,
-    Image=14, Audio=15, TensorRef=16, Adjlist=17, RichText=18, Delta=19
+    TensorRef=14, Image=15, Audio=16, Adjlist=17, RichText=18, Delta=19
     """
     mapping = {
         Type.NULL: 0,
@@ -2374,9 +2374,9 @@ def _type_to_ord(t: Type) -> int:
         Type.ARRAY: 11,
         Type.OBJECT: 12,
         Type.TENSOR: 13,
-        Type.IMAGE: 14,
-        Type.AUDIO: 15,
-        Type.TENSOR_REF: 16,
+        Type.TENSOR_REF: 14,
+        Type.IMAGE: 15,
+        Type.AUDIO: 16,
         Type.ADJLIST: 17,
         Type.RICHTEXT: 18,
         Type.DELTA: 19,
