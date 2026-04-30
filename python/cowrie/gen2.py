@@ -1282,6 +1282,12 @@ class Decoder:
                 raise SecurityLimitExceeded(f"Bitmask data too large: {byte_len} > {self.opts.max_bytes_len}")
             bits = self._read(byte_len)
             return Value.bitmask(count, bits)
+        elif tag in (0x30, 0x31, 0x32, 0x39):
+            # Reserved (deprecated) tags — length-prefixed payload, skip silently.
+            # Spec: decoders MUST skip; encoders MUST NOT emit.
+            length = self._read_uvarint()
+            self._read(length)
+            return Value.null()
         else:
             # v3 inline types
             if Tag.FIXINT_BASE <= tag <= Tag.FIXINT_MAX:

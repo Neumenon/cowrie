@@ -8,11 +8,9 @@ from uuid import UUID
 
 from cowrie.gen2 import (
     encode, decode, Value, Type, to_json, to_any, from_json, from_any,
-    NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData,
+    NodeData, EdgeData, NodeBatchData, EdgeBatchData,
     TensorData, DType, ImageData, ImageFormat, AudioData, AudioEncoding,
-    TensorRefData, AdjlistData, IDWidth,
-    RichTextData, RichTextSpan,
-    DeltaData, DeltaOp, DeltaOpCode,
+    TensorRefData,
     BitmaskData, UnknownExtData,
     Decimal128, DecodeOptions, UnknownExtBehavior,
     SecurityLimitExceeded,
@@ -632,35 +630,6 @@ class TestGraphTypes:
         assert decoded.data.edges[0].from_id == "a"
         assert decoded.data.edges[1].edge_type == "E2"
 
-    def test_graph_shard_roundtrip(self):
-        """GraphShard with nodes, edges, and metadata should round-trip."""
-        nodes = [
-            NodeData(id="1", labels=["Node"], props={"x": Value.float64(0.1)}),
-            NodeData(id="2", labels=["Node"], props={"x": Value.float64(0.2)}),
-        ]
-        edges = [
-            EdgeData(from_id="1", to_id="2", edge_type="EDGE", props={"weight": Value.float64(0.85)})
-        ]
-        metadata = {"version": Value.int64(1)}
-        shard = Value.graph_shard(nodes, edges, metadata)
-        decoded = decode(encode(shard))
-
-        assert decoded.type == Type.GRAPH_SHARD
-        assert len(decoded.data.nodes) == 2
-        assert len(decoded.data.edges) == 1
-        assert decoded.data.metadata["version"].data == 1
-        assert decoded.data.nodes[0].id == "1"
-        assert decoded.data.edges[0].edge_type == "EDGE"
-
-    def test_empty_graph_shard(self):
-        """Empty GraphShard should round-trip correctly."""
-        shard = Value.graph_shard([], [], {})
-        decoded = decode(encode(shard))
-
-        assert decoded.type == Type.GRAPH_SHARD
-        assert len(decoded.data.nodes) == 0
-        assert len(decoded.data.edges) == 0
-        assert len(decoded.data.metadata) == 0
 
 
 class TestImage:
@@ -760,122 +729,6 @@ class TestTensorRef:
             TensorRefData(store_id=-1, key=b"test")
 
 
-class TestAdjlist:
-    """Test adjacency list encoding/decoding."""
-
-    def test_adjlist_int32_roundtrip(self):
-        """Adjlist with int32 IDs should round-trip."""
-        col_indices = struct.pack('<3I', 1, 2, 0)  # 3 edges
-        adj = Value.adjlist(IDWidth.INT32, 3, 3, [0, 1, 2, 3], col_indices)
-        decoded = decode(encode(adj))
-
-        assert decoded.type == Type.ADJLIST
-        assert decoded.data.id_width == IDWidth.INT32
-        assert decoded.data.node_count == 3
-        assert decoded.data.edge_count == 3
-        assert decoded.data.row_offsets == [0, 1, 2, 3]
-        assert decoded.data.col_indices == col_indices
-
-    def test_adjlist_int64_roundtrip(self):
-        """Adjlist with int64 IDs should round-trip."""
-        col_indices = struct.pack('<2Q', 100, 200)
-        adj = Value.adjlist(IDWidth.INT64, 2, 2, [0, 1, 2], col_indices)
-        decoded = decode(encode(adj))
-
-        assert decoded.type == Type.ADJLIST
-        assert decoded.data.id_width == IDWidth.INT64
-        assert decoded.data.id_size == 8
-
-    def test_adjlist_id_size(self):
-        """AdjlistData id_size property."""
-        adj32 = AdjlistData(id_width=IDWidth.INT32, node_count=0, edge_count=0,
-                            row_offsets=[0], col_indices=b"")
-        assert adj32.id_size == 4
-        adj64 = AdjlistData(id_width=IDWidth.INT64, node_count=0, edge_count=0,
-                            row_offsets=[0], col_indices=b"")
-        assert adj64.id_size == 8
-
-
-class TestRichText:
-    """Test rich text encoding/decoding."""
-
-    def test_richtext_plain(self):
-        """Plain richtext (no tokens or spans) should round-trip."""
-        rt = Value.richtext("Hello, world!")
-        decoded = decode(encode(rt))
-
-        assert decoded.type == Type.RICHTEXT
-        assert decoded.data.text == "Hello, world!"
-        assert decoded.data.tokens is None
-        assert decoded.data.spans is None
-
-    def test_richtext_with_tokens(self):
-        """Richtext with tokens should round-trip."""
-        rt = Value.richtext("Hello world", tokens=[101, 7592, 2088])
-        decoded = decode(encode(rt))
-
-        assert decoded.type == Type.RICHTEXT
-        assert decoded.data.text == "Hello world"
-        assert decoded.data.tokens == [101, 7592, 2088]
-        assert decoded.data.spans is None
-
-    def test_richtext_with_spans(self):
-        """Richtext with spans should round-trip."""
-        spans = [RichTextSpan(start=0, end=5, kind_id=1),
-                 RichTextSpan(start=6, end=11, kind_id=2)]
-        rt = Value.richtext("Hello world", spans=spans)
-        decoded = decode(encode(rt))
-
-        assert decoded.type == Type.RICHTEXT
-        assert decoded.data.text == "Hello world"
-        assert decoded.data.tokens is None
-        assert len(decoded.data.spans) == 2
-        assert decoded.data.spans[0].start == 0
-        assert decoded.data.spans[0].end == 5
-        assert decoded.data.spans[0].kind_id == 1
-
-    def test_richtext_with_tokens_and_spans(self):
-        """Richtext with both tokens and spans should round-trip."""
-        spans = [RichTextSpan(start=0, end=5, kind_id=1)]
-        rt = Value.richtext("Hello world", tokens=[101, 7592], spans=spans)
-        decoded = decode(encode(rt))
-
-        assert decoded.type == Type.RICHTEXT
-        assert decoded.data.tokens == [101, 7592]
-        assert len(decoded.data.spans) == 1
-
-
-class TestDelta:
-    """Test delta encoding/decoding."""
-
-    def test_delta_set_field(self):
-        """Delta with SET_FIELD operation should round-trip."""
-        ops = [
-            DeltaOp(op_code=DeltaOpCode.SET_FIELD, field_id=0, value=Value.string("new_value")),
-            DeltaOp(op_code=DeltaOpCode.DELETE_FIELD, field_id=1, value=None),
-        ]
-        delta = Value.delta(123, ops)
-        decoded = decode(encode(delta))
-
-        assert decoded.type == Type.DELTA
-        assert decoded.data.base_id == 123
-        assert len(decoded.data.ops) == 2
-        assert decoded.data.ops[0].op_code == DeltaOpCode.SET_FIELD
-        assert decoded.data.ops[1].op_code == DeltaOpCode.DELETE_FIELD
-
-    def test_delta_append_array(self):
-        """Delta with APPEND_ARRAY operation should round-trip."""
-        ops = [
-            DeltaOp(op_code=DeltaOpCode.APPEND_ARRAY, field_id=0, value=Value.int64(42)),
-        ]
-        delta = Value.delta(456, ops)
-        decoded = decode(encode(delta))
-
-        assert decoded.type == Type.DELTA
-        assert decoded.data.ops[0].op_code == DeltaOpCode.APPEND_ARRAY
-        assert decoded.data.ops[0].value.data == 42
-
-
 class TestBitmask:
     """Test bitmask encoding/decoding."""
 
@@ -959,17 +812,6 @@ class TestJSON:
         assert result["labels"] == ["Label"]
         assert result["props"]["prop"] == "value"
 
-    def test_to_any_graph_shard(self):
-        shard = Value.graph_shard(
-            [NodeData(id="x", labels=[], props={})],
-            [],
-            {"v": Value.int64(1)}
-        )
-        result = to_any(shard)
-        assert result["_type"] == "graph_shard"
-        assert len(result["nodes"]) == 1
-        assert result["metadata"]["v"] == 1
-
     def test_to_any_edge(self):
         edge = Value.edge("a", "b", "REL", {"w": Value.float64(0.5)})
         result = to_any(edge)
@@ -1017,30 +859,6 @@ class TestJSON:
         result = to_any(v)
         assert result["_type"] == "tensor_ref"
         assert result["store_id"] == 1
-
-    def test_to_any_adjlist(self):
-        col_indices = struct.pack('<2I', 1, 0)
-        v = Value.adjlist(IDWidth.INT32, 2, 2, [0, 1, 2], col_indices)
-        result = to_any(v)
-        assert result["_type"] == "adjlist"
-        assert result["id_width"] == "int32"
-        assert result["node_count"] == 2
-
-    def test_to_any_richtext(self):
-        spans = [RichTextSpan(start=0, end=5, kind_id=1)]
-        v = Value.richtext("hello world", tokens=[1, 2, 3], spans=spans)
-        result = to_any(v)
-        assert result["_type"] == "richtext"
-        assert result["text"] == "hello world"
-        assert result["tokens"] == [1, 2, 3]
-        assert len(result["spans"]) == 1
-
-    def test_to_any_delta(self):
-        ops = [DeltaOp(op_code=DeltaOpCode.SET_FIELD, field_id=0, value=Value.int64(99))]
-        v = Value.delta(100, ops)
-        result = to_any(v)
-        assert result["_type"] == "delta"
-        assert result["base_id"] == 100
 
     def test_to_any_bitmask(self):
         v = Value.bitmask_from_bools([True, False, True])
@@ -1096,12 +914,6 @@ class TestJSON:
         v = Value.uint64(9007199254740992)
         result = to_any(v)
         assert isinstance(result, str)
-
-    def test_to_any_adjlist_int64(self):
-        col_indices = struct.pack('<2Q', 100, 200)
-        v = Value.adjlist(IDWidth.INT64, 2, 2, [0, 1, 2], col_indices)
-        result = to_any(v)
-        assert result["id_width"] == "int64"
 
 
 class TestFromJson:
@@ -1459,36 +1271,6 @@ class TestDeterministicEncoder:
         decoded = decode(data)
         assert decoded.type == Type.TENSOR_REF
 
-    def test_deterministic_adjlist(self):
-        """Deterministic encoder handles adjlist type."""
-        col = struct.pack('<2I', 1, 0)
-        v = Value.adjlist(IDWidth.INT32, 2, 2, [0, 1, 2], col)
-        opts = EncodeOptions(deterministic=True)
-        data = encode_with_opts(v, opts)
-        decoded = decode(data)
-        assert decoded.type == Type.ADJLIST
-
-    def test_deterministic_richtext(self):
-        """Deterministic encoder handles richtext type."""
-        spans = [RichTextSpan(start=0, end=3, kind_id=1)]
-        v = Value.richtext("abc", tokens=[1, 2], spans=spans)
-        opts = EncodeOptions(deterministic=True)
-        data = encode_with_opts(v, opts)
-        decoded = decode(data)
-        assert decoded.type == Type.RICHTEXT
-
-    def test_deterministic_delta(self):
-        """Deterministic encoder handles delta type."""
-        ops = [
-            DeltaOp(op_code=DeltaOpCode.SET_FIELD, field_id=0, value=Value.int64(1)),
-            DeltaOp(op_code=DeltaOpCode.APPEND_ARRAY, field_id=1, value=Value.string("x")),
-        ]
-        v = Value.delta(10, ops)
-        opts = EncodeOptions(deterministic=True)
-        data = encode_with_opts(v, opts)
-        decoded = decode(data)
-        assert decoded.type == Type.DELTA
-
     def test_deterministic_all_primitives(self):
         """Deterministic encoder handles all primitive types."""
         u = UUID("550e8400-e29b-41d4-a716-446655440000")
@@ -1579,25 +1361,6 @@ class TestSchemaFingerprint:
         r2 = Value.tensor_ref(2, b"key")
         assert schema_fingerprint64(r1) != schema_fingerprint64(r2)
 
-    def test_schema_fingerprint_adjlist(self):
-        """Adjlist schema includes id_width."""
-        a1 = Value.adjlist(IDWidth.INT32, 0, 0, [0], b"")
-        a2 = Value.adjlist(IDWidth.INT64, 0, 0, [0], b"")
-        assert schema_fingerprint64(a1) != schema_fingerprint64(a2)
-
-    def test_schema_fingerprint_richtext(self):
-        """RichText schema is consistent."""
-        r1 = Value.richtext("hello")
-        r2 = Value.richtext("world")
-        assert schema_fingerprint64(r1) == schema_fingerprint64(r2)
-
-    def test_schema_fingerprint_delta(self):
-        """Delta schema includes op codes."""
-        ops1 = [DeltaOp(op_code=DeltaOpCode.SET_FIELD, field_id=0, value=Value.int64(1))]
-        ops2 = [DeltaOp(op_code=DeltaOpCode.DELETE_FIELD, field_id=0, value=None)]
-        d1 = Value.delta(0, ops1)
-        d2 = Value.delta(0, ops2)
-        assert schema_fingerprint64(d1) != schema_fingerprint64(d2)
 
 
 class TestMasterStream:
@@ -1813,6 +1576,92 @@ class TestInvariantTrailingGarbage:
         corrupted = data + b"\xff"
         with pytest.raises(ValueError, match="trailing"):
             decode(corrupted)
+
+
+class TestSkipReservedTag:
+    """Spec requirement: decoders MUST skip reserved tags (0x30-0x32, 0x39) silently."""
+
+    def _build_stream(self, dict_keys: list, root_bytes: bytes) -> bytes:
+        """Build a minimal valid Gen2 stream with the given dictionary and raw root value bytes."""
+        from cowrie.gen2 import MAGIC, VERSION, encode_uvarint
+        buf = bytearray()
+        buf += MAGIC
+        buf += bytes([VERSION, 0])  # version, flags
+        buf += encode_uvarint(len(dict_keys))
+        for key in dict_keys:
+            key_enc = key.encode("utf-8")
+            buf += encode_uvarint(len(key_enc))
+            buf += key_enc
+        buf += root_bytes
+        return bytes(buf)
+
+    def test_reserved_0x30_in_object_field(self):
+        """Reserved tag 0x30 (Adjlist) inside an object field is silently skipped (returns null)."""
+        from cowrie.gen2 import encode_uvarint
+        reserved_payload = b"\xAA\xBB\xCC\xDD"
+        reserved_val = bytes([0x30]) + encode_uvarint(len(reserved_payload)) + reserved_payload
+
+        name_str = b"hello"
+        kept_val = bytes([0x05]) + encode_uvarint(len(name_str)) + name_str  # STRING tag
+
+        # OBJECT tag = 0x07, 2 fields
+        obj_bytes = (
+            bytes([0x07])
+            + encode_uvarint(2)
+            + encode_uvarint(0) + kept_val      # field "name" = "hello"
+            + encode_uvarint(1) + reserved_val  # field "skip_me" = reserved
+        )
+        raw = self._build_stream(["name", "skip_me"], obj_bytes)
+
+        decoded = decode(raw)
+
+        assert decoded.type == Type.OBJECT
+        assert decoded.data["name"].data == "hello"
+        assert decoded.data["skip_me"].type == Type.NULL
+
+    def test_reserved_0x39_in_object_field(self):
+        """Reserved tag 0x39 (GraphShard) inside an object field is silently skipped."""
+        from cowrie.gen2 import encode_uvarint, zigzag_encode
+        reserved_payload = b"\x01\x02\x03\x04\x05\x06\x07\x08"
+        reserved_val = bytes([0x39]) + encode_uvarint(len(reserved_payload)) + reserved_payload
+
+        # INT64 tag = 0x03, zigzag(99)
+        kept_val = bytes([0x03]) + encode_uvarint(zigzag_encode(99))
+
+        obj_bytes = (
+            bytes([0x07])
+            + encode_uvarint(2)
+            + encode_uvarint(0) + kept_val       # field "count" = 99
+            + encode_uvarint(1) + reserved_val   # field "skip_me" = reserved
+        )
+        raw = self._build_stream(["count", "skip_me"], obj_bytes)
+
+        decoded = decode(raw)
+        assert decoded.type == Type.OBJECT
+        assert decoded.data["count"].data == 99
+        assert decoded.data["skip_me"].type == Type.NULL
+
+    def test_reserved_tags_0x31_0x32_also_skip(self):
+        """Reserved tags 0x31 and 0x32 are also silently skipped."""
+        from cowrie.gen2 import encode_uvarint
+        payload = b"\xDE\xAD\xBE\xEF"
+
+        for reserved_tag in (0x31, 0x32):
+            reserved_val = bytes([reserved_tag]) + encode_uvarint(len(payload)) + payload
+            kept_val = bytes([0x02])  # TRUE tag
+
+            obj_bytes = (
+                bytes([0x07])
+                + encode_uvarint(2)
+                + encode_uvarint(0) + kept_val      # field "flag" = True
+                + encode_uvarint(1) + reserved_val  # field "x" = reserved
+            )
+            raw = self._build_stream(["flag", "x"], obj_bytes)
+
+            decoded = decode(raw)
+            assert decoded.type == Type.OBJECT, f"tag 0x{reserved_tag:02x}: expected OBJECT"
+            assert decoded.data["flag"].data is True, f"tag 0x{reserved_tag:02x}: kept field wrong"
+            assert decoded.data["x"].type == Type.NULL, f"tag 0x{reserved_tag:02x}: expected null for reserved"
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ def _map_error_code(err: Exception) -> str:
         return "ERR_TRUNCATED"
     if msg.startswith("Invalid tag"):
         return "ERR_INVALID_TAG"
+    if "trailing" in msg.lower():
+        return "ERR_TRAILING_DATA"
     return ""
 
 
