@@ -11,6 +11,7 @@ function mapErrorCode(err: unknown): string {
   if (msg.includes("Unsupported version")) return "ERR_INVALID_VERSION";
   if (msg.includes("Unexpected end of data") || msg.includes("truncated")) return "ERR_TRUNCATED";
   if (msg.startsWith("Invalid tag")) return "ERR_INVALID_TAG";
+  if (msg.includes("trailing data")) return "ERR_TRAILING_DATA";
   return "";
 }
 

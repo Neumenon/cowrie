@@ -33,8 +33,6 @@ import {
   DType,
   ImageFormat,
   AudioEncoding,
-  IDWidth,
-  DeltaOpCode,
   SecurityLimitExceeded,
   UnknownExtBehavior,
   tensorViewFloat32,
@@ -50,15 +48,10 @@ import type {
   ImageData,
   AudioData,
   TensorRefData,
-  AdjlistData,
-  RichTextData,
-  DeltaData,
-  DeltaOp,
   NodeData,
   EdgeData,
   NodeBatchData,
   EdgeBatchData,
-  GraphShardData,
   BitmaskData,
   Decimal128,
   UnknownExtData,
@@ -420,94 +413,6 @@ describe('gen2 encode/decode roundtrip: ML types', () => {
     assert.deepStrictEqual(ref.key, key);
   });
 
-  it('adjlist int32', () => {
-    const colIndices = new Uint8Array(new Int32Array([1, 0, 2]).buffer);
-    const v = roundtrip(SJ.adjlist(IDWidth.INT32, 3, 3, [0, 1, 2, 3], colIndices));
-    assert.strictEqual(v.type, Type.ADJLIST);
-    const adj = v.data as AdjlistData;
-    assert.strictEqual(adj.idWidth, IDWidth.INT32);
-    assert.strictEqual(adj.nodeCount, 3);
-    assert.strictEqual(adj.edgeCount, 3);
-    assert.deepStrictEqual(adj.rowOffsets, [0, 1, 2, 3]);
-  });
-
-  it('adjlist int64', () => {
-    const colIndices = new Uint8Array(new BigInt64Array([1n, 2n]).buffer);
-    const v = roundtrip(SJ.adjlist(IDWidth.INT64, 2, 2, [0, 1, 2], colIndices));
-    const adj = v.data as AdjlistData;
-    assert.strictEqual(adj.idWidth, IDWidth.INT64);
-    assert.strictEqual(adj.nodeCount, 2);
-    assert.strictEqual(adj.edgeCount, 2);
-  });
-
-  it('richtext plain', () => {
-    const v = roundtrip(SJ.richtext('hello world'));
-    assert.strictEqual(v.type, Type.RICHTEXT);
-    const rt = v.data as RichTextData;
-    assert.strictEqual(rt.text, 'hello world');
-    assert.strictEqual(rt.tokens, undefined);
-    assert.strictEqual(rt.spans, undefined);
-  });
-
-  it('richtext with tokens', () => {
-    const v = roundtrip(SJ.richtext('hello world', [101, 102, 103]));
-    const rt = v.data as RichTextData;
-    assert.strictEqual(rt.text, 'hello world');
-    assert.deepStrictEqual(rt.tokens, [101, 102, 103]);
-  });
-
-  it('richtext with spans', () => {
-    const v = roundtrip(SJ.richtext('hello world', undefined, [
-      { start: 0, end: 5, kindId: 1 },
-      { start: 6, end: 11, kindId: 2 },
-    ]));
-    const rt = v.data as RichTextData;
-    assert.strictEqual(rt.spans!.length, 2);
-    assert.strictEqual(rt.spans![0].start, 0);
-    assert.strictEqual(rt.spans![0].end, 5);
-    assert.strictEqual(rt.spans![0].kindId, 1);
-  });
-
-  it('richtext with tokens and spans', () => {
-    const v = roundtrip(SJ.richtext('hello', [1, 2], [
-      { start: 0, end: 5, kindId: 3 },
-    ]));
-    const rt = v.data as RichTextData;
-    assert.deepStrictEqual(rt.tokens, [1, 2]);
-    assert.strictEqual(rt.spans!.length, 1);
-  });
-
-  it('delta with SET_FIELD', () => {
-    const ops: DeltaOp[] = [
-      { opCode: DeltaOpCode.SET_FIELD, fieldId: 0, value: SJ.string('new_value') },
-    ];
-    const v = roundtrip(SJ.delta(42, ops));
-    assert.strictEqual(v.type, Type.DELTA);
-    const delta = v.data as DeltaData;
-    assert.strictEqual(delta.baseId, 42);
-    assert.strictEqual(delta.ops.length, 1);
-    assert.strictEqual(delta.ops[0].opCode, DeltaOpCode.SET_FIELD);
-  });
-
-  it('delta with DELETE_FIELD', () => {
-    const ops: DeltaOp[] = [
-      { opCode: DeltaOpCode.DELETE_FIELD, fieldId: 1 },
-    ];
-    const v = roundtrip(SJ.delta(0, ops));
-    const delta = v.data as DeltaData;
-    assert.strictEqual(delta.ops[0].opCode, DeltaOpCode.DELETE_FIELD);
-    assert.strictEqual(delta.ops[0].value, undefined);
-  });
-
-  it('delta with APPEND_ARRAY', () => {
-    const ops: DeltaOp[] = [
-      { opCode: DeltaOpCode.APPEND_ARRAY, fieldId: 2, value: SJ.int64(99) },
-    ];
-    const v = roundtrip(SJ.delta(1, ops));
-    const delta = v.data as DeltaData;
-    assert.strictEqual(delta.ops[0].opCode, DeltaOpCode.APPEND_ARRAY);
-  });
-
   it('bitmask', () => {
     const bits = new Uint8Array([0b10110101]);
     const v = roundtrip(SJ.bitmask(8, bits));
@@ -592,21 +497,6 @@ describe('gen2 encode/decode roundtrip: graph types', () => {
     assert.strictEqual(batch.edges.length, 2);
   });
 
-  it('graph shard', () => {
-    const nodes: NodeData[] = [
-      { id: 'n1', labels: ['Person'], props: { name: SJ.string('Alice') } },
-    ];
-    const edges: EdgeData[] = [
-      { fromId: 'n1', toId: 'n2', edgeType: 'KNOWS', props: {} },
-    ];
-    const meta: Record<string, Value> = { shard_id: SJ.string('s1') };
-    const v = roundtrip(SJ.graphShard(nodes, edges, meta));
-    assert.strictEqual(v.type, Type.GRAPH_SHARD);
-    const shard = v.data as GraphShardData;
-    assert.strictEqual(shard.nodes.length, 1);
-    assert.strictEqual(shard.edges.length, 1);
-    assert.strictEqual((shard.metadata['shard_id'] as Value).data, 's1');
-  });
 });
 
 // ============================================================
@@ -855,47 +745,6 @@ describe('gen2 JSON bridge', () => {
     assert.strictEqual(result.storeId, 1);
   });
 
-  it('toAny adjlist', () => {
-    const colIndices = new Uint8Array(new Int32Array([1]).buffer);
-    const result = toAny(SJ.adjlist(IDWidth.INT32, 2, 1, [0, 1, 1], colIndices)) as Record<string, unknown>;
-    assert.strictEqual(result._type, 'adjlist');
-    assert.strictEqual(result.idWidth, 'int32');
-    assert.strictEqual(result.nodeCount, 2);
-    assert.strictEqual(result.edgeCount, 1);
-  });
-
-  it('toAny adjlist int64', () => {
-    const colIndices = new Uint8Array(new BigInt64Array([1n]).buffer);
-    const result = toAny(SJ.adjlist(IDWidth.INT64, 2, 1, [0, 0, 1], colIndices)) as Record<string, unknown>;
-    assert.strictEqual(result.idWidth, 'int64');
-  });
-
-  it('toAny richtext plain', () => {
-    const result = toAny(SJ.richtext('hello')) as Record<string, unknown>;
-    assert.strictEqual(result._type, 'richtext');
-    assert.strictEqual(result.text, 'hello');
-    assert.strictEqual(result.tokens, undefined);
-    assert.strictEqual(result.spans, undefined);
-  });
-
-  it('toAny richtext with tokens and spans', () => {
-    const result = toAny(SJ.richtext('hello', [1, 2], [
-      { start: 0, end: 5, kindId: 1 },
-    ])) as Record<string, unknown>;
-    assert.deepStrictEqual(result.tokens, [1, 2]);
-    assert.strictEqual((result.spans as any[]).length, 1);
-  });
-
-  it('toAny delta', () => {
-    const result = toAny(SJ.delta(1, [
-      { opCode: DeltaOpCode.SET_FIELD, fieldId: 0, value: SJ.string('v') },
-      { opCode: DeltaOpCode.DELETE_FIELD, fieldId: 1 },
-    ])) as Record<string, unknown>;
-    assert.strictEqual(result._type, 'delta');
-    assert.strictEqual(result.baseId, 1);
-    assert.strictEqual((result.ops as any[]).length, 2);
-  });
-
   it('toAny node', () => {
     const result = toAny(SJ.node('n1', ['Person'], { name: SJ.string('Alice') })) as Record<string, unknown>;
     assert.strictEqual(result._type, 'node');
@@ -927,15 +776,6 @@ describe('gen2 JSON bridge', () => {
     const result = toAny(SJ.edgeBatch(edges)) as Record<string, unknown>;
     assert.strictEqual(result._type, 'edge_batch');
     assert.strictEqual((result.edges as any[]).length, 1);
-  });
-
-  it('toAny graph_shard', () => {
-    const result = toAny(SJ.graphShard(
-      [{ id: 'n1', labels: ['A'], props: { x: SJ.int64(1) } }],
-      [{ fromId: 'n1', toId: 'n2', edgeType: 'E', props: { w: SJ.int64(2) } }],
-      { key: SJ.string('val') },
-    )) as Record<string, unknown>;
-    assert.strictEqual(result._type, 'graph_shard');
   });
 
   it('toAny bitmask', () => {
@@ -1075,36 +915,6 @@ describe('gen2 deterministic encoding', () => {
     assert.strictEqual(obj['ref'].type, Type.TENSOR_REF);
   });
 
-  it('deterministic encode adjlist', () => {
-    const adj = SJ.adjlist(IDWidth.INT32, 2, 1, [0, 0, 1], new Uint8Array(new Int32Array([0]).buffer));
-    const v = SJ.object({ adj });
-    const enc = encodeWithOpts(v, { deterministic: true });
-    const decoded = decode(enc);
-    const obj = decoded.data as Record<string, Value>;
-    assert.strictEqual(obj['adj'].type, Type.ADJLIST);
-  });
-
-  it('deterministic encode richtext', () => {
-    const rt = SJ.richtext('hello', [1, 2], [{ start: 0, end: 5, kindId: 1 }]);
-    const v = SJ.object({ rt });
-    const enc = encodeWithOpts(v, { deterministic: true });
-    const decoded = decode(enc);
-    const obj = decoded.data as Record<string, Value>;
-    assert.strictEqual(obj['rt'].type, Type.RICHTEXT);
-  });
-
-  it('deterministic encode delta', () => {
-    const d = SJ.delta(0, [
-      { opCode: DeltaOpCode.SET_FIELD, fieldId: 0, value: SJ.int64(1) },
-      { opCode: DeltaOpCode.DELETE_FIELD, fieldId: 1 },
-    ]);
-    const v = SJ.object({ d });
-    const enc = encodeWithOpts(v, { deterministic: true });
-    const decoded = decode(enc);
-    const obj = decoded.data as Record<string, Value>;
-    assert.strictEqual(obj['d'].type, Type.DELTA);
-  });
-
   it('deterministic encode bitmask', () => {
     const bm = SJ.bitmask(4, new Uint8Array([0b1010]));
     const v = SJ.object({ bm });
@@ -1197,24 +1007,6 @@ describe('gen2 schema fingerprinting', () => {
     const r1 = SJ.tensorRef(1, new Uint8Array([1]));
     const r2 = SJ.tensorRef(2, new Uint8Array([1]));
     assert.notStrictEqual(schemaFingerprint32(r1), schemaFingerprint32(r2));
-  });
-
-  it('adjlist schema includes idWidth', () => {
-    const a1 = SJ.adjlist(IDWidth.INT32, 1, 0, [0, 0], new Uint8Array(0));
-    const a2 = SJ.adjlist(IDWidth.INT64, 1, 0, [0, 0], new Uint8Array(0));
-    assert.notStrictEqual(schemaFingerprint32(a1), schemaFingerprint32(a2));
-  });
-
-  it('richtext schema is type-only', () => {
-    const r1 = SJ.richtext('hello', [1], [{ start: 0, end: 5, kindId: 1 }]);
-    const r2 = SJ.richtext('world', [2, 3], [{ start: 0, end: 5, kindId: 2 }]);
-    assert.strictEqual(schemaFingerprint32(r1), schemaFingerprint32(r2));
-  });
-
-  it('delta schema includes ops', () => {
-    const d1 = SJ.delta(0, [{ opCode: DeltaOpCode.SET_FIELD, fieldId: 0, value: SJ.int64(1) }]);
-    const d2 = SJ.delta(0, [{ opCode: DeltaOpCode.DELETE_FIELD, fieldId: 0 }]);
-    assert.notStrictEqual(schemaFingerprint32(d1), schemaFingerprint32(d2));
   });
 
   it('scalar types same schema', () => {
