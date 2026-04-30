@@ -1,11 +1,9 @@
 //! Cowrie decoder.
 
-use super::types::{Value, CowrieError, DType, TensorData, TensorRef, ImageFormat, ImageData, AudioEncoding, AudioData, AdjlistData, RichTextData, RichTextSpan, DeltaData, DeltaOp, DeltaOpCode, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData, GraphShardData};
+use super::types::{Value, CowrieError, DType, TensorData, TensorRef, ImageFormat, ImageData, AudioEncoding, AudioData, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData};
 use super::tags;
 use crate::{MAGIC, VERSION};
 use std::collections::BTreeMap;
-
-const FLAG_HAS_COLUMN_HINTS: u8 = 0x08;
 
 /// Configurable limits for the Cowrie decoder.
 ///
@@ -30,8 +28,6 @@ pub struct DecodeOptions {
     pub max_dict_len: usize,
     /// Maximum tensor rank (number of dimensions).
     pub max_rank: usize,
-    /// Maximum number of column hints.
-    pub max_hint_count: usize,
 }
 
 impl Default for DecodeOptions {
@@ -45,7 +41,6 @@ impl Default for DecodeOptions {
             max_ext_len: 1_000_000,       // Tightened: was 100M
             max_dict_len: 1_000_000,      // Tightened: was 10M
             max_rank: 32,
-            max_hint_count: 10_000,
         }
     }
 }
@@ -96,11 +91,8 @@ impl<'a> Reader<'a> {
             return Err(CowrieError::InvalidVersion(version));
         }
 
-        // Read flags
-        let flags = self.read_byte()?;
-        if (flags & FLAG_HAS_COLUMN_HINTS) != 0 {
-            self.skip_hints()?;
-        }
+        // Read flags (reserved — ignore)
+        let _flags = self.read_byte()?;
 
         // Read dictionary
         let dict_len = self.read_uvarint()? as usize;
@@ -281,99 +273,6 @@ impl<'a> Reader<'a> {
                 let data = self.read_bytes(data_len)?;
                 Value::Audio(AudioData { encoding, sample_rate, channels, data })
             }
-            tags::ADJLIST => {
-                let id_width = self.read_byte()?;
-                let node_count = self.read_uvarint()?;
-                let edge_count = self.read_uvarint()?;
-
-                // Row offsets: node_count + 1 elements
-                let mut row_offsets = Vec::with_capacity((node_count + 1) as usize);
-                for _ in 0..=node_count {
-                    row_offsets.push(self.read_uvarint()?);
-                }
-
-                // Col indices size depends on id_width and edge_count
-                let col_size = if id_width == 1 { 4 } else { 8 };
-                let col_len = edge_count as usize * col_size;
-                if col_len > self.opts.max_bytes_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let col_indices = self.read_bytes(col_len)?;
-
-                Value::Adjlist(AdjlistData {
-                    id_width,
-                    node_count,
-                    edge_count,
-                    row_offsets,
-                    col_indices,
-                })
-            }
-            tags::RICHTEXT => {
-                let text_len = self.read_uvarint()? as usize;
-                if text_len > self.opts.max_string_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let text_bytes = self.read_bytes(text_len)?;
-                let text = String::from_utf8(text_bytes).map_err(|_| CowrieError::InvalidUtf8)?;
-
-                let flags = self.read_byte()?;
-                let has_tokens = (flags & 0x01) != 0;
-                let has_spans = (flags & 0x02) != 0;
-
-                let tokens = if has_tokens {
-                    let token_count = self.read_uvarint()? as usize;
-                    let mut toks = Vec::with_capacity(token_count);
-                    for _ in 0..token_count {
-                        let tok = i32::from_le_bytes(self.read_bytes_fixed::<4>()?);
-                        toks.push(tok);
-                    }
-                    Some(toks)
-                } else {
-                    None
-                };
-
-                let spans = if has_spans {
-                    let span_count = self.read_uvarint()? as usize;
-                    let mut sp = Vec::with_capacity(span_count);
-                    for _ in 0..span_count {
-                        let start = self.read_uvarint()?;
-                        let end = self.read_uvarint()?;
-                        let kind_id = self.read_uvarint()?;
-                        sp.push(RichTextSpan { start, end, kind_id });
-                    }
-                    Some(sp)
-                } else {
-                    None
-                };
-
-                Value::RichText(RichTextData { text, tokens, spans })
-            }
-            tags::DELTA => {
-                let base_id = self.read_uvarint()?;
-                let op_count = self.read_uvarint()? as usize;
-
-                let mut ops = Vec::with_capacity(op_count);
-                for _ in 0..op_count {
-                    let op_byte = self.read_byte()?;
-                    let op_code = match op_byte {
-                        0x01 => DeltaOpCode::SetField,
-                        0x02 => DeltaOpCode::DeleteField,
-                        0x03 => DeltaOpCode::AppendArray,
-                        _ => return Err(CowrieError::InvalidTag(op_byte)),
-                    };
-                    let field_id = self.read_uvarint()?;
-
-                    let value = if op_code == DeltaOpCode::DeleteField {
-                        None
-                    } else {
-                        Some(Box::new(self.decode_value()?))
-                    };
-
-                    ops.push(DeltaOp { op_code, field_id, value });
-                }
-
-                Value::Delta(DeltaData { base_id, ops })
-            }
             // Graph types
             tags::NODE => {
                 let node = self.decode_node_data()?;
@@ -404,29 +303,6 @@ impl<'a> Reader<'a> {
                     edges.push(self.decode_edge_data()?);
                 }
                 Value::EdgeBatch(EdgeBatchData { edges })
-            }
-            tags::GRAPH_SHARD => {
-                // Decode nodes
-                let node_count = self.read_uvarint()? as usize;
-                if node_count > self.opts.max_array_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let mut nodes = Vec::with_capacity(node_count);
-                for _ in 0..node_count {
-                    nodes.push(self.decode_node_data()?);
-                }
-                // Decode edges
-                let edge_count = self.read_uvarint()? as usize;
-                if edge_count > self.opts.max_array_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let mut edges = Vec::with_capacity(edge_count);
-                for _ in 0..edge_count {
-                    edges.push(self.decode_edge_data()?);
-                }
-                // Decode metadata
-                let metadata = self.decode_props()?;
-                Value::GraphShard(GraphShardData { nodes, edges, metadata })
             }
             tags::BITMASK => {
                 let count = self.read_uvarint()?;
@@ -473,6 +349,17 @@ impl<'a> Reader<'a> {
             }
             t if t >= tags::FIXNEG_BASE && t <= tags::FIXNEG_MAX => {
                 Value::Int(-1 - (t - tags::FIXNEG_BASE) as i64)
+            }
+            // Reserved / stripped tags in 0x30–0x34 and 0x39: length-prefixed payload.
+            // Silently skip payload so that a reader can forward-scan past unknown tags.
+            t if (t >= 0x30 && t <= 0x34) || t == 0x39 => {
+                let payload_len = self.read_uvarint()? as usize;
+                if payload_len > self.opts.max_bytes_len {
+                    return Err(CowrieError::TooLarge);
+                }
+                let _ = self.read_bytes(payload_len)?;
+                // Return Null as a placeholder — callers that care about type should inspect the tag.
+                Value::Null
             }
             _ => return Err(CowrieError::InvalidTag(tag)),
         };
@@ -547,26 +434,6 @@ impl<'a> Reader<'a> {
         }
         let bytes = self.read_bytes(len)?;
         String::from_utf8(bytes).map_err(|_| CowrieError::InvalidUtf8)
-    }
-
-    fn skip_hints(&mut self) -> Result<(), CowrieError> {
-        let count = self.read_uvarint()? as usize;
-        if count > self.opts.max_hint_count {
-            return Err(CowrieError::TooLarge);
-        }
-        for _ in 0..count {
-            let _field = self.read_string()?;
-            let _typ = self.read_byte()?;
-            let shape_len = self.read_uvarint()?;
-            if shape_len > self.opts.max_rank as u64 {
-                return Err(CowrieError::TooLarge);
-            }
-            for _ in 0..shape_len {
-                let _ = self.read_uvarint()?;
-            }
-            let _flags = self.read_byte()?;
-        }
-        Ok(())
     }
 
     /// Decode a node (without tag byte).

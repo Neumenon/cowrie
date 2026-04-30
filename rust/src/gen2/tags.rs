@@ -25,15 +25,11 @@ pub const TENSOR_REF: u8 = 0x21;
 pub const IMAGE: u8 = 0x22;
 pub const AUDIO: u8 = 0x23;
 pub const BITMASK: u8 = 0x24;
-pub const ADJLIST: u8 = 0x30;
-pub const RICHTEXT: u8 = 0x31;
-pub const DELTA: u8 = 0x32;
 // Graph types (v2.1)
 pub const NODE: u8 = 0x35;
 pub const EDGE: u8 = 0x36;
 pub const NODE_BATCH: u8 = 0x37;
 pub const EDGE_BATCH: u8 = 0x38;
-pub const GRAPH_SHARD: u8 = 0x39;
 // v3 inline types
 pub const FIXINT_BASE: u8 = 0x40;
 pub const FIXINT_MAX: u8 = 0xBF;

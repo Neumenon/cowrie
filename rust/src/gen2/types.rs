@@ -348,56 +348,6 @@ pub struct AudioData {
     pub data: Vec<u8>,
 }
 
-/// Adjacency list data for graph types.
-#[derive(Debug, Clone, PartialEq)]
-pub struct AdjlistData {
-    pub id_width: u8,      // 1=int32, 2=int64
-    pub node_count: u64,
-    pub edge_count: u64,
-    pub row_offsets: Vec<u64>,
-    pub col_indices: Vec<u8>,
-}
-
-/// Rich text span.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RichTextSpan {
-    pub start: u64,
-    pub end: u64,
-    pub kind_id: u64,
-}
-
-/// Rich text data with optional tokens and spans.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RichTextData {
-    pub text: String,
-    pub tokens: Option<Vec<i32>>,
-    pub spans: Option<Vec<RichTextSpan>>,
-}
-
-/// Delta operation codes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum DeltaOpCode {
-    SetField = 0x01,
-    DeleteField = 0x02,
-    AppendArray = 0x03,
-}
-
-/// Delta operation.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DeltaOp {
-    pub op_code: DeltaOpCode,
-    pub field_id: u64,
-    pub value: Option<Box<Value>>,
-}
-
-/// Delta data representing a semantic diff/patch.
-#[derive(Debug, Clone, PartialEq)]
-pub struct DeltaData {
-    pub base_id: u64,
-    pub ops: Vec<DeltaOp>,
-}
-
 /// Extension type (unknown extension).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtData {
@@ -470,15 +420,6 @@ pub struct EdgeBatchData {
     pub edges: Vec<EdgeData>,
 }
 
-/// Self-contained subgraph with nodes, edges, and metadata.
-/// Useful for distributed graph processing and checkpointing.
-#[derive(Debug, Clone, PartialEq)]
-pub struct GraphShardData {
-    pub nodes: Vec<NodeData>,
-    pub edges: Vec<EdgeData>,
-    pub metadata: BTreeMap<String, Value>,
-}
-
 /// Cowrie Value type.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -499,9 +440,6 @@ pub enum Value {
     TensorRef(TensorRef),
     Image(ImageData),
     Audio(AudioData),
-    Adjlist(AdjlistData),
-    RichText(RichTextData),
-    Delta(DeltaData),
     Ext(ExtData),
     Bitmask { count: u64, bits: Vec<u8> },
     // Graph types (v2.1)
@@ -509,7 +447,6 @@ pub enum Value {
     Edge(EdgeData),
     NodeBatch(NodeBatchData),
     EdgeBatch(EdgeBatchData),
-    GraphShard(GraphShardData),
 }
 
 impl Value {
@@ -636,14 +573,6 @@ impl Value {
     pub fn as_edge_batch(&self) -> Option<&EdgeBatchData> {
         match self {
             Value::EdgeBatch(eb) => Some(eb),
-            _ => None,
-        }
-    }
-
-    /// Get graph shard data.
-    pub fn as_graph_shard(&self) -> Option<&GraphShardData> {
-        match self {
-            Value::GraphShard(gs) => Some(gs),
             _ => None,
         }
     }

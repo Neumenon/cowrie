@@ -38,8 +38,8 @@ pub fn schema_equals(a: &Value, b: &Value) -> bool {
 /// Map Value variant to Go's Type enum for cross-language fingerprint compatibility.
 /// Go's Type enum (iota): Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
 /// String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
-/// Tensor=13, TensorRef=14, Image=15, Audio=16, Adjlist=17, RichText=18, Delta=19, UnknownExt=20
-/// Node=21, Edge=22, NodeBatch=23, EdgeBatch=24, GraphShard=25
+/// Tensor=13, TensorRef=14, Image=15, Audio=16, UnknownExt=17 (was 20),
+/// Node=18, Edge=19, NodeBatch=20, EdgeBatch=21
 fn value_type_ord(value: &Value) -> u8 {
     match value {
         Value::Null => 0,
@@ -59,16 +59,12 @@ fn value_type_ord(value: &Value) -> u8 {
         Value::TensorRef(_) => 14,
         Value::Image(_) => 15,
         Value::Audio(_) => 16,
-        Value::Adjlist(_) => 17,
-        Value::RichText(_) => 18,
-        Value::Delta(_) => 19,
-        Value::Ext(_) => 20, // UnknownExt in Go
-        Value::Node(_) => 21,
-        Value::Edge(_) => 22,
-        Value::NodeBatch(_) => 23,
-        Value::EdgeBatch(_) => 24,
-        Value::GraphShard(_) => 25,
-        Value::Bitmask { .. } => 26,
+        Value::Ext(_) => 17,
+        Value::Node(_) => 18,
+        Value::Edge(_) => 19,
+        Value::NodeBatch(_) => 20,
+        Value::EdgeBatch(_) => 21,
+        Value::Bitmask { .. } => 22,
     }
 }
 
@@ -119,18 +115,6 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
             h = fnv_hash_byte(h, aud.channels);
         }
 
-        Value::Adjlist(adj) => {
-            h = fnv_hash_byte(h, adj.id_width);
-        }
-
-        Value::RichText(_) => {
-            // RichText schema is just the type tag
-        }
-
-        Value::Delta(_) => {
-            // Delta schema is just the type tag
-        }
-
         Value::Ext(ext) => {
             h = fnv_hash_u64(h, ext.type_id);
         }
@@ -162,11 +146,6 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
             for edge in &batch.edges {
                 h = hash_schema(&Value::Edge(edge.clone()), h);
             }
-        }
-        Value::GraphShard(shard) => {
-            h = fnv_hash_u64(h, shard.nodes.len() as u64);
-            h = fnv_hash_u64(h, shard.edges.len() as u64);
-            h = fnv_hash_u64(h, shard.metadata.len() as u64);
         }
         Value::Bitmask { count, .. } => {
             h = fnv_hash_u64(h, *count);
@@ -239,15 +218,11 @@ pub fn schema_descriptor(value: &Value) -> String {
         Value::TensorRef(_) => "tensor_ref".to_string(),
         Value::Image(_) => "image".to_string(),
         Value::Audio(_) => "audio".to_string(),
-        Value::Adjlist(_) => "adjlist".to_string(),
-        Value::RichText(_) => "richtext".to_string(),
-        Value::Delta(_) => "delta".to_string(),
         Value::Ext(_) => "ext".to_string(),
         Value::Node(_) => "node".to_string(),
         Value::Edge(_) => "edge".to_string(),
         Value::NodeBatch(_) => "node_batch".to_string(),
         Value::EdgeBatch(_) => "edge_batch".to_string(),
-        Value::GraphShard(_) => "graph_shard".to_string(),
         Value::Bitmask { .. } => "bitmask".to_string(),
     }
 }

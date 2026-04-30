@@ -280,40 +280,6 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
                 "data": BASE64.encode(&aud.data)
             }))
         }
-        Value::Adjlist(adj) => {
-            Ok(serde_json::json!({
-                "_type": "adjlist",
-                "id_width": adj.id_width,
-                "node_count": adj.node_count,
-                "edge_count": adj.edge_count,
-                "row_offsets": adj.row_offsets,
-                "col_indices": BASE64.encode(&adj.col_indices)
-            }))
-        }
-        Value::RichText(rt) => {
-            Ok(serde_json::json!({
-                "_type": "richtext",
-                "text": rt.text,
-                "tokens": rt.tokens,
-                "spans": rt.spans.as_ref().map(|spans| spans.iter().map(|s| {
-                    serde_json::json!({"start": s.start, "end": s.end, "kind_id": s.kind_id})
-                }).collect::<Vec<_>>())
-            }))
-        }
-        Value::Delta(delta) => {
-            let ops: Vec<serde_json::Value> = delta.ops.iter().map(|op| {
-                serde_json::json!({
-                    "op_code": op.op_code as u8,
-                    "field_id": op.field_id,
-                    "value": op.value.as_ref().map(|v| value_to_json(v).ok()).flatten()
-                })
-            }).collect();
-            Ok(serde_json::json!({
-                "_type": "delta",
-                "base_id": delta.base_id,
-                "ops": ops
-            }))
-        }
         Value::Ext(ext) => {
             Ok(serde_json::json!({
                 "_type": "ext",
@@ -361,22 +327,6 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             Ok(serde_json::json!({
                 "_type": "edge_batch",
                 "edges": edges?
-            }))
-        }
-        Value::GraphShard(shard) => {
-            let nodes: Result<Vec<serde_json::Value>, CowrieError> =
-                shard.nodes.iter().map(|n| value_to_json(&Value::Node(n.clone()))).collect();
-            let edges: Result<Vec<serde_json::Value>, CowrieError> =
-                shard.edges.iter().map(|e| value_to_json(&Value::Edge(e.clone()))).collect();
-            let metadata: Result<serde_json::Map<String, serde_json::Value>, CowrieError> =
-                shard.metadata.iter().map(|(k, v)| {
-                    Ok((k.clone(), value_to_json(v)?))
-                }).collect();
-            Ok(serde_json::json!({
-                "_type": "graph_shard",
-                "nodes": nodes?,
-                "edges": edges?,
-                "metadata": serde_json::Value::Object(metadata?)
             }))
         }
         Value::Bitmask { count, bits } => {

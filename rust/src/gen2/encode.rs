@@ -95,15 +95,6 @@ fn collect_keys(value: &Value, keys: &mut Vec<String>, seen: &mut std::collectio
                 collect_props_keys(&edge.props, keys, seen, opts);
             }
         }
-        Value::GraphShard(shard) => {
-            for node in &shard.nodes {
-                collect_props_keys(&node.props, keys, seen, opts);
-            }
-            for edge in &shard.edges {
-                collect_props_keys(&edge.props, keys, seen, opts);
-            }
-            collect_props_keys(&shard.metadata, keys, seen, opts);
-        }
         _ => {}
     }
 }
@@ -253,54 +244,6 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
             write_uvarint(buf, aud.data.len() as u64);
             buf.extend_from_slice(&aud.data);
         }
-        Value::Adjlist(adj) => {
-            buf.push(tags::ADJLIST);
-            buf.push(adj.id_width);
-            write_uvarint(buf, adj.node_count);
-            write_uvarint(buf, adj.edge_count);
-            for &offset in &adj.row_offsets {
-                write_uvarint(buf, offset);
-            }
-            buf.extend_from_slice(&adj.col_indices);
-        }
-        Value::RichText(rt) => {
-            buf.push(tags::RICHTEXT);
-            let text_bytes = rt.text.as_bytes();
-            write_uvarint(buf, text_bytes.len() as u64);
-            buf.extend_from_slice(text_bytes);
-
-            let mut flags = 0u8;
-            if rt.tokens.is_some() { flags |= 0x01; }
-            if rt.spans.is_some() { flags |= 0x02; }
-            buf.push(flags);
-
-            if let Some(ref tokens) = rt.tokens {
-                write_uvarint(buf, tokens.len() as u64);
-                for &tok in tokens {
-                    buf.extend_from_slice(&tok.to_le_bytes());
-                }
-            }
-            if let Some(ref spans) = rt.spans {
-                write_uvarint(buf, spans.len() as u64);
-                for span in spans {
-                    write_uvarint(buf, span.start);
-                    write_uvarint(buf, span.end);
-                    write_uvarint(buf, span.kind_id);
-                }
-            }
-        }
-        Value::Delta(delta) => {
-            buf.push(tags::DELTA);
-            write_uvarint(buf, delta.base_id);
-            write_uvarint(buf, delta.ops.len() as u64);
-            for op in &delta.ops {
-                buf.push(op.op_code as u8);
-                write_uvarint(buf, op.field_id);
-                if let Some(ref val) = op.value {
-                    encode_value(buf, val, dict, opts)?;
-                }
-            }
-        }
         Value::Ext(ext) => {
             buf.push(tags::EXT);
             write_uvarint(buf, ext.type_id);
@@ -334,21 +277,6 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
             for edge in &batch.edges {
                 encode_edge_data(buf, edge, dict, opts)?;
             }
-        }
-        Value::GraphShard(shard) => {
-            buf.push(tags::GRAPH_SHARD);
-            // Encode nodes
-            write_uvarint(buf, shard.nodes.len() as u64);
-            for node in &shard.nodes {
-                encode_node_data(buf, node, dict, opts)?;
-            }
-            // Encode edges
-            write_uvarint(buf, shard.edges.len() as u64);
-            for edge in &shard.edges {
-                encode_edge_data(buf, edge, dict, opts)?;
-            }
-            // Encode metadata (as dict-coded properties)
-            encode_props(buf, &shard.metadata, dict, opts)?;
         }
     }
     Ok(())
