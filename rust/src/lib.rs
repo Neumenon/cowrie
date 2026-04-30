@@ -42,17 +42,19 @@
 //! | Feature | Gen1 | Gen2 |
 //! |---------|------|------|
 //! | Core types | 11 | 13+ |
-//! | ML types | proto-tensors | Tensor, Image, Audio, etc. |
+//! | ML types | proto-tensors | Tensor, TensorRef, Image, Audio, Bitmask |
 //! | Dictionary coding | No | Yes |
 //! | Compression | No | gzip/zstd |
 //! | Schema fingerprint | No | Yes |
-//! | Graph types | 6 | Adjlist |
+//! | Graph types | No | Node, Edge, NodeBatch, EdgeBatch |
+//!
+//! Tags 0x30 (Adjlist), 0x31 (RichText), 0x32 (Delta), 0x39 (GraphShard) are reserved.
+//! Encoders must not emit them; decoders skip them silently.
 //!
 //! # Choosing a Codec
 //!
 //! Use **Gen1** when:
 //! - You need a simple, lightweight codec
-//! - You're working with GNN/graph data
 //! - You want minimal dependencies
 //!
 //! Use **Gen2** when:
