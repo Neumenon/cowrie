@@ -31,7 +31,6 @@ var (
 	ErrUnknownExt      = errors.New("cowrie: unknown extension type (strict mode)")
 	ErrInvalidVarint   = errors.New("cowrie: invalid or overflow varint encoding")
 	ErrDictTooLarge    = errors.New("cowrie: dictionary exceeds maximum size")
-	ErrTooManyHints    = errors.New("cowrie: too many column hints")
 	ErrTrailingData    = errors.New("cowrie: trailing data after root value")
 )
 
@@ -47,7 +46,6 @@ const (
 	DefaultMaxBytesLen  = 50_000_000    // 50MB bytes (tightened: was 1GB)
 	DefaultMaxExtLen    = 1_000_000     // 1MB max extension payload (tightened: was 100MB)
 	DefaultMaxDictLen   = 1_000_000     // 1M dictionary entries (tightened: was 10M)
-	DefaultMaxHintCount = 10_000        // 10K column hints max
 	DefaultMaxRank      = 32            // Maximum tensor rank (dimensions)
 )
 
@@ -78,7 +76,6 @@ type DecodeOptions struct {
 	MaxBytesLen  int // Maximum bytes length (also applies to tensor/image/audio data)
 	MaxExtLen    int // Maximum extension payload length (default 100MB)
 	MaxDictLen   int // Maximum dictionary size (default 10M)
-	MaxHintCount int // Maximum column hints (default 10K)
 	MaxRank      int // Maximum tensor rank/dimensions (default 32)
 
 	// OnUnknownExt controls behavior when an unknown TagExt is encountered.
@@ -114,7 +111,6 @@ func DefaultDecodeOptions() DecodeOptions {
 		MaxBytesLen:  DefaultMaxBytesLen,
 		MaxExtLen:    DefaultMaxExtLen,
 		MaxDictLen:   DefaultMaxDictLen,
-		MaxHintCount: DefaultMaxHintCount,
 		MaxRank:      DefaultMaxRank,
 		OnUnknownExt: UnknownExtKeep,
 	}
@@ -188,9 +184,6 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (*Value, error) {
 	}
 	if opts.MaxDictLen == 0 {
 		opts.MaxDictLen = DefaultMaxDictLen
-	}
-	if opts.MaxHintCount == 0 {
-		opts.MaxHintCount = DefaultMaxHintCount
 	}
 	if opts.MaxRank == 0 {
 		opts.MaxRank = DefaultMaxRank
@@ -409,51 +402,6 @@ func (r *reader) readInt32LE() (int32, error) {
 // zigzagDecode decodes a zigzag-encoded value.
 func zigzagDecode(n uint64) int64 {
 	return int64((n >> 1) ^ -(n & 1))
-}
-
-// skipHints reads and discards column hints from the stream with limit enforcement.
-func skipHints(r *reader) error {
-	count, err := r.readUvarint()
-	if err != nil {
-		return err
-	}
-	// Enforce hint count limit to prevent CPU spin attacks
-	if r.opts.MaxHintCount > 0 && count > uint64(r.opts.MaxHintCount) {
-		return ErrTooManyHints
-	}
-	// Sanity check: each hint is at least 3 bytes (1 field name len + 1 type + 1 flags)
-	if count*3 > uint64(r.remaining()) {
-		return ErrMalformedLength
-	}
-	for i := uint64(0); i < count; i++ {
-		// Skip field name (use limit-checked version)
-		if _, err := r.readStringWithLimit(r.opts.MaxStringLen); err != nil {
-			return err
-		}
-		// Skip type (1 byte)
-		if _, err := r.readByte(); err != nil {
-			return err
-		}
-		// Skip shape
-		shapeLen, err := r.readUvarint()
-		if err != nil {
-			return err
-		}
-		// Enforce rank limit (shapeLen is effectively the tensor rank)
-		if r.opts.MaxRank > 0 && shapeLen > uint64(r.opts.MaxRank) {
-			return ErrMalformedLength
-		}
-		for j := uint64(0); j < shapeLen; j++ {
-			if _, err := r.readUvarint(); err != nil {
-				return err
-			}
-		}
-		// Skip flags (1 byte)
-		if _, err := r.readByte(); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // decode reads the complete Cowrie v2 format.
@@ -961,6 +909,22 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			}
 			return UnknownExtension(extType, payload), nil
 		}
+
+	// Reserved tags (0x30-0x32, 0x39): Adjlist/RichText/Delta/GraphShard moved to attic.
+	// These are encoded as: tag | varint-len | payload-bytes
+	// Skip the payload and return Null for forward compatibility.
+	case 0x30, 0x31, 0x32, 0x39:
+		payloadLen, err := r.readUvarint()
+		if err != nil {
+			return nil, err
+		}
+		if payloadLen > uint64(r.remaining()) {
+			return nil, ErrMalformedLength
+		}
+		if _, err := r.read(int(payloadLen)); err != nil {
+			return nil, err
+		}
+		return Null(), nil
 
 	default:
 		// v3 inline types

@@ -95,9 +95,6 @@ func TestValueToAny_AllTypes(t *testing.T) {
 		{"tensor_ref", TensorRef(0, []byte{0xAA})},
 		{"image", Image(0, 10, 10, []byte{0xFF})},
 		{"audio", Audio(0, 44100, 2, []byte{0x00})},
-		{"adjlist", Adjlist(0, 3, 2, []uint64{0, 1, 2}, []byte{1, 2})},
-		{"richtext", RichText("hello", nil, nil)},
-		{"delta", Delta(0, []DeltaOp{{OpCode: DeltaOpSetField}})},
 		{"bitmask", Bitmask(8, []byte{0xFF})},
 		{"unknown_ext", UnknownExtension(999, []byte{0x01})},
 	}
@@ -180,16 +177,6 @@ func TestValueToAny_GraphTypes(t *testing.T) {
 		t.Error("expected non-nil for EdgeBatch")
 	}
 
-	// GraphShard
-	gsVal := GraphShard(
-		[]NodeData{{ID: "n1"}},
-		[]EdgeData{{From: "n1", To: "n2"}},
-		map[string]any{"version": "1"},
-	)
-	result = valueToAny(gsVal)
-	if result == nil {
-		t.Error("expected non-nil for GraphShard")
-	}
 }
 
 func TestEncodeDecode_CompressedGzip(t *testing.T) {
@@ -259,52 +246,3 @@ func TestEncodeFramed_BelowThreshold(t *testing.T) {
 	}
 }
 
-func TestColumnReader_DatetimeAndBytes(t *testing.T) {
-	// Build an array of objects with datetime and bytes fields
-	rows := Array(
-		Object(
-			Member{Key: "ts", Value: Datetime64(1000000)},
-			Member{Key: "data", Value: Bytes([]byte{1, 2, 3})},
-		),
-		Object(
-			Member{Key: "ts", Value: Datetime64(2000000)},
-			Member{Key: "data", Value: Bytes([]byte{4, 5, 6})},
-		),
-	)
-
-	hints := []ColumnHint{
-		{Field: "ts", Type: HintDatetime},
-		{Field: "data", Type: HintBytes},
-	}
-
-	data, err := EncodeWithHints(rows, hints)
-	if err != nil {
-		t.Fatalf("EncodeWithHints failed: %v", err)
-	}
-
-	cr, err := NewColumnReader(data)
-	if err != nil {
-		t.Fatalf("NewColumnReader failed: %v", err)
-	}
-
-	// ReadDatetimeColumn
-	ts, valid, err := cr.ReadDatetimeColumn("ts")
-	if err != nil {
-		t.Fatalf("ReadDatetimeColumn failed: %v", err)
-	}
-	if len(ts) != 2 || !valid[0] || !valid[1] {
-		t.Errorf("unexpected datetime results: %v, %v", ts, valid)
-	}
-	if ts[0] != 1000000 || ts[1] != 2000000 {
-		t.Errorf("datetime values: got %v", ts)
-	}
-
-	// ReadBytesColumn
-	bdata, bvalid, err := cr.ReadBytesColumn("data")
-	if err != nil {
-		t.Fatalf("ReadBytesColumn failed: %v", err)
-	}
-	if len(bdata) != 2 || !bvalid[0] || !bvalid[1] {
-		t.Errorf("unexpected bytes results: %v, %v", bdata, bvalid)
-	}
-}

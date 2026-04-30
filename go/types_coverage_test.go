@@ -153,13 +153,6 @@ func TestTryExtTypes(t *testing.T) {
 		t.Error("TryEdgeBatch")
 	}
 
-	// TryGraphShard
-	gsv := GraphShard([]NodeData{{ID: "n1"}}, []EdgeData{{From: "n1", To: "n2"}}, nil)
-	gsd, ok := gsv.TryGraphShard()
-	if !ok || len(gsd.Nodes) != 1 {
-		t.Error("TryGraphShard")
-	}
-
 	// TryBitmask
 	bmv := BitmaskFromBools([]bool{true, false, true})
 	bmd, ok := bmv.TryBitmask()

@@ -382,9 +382,6 @@ func TestToGoAny_AllTypes(t *testing.T) {
 		{"tensor_ref", TensorRef(1, []byte{0xAA})},
 		{"image", Image(0, 10, 10, []byte{0xFF})},
 		{"audio", Audio(0, 44100, 2, []byte{0x00})},
-		{"adjlist", Adjlist(0, 3, 2, []uint64{0, 1, 2}, []byte{1, 2})},
-		{"richtext", RichText("hello", nil, nil)},
-		{"delta", Delta(0, []DeltaOp{{OpCode: DeltaOpSetField, FieldID: 0, Value: Int64(1)}})},
 		{"unknown_ext", UnknownExtension(999, []byte{0x01})},
 	}
 

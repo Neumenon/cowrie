@@ -110,11 +110,6 @@ func TestValueTypeMethodOnNonMatchingType(t *testing.T) {
 		t.Error("TryEdgeBatch on int should fail")
 	}
 
-	// TryGraphShard on non-graphshard
-	if _, ok := iv.TryGraphShard(); ok {
-		t.Error("TryGraphShard on int should fail")
-	}
-
 	// TryBitmask on non-bitmask
 	if _, ok := iv.TryBitmask(); ok {
 		t.Error("TryBitmask on int should fail")
@@ -152,9 +147,6 @@ func TestValuePanics_Coverage(t *testing.T) {
 	assertPanics(t, "TensorRef on int", func() { _ = iv.TensorRef() })
 	assertPanics(t, "Image on int", func() { _ = iv.Image() })
 	assertPanics(t, "Audio on int", func() { _ = iv.Audio() })
-	assertPanics(t, "Adjlist on int", func() { _ = iv.Adjlist() })
-	assertPanics(t, "RichText on int", func() { _ = iv.RichText() })
-	assertPanics(t, "Delta on int", func() { _ = iv.Delta() })
 	assertPanics(t, "UnknownExt on int", func() { _ = iv.UnknownExt() })
 	assertPanics(t, "Decimal128 on int", func() { _ = iv.Decimal128() })
 	assertPanics(t, "Datetime64 on int", func() { _ = iv.Datetime64() })
@@ -164,7 +156,6 @@ func TestValuePanics_Coverage(t *testing.T) {
 	assertPanics(t, "Edge on int", func() { _ = iv.Edge() })
 	assertPanics(t, "NodeBatch on int", func() { _ = iv.NodeBatch() })
 	assertPanics(t, "EdgeBatch on int", func() { _ = iv.EdgeBatch() })
-	assertPanics(t, "GraphShard on int", func() { _ = iv.GraphShard() })
 	assertPanics(t, "Bitmask on int", func() { _ = iv.Bitmask() })
 }
 
@@ -277,30 +268,9 @@ func TestViewFunctions_WrongDtype(t *testing.T) {
 }
 
 func TestSchemaDescriptor_MoreTypes(t *testing.T) {
-	// RichText
-	rt := RichText("hello world", nil, nil)
-	d := SchemaDescriptor(rt)
-	if d != "rich_text" {
-		t.Errorf("expected rich_text, got %s", d)
-	}
-
-	// Delta
-	dt := Delta(0, nil)
-	d = SchemaDescriptor(dt)
-	if d != "delta" {
-		t.Errorf("expected delta, got %s", d)
-	}
-
-	// Adjlist
-	adj := Adjlist(IDWidthInt32, 2, 1, []uint64{0, 0, 1}, []byte{1, 0, 0, 0})
-	d = SchemaDescriptor(adj)
-	if d != "adjlist" {
-		t.Errorf("expected adjlist, got %s", d)
-	}
-
 	// TensorRef
 	tr := TensorRef(1, []byte{1, 2})
-	d = SchemaDescriptor(tr)
+	d := SchemaDescriptor(tr)
 	if d != "tensor_ref" {
 		t.Errorf("expected tensor_ref, got %s", d)
 	}
@@ -316,8 +286,6 @@ func TestHashSchema_AllTypes(t *testing.T) {
 		Bytes([]byte{1}),
 		Datetime64(12345),
 		UUID128([16]byte{1}),
-		RichText("hello", nil, nil),
-		Delta(0, nil),
 		UnknownExtension(42, []byte{1}),
 	}
 
@@ -349,27 +317,6 @@ func TestToAny_MoreTypes(t *testing.T) {
 	ta := ToAny(tr)
 	if ta == nil {
 		t.Error("tensorref ToAny nil")
-	}
-
-	// RichText
-	rt := RichText("hello", []int32{1, 2}, []RichTextSpan{{Start: 0, End: 5, KindID: 1}})
-	ra := ToAny(rt)
-	if ra == nil {
-		t.Error("richtext ToAny nil")
-	}
-
-	// Delta
-	dt := Delta(1, []DeltaOp{{OpCode: DeltaOpSetField, FieldID: 1, Value: Int64(42)}})
-	dta := ToAny(dt)
-	if dta == nil {
-		t.Error("delta ToAny nil")
-	}
-
-	// Adjlist
-	adj := Adjlist(IDWidthInt32, 2, 1, []uint64{0, 0, 1}, []byte{1, 0, 0, 0})
-	aa := ToAny(adj)
-	if aa == nil {
-		t.Error("adjlist ToAny nil")
 	}
 
 	// Large int64 (out of JS safe range)

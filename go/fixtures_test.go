@@ -128,6 +128,8 @@ func mapErrorCode(err error) string {
 		return "ERR_TOO_DEEP"
 	case errors.Is(err, ErrArrayTooLarge), errors.Is(err, ErrObjectTooLarge):
 		return "ERR_TOO_LARGE"
+	case errors.Is(err, ErrTrailingData):
+		return "ERR_TRAILING_DATA"
 	default:
 		return ""
 	}

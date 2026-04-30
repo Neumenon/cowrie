@@ -36,41 +36,6 @@ func TestConstructors_ExtTypes(t *testing.T) {
 		t.Errorf("Audio data: %v", audd)
 	}
 
-	// RichText
-	rt := RichText("hello world", []int32{1, 2, 3}, []RichTextSpan{{Start: 0, End: 5, KindID: 1}})
-	if rt.Type() != TypeRichText {
-		t.Error("RichText type")
-	}
-	rtd := rt.RichText()
-	if rtd.Text != "hello world" || len(rtd.Tokens) != 3 {
-		t.Errorf("RichText data: %v", rtd)
-	}
-
-	// RichText with nil tokens/spans
-	rt2 := RichText("plain", nil, nil)
-	if rt2.Type() != TypeRichText {
-		t.Error("RichText type nil tokens")
-	}
-
-	// Adjlist
-	adj := Adjlist(0, 3, 2, []uint64{0, 1, 2, 3}, []byte{0, 1, 2})
-	if adj.Type() != TypeAdjlist {
-		t.Error("Adjlist type")
-	}
-
-	// Delta
-	d := Delta(42, []DeltaOp{
-		{OpCode: DeltaOpSetField, FieldID: 0, Value: Int64(1)},
-		{OpCode: DeltaOpDeleteField, FieldID: 1},
-	})
-	if d.Type() != TypeDelta {
-		t.Error("Delta type")
-	}
-	dd := d.Delta()
-	if dd.BaseID != 42 || len(dd.Ops) != 2 {
-		t.Errorf("Delta data: %v", dd)
-	}
-
 	// UnknownExtension
 	ue := UnknownExtension(999, []byte{0x01, 0x02})
 	if ue.Type() != TypeUnknownExt {
@@ -144,15 +109,6 @@ func TestConstructors_GraphTypes(t *testing.T) {
 		t.Error("EdgeBatch type")
 	}
 
-	// GraphShard
-	gs := GraphShard(
-		[]NodeData{{ID: "n1"}},
-		[]EdgeData{{From: "n1", To: "n2"}},
-		map[string]any{"version": "1"},
-	)
-	if gs.Type() != TypeGraphShard {
-		t.Error("GraphShard type")
-	}
 }
 
 func TestEncodeDecode_ExtTypes(t *testing.T) {
@@ -163,15 +119,11 @@ func TestEncodeDecode_ExtTypes(t *testing.T) {
 		{"tensor_ref", TensorRef(1, []byte{0xAA})},
 		{"image", Image(ImageFormatPNG, 10, 10, []byte{0xFF})},
 		{"audio", Audio(AudioEncodingPCMInt16, 44100, 1, []byte{0x00, 0x01})},
-		{"adjlist", Adjlist(IDWidthInt32, 2, 1, []uint64{0, 0, 1}, []byte{1, 0, 0, 0})},
-		{"richtext", RichText("hello", []int32{1}, nil)},
-		{"delta", Delta(0, []DeltaOp{{OpCode: DeltaOpSetField, FieldID: 0, Value: Int64(1)}})},
 		{"bitmask", BitmaskFromBools([]bool{true, false, true})},
 		{"node", Node("n1", []string{"A"}, map[string]any{"x": "y"})},
 		{"edge", Edge("n1", "n2", "T", nil)},
 		{"node_batch", NodeBatch([]NodeData{{ID: "n1", Labels: []string{"A"}}})},
 		{"edge_batch", EdgeBatch([]EdgeData{{From: "n1", To: "n2", Type: "T"}})},
-		{"graph_shard", GraphShard([]NodeData{{ID: "n1"}}, []EdgeData{{From: "n1", To: "n2"}}, nil)},
 		{"unknown_ext", UnknownExtension(42, []byte{0x01})},
 	}
 

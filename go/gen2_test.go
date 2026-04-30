@@ -1118,52 +1118,6 @@ func TestEdgeBatchRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGraphShardRoundTrip(t *testing.T) {
-	nodes := []NodeData{
-		{ID: "1", Labels: []string{"Node"}, Props: map[string]any{"x": float64(0.1)}},
-		{ID: "2", Labels: []string{"Node"}, Props: map[string]any{"x": float64(0.2)}},
-	}
-	edges := []EdgeData{
-		{From: "1", To: "2", Type: "EDGE", Props: map[string]any{"weight": float64(0.85)}},
-	}
-	metadata := map[string]any{
-		"version":     int64(1),
-		"partitionId": int64(42),
-	}
-	shard := GraphShard(nodes, edges, metadata)
-
-	// Encode
-	encoded, err := Encode(shard)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Decode
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	// Verify type
-	if decoded.Type() != TypeGraphShard {
-		t.Fatalf("Expected TypeGraphShard, got %v", decoded.Type())
-	}
-
-	// Verify data
-	shardData := decoded.GraphShard()
-	if len(shardData.Nodes) != 2 {
-		t.Fatalf("Expected 2 nodes, got %d", len(shardData.Nodes))
-	}
-	if len(shardData.Edges) != 1 {
-		t.Fatalf("Expected 1 edge, got %d", len(shardData.Edges))
-	}
-	if shardData.Metadata["version"] != int64(1) {
-		t.Errorf("Metadata[version]: got %v, want 1", shardData.Metadata["version"])
-	}
-	if shardData.Metadata["partitionId"] != int64(42) {
-		t.Errorf("Metadata[partitionId]: got %v, want 42", shardData.Metadata["partitionId"])
-	}
-}
 
 func TestGraphDictionaryCodingSavings(t *testing.T) {
 	// Create 100 nodes with repeated property keys
@@ -1201,6 +1155,83 @@ func TestGraphDictionaryCodingSavings(t *testing.T) {
 	}
 }
 
+// TestSkipReservedTagRoundTrip verifies that reserved tags (0x30-0x32, 0x39)
+// are silently skipped when encountered inside a container. The decoder must
+// not error or panic; kept fields must decode correctly; and the reserved-tag
+// slot must produce Null rather than corrupting the surrounding object.
+func TestSkipReservedTagRoundTrip(t *testing.T) {
+	// Hand-craft a Gen2 stream:
+	//
+	//   Header : 'S' 'J' 0x02 0x00
+	//   Dict   : 2 entries → ["kept_key", "dead_key"]
+	//   Root   : TagObject (0x07), count=2
+	//     field 0: dictIdx=1 ("dead_key"), value=0x30 (reserved), payloadLen=4, payload=[0xDE 0xAD 0xBE 0xEF]
+	//     field 1: dictIdx=0 ("kept_key"), value=TagString (0x05), len=5, "hello"
+	//
+	// The skip-reserved-tag logic in decodeValue reads payloadLen as a varint
+	// then discards that many bytes, returning Null().  The object therefore
+	// decodes as { dead_key: null, kept_key: "hello" } with no trailing bytes.
+
+	stream := []byte{
+		// ── header ──────────────────────────────────────────────────────────
+		'S', 'J', // magic
+		0x02,     // version
+		0x00,     // flags
+
+		// ── dictionary (2 entries) ───────────────────────────────────────────
+		0x02,                                     // dictLen = 2
+		0x08, 'k', 'e', 'p', 't', '_', 'k', 'e', 'y', // entry[0]: len=8, "kept_key"
+		0x08, 'd', 'e', 'a', 'd', '_', 'k', 'e', 'y', // entry[1]: len=8, "dead_key"
+
+		// ── root: TagObject, 2 fields ────────────────────────────────────────
+		TagObject,
+		0x02, // field count = 2
+
+		// field 0: dictIdx=1 ("dead_key"), reserved tag 0x30, 4-byte payload
+		0x01, // dictIdx = 1
+		0x30, // reserved tag (Adjlist — now cut)
+		0x04, // payloadLen varint = 4
+		0xDE, 0xAD, 0xBE, 0xEF, // opaque payload
+
+		// field 1: dictIdx=0 ("kept_key"), TagString "hello"
+		0x00, // dictIdx = 0
+		TagString,
+		0x05, 'h', 'e', 'l', 'l', 'o',
+	}
+
+	val, err := Decode(stream)
+	if err != nil {
+		t.Fatalf("Decode returned unexpected error: %v", err)
+	}
+	if val == nil {
+		t.Fatal("Decode returned nil value")
+	}
+	if val.Type() != TypeObject {
+		t.Fatalf("expected TypeObject, got %v", val.Type())
+	}
+
+	// The kept field must decode correctly.
+	kept := val.Get("kept_key")
+	if kept == nil {
+		t.Fatal("kept_key field missing from decoded object")
+	}
+	if kept.Type() != TypeString {
+		t.Fatalf("kept_key: expected TypeString, got %v", kept.Type())
+	}
+	if kept.String() != "hello" {
+		t.Fatalf("kept_key: expected %q, got %q", "hello", kept.String())
+	}
+
+	// The reserved-tag slot must produce Null (not corrupt the decode).
+	dead := val.Get("dead_key")
+	if dead == nil {
+		t.Fatal("dead_key field missing from decoded object (expected Null)")
+	}
+	if !dead.IsNull() {
+		t.Fatalf("dead_key: expected Null, got type %v", dead.Type())
+	}
+}
+
 func TestGraphEmptyCollections(t *testing.T) {
 	// Test empty node
 	node := Node("empty", nil, nil)
@@ -1234,17 +1265,4 @@ func TestGraphEmptyCollections(t *testing.T) {
 		t.Errorf("Expected TypeNodeBatch, got %v", decoded.Type())
 	}
 
-	// Test empty shard
-	shard := GraphShard(nil, nil, nil)
-	encoded, err = Encode(shard)
-	if err != nil {
-		t.Fatalf("Encode empty shard failed: %v", err)
-	}
-	decoded, err = Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode empty shard failed: %v", err)
-	}
-	if decoded.Type() != TypeGraphShard {
-		t.Errorf("Expected TypeGraphShard, got %v", decoded.Type())
-	}
 }

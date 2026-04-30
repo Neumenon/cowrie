@@ -2,9 +2,7 @@ package cowrie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
-	"math"
 	"testing"
 	"time"
 )
@@ -186,122 +184,6 @@ func TestEncodeAny_FixArrayFixMap(t *testing.T) {
 	_, err = Decode(data2)
 	if err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestColumnReader_Float32Tensor(t *testing.T) {
-	f32data := make([]byte, 3*4)
-	for i := 0; i < 3; i++ {
-		bits := math.Float32bits(float32(i) + 1.0)
-		binary.LittleEndian.PutUint32(f32data[i*4:], bits)
-	}
-
-	row1 := Object(Member{Key: "embedding", Value: Bytes(f32data)})
-	row2 := Object(Member{Key: "embedding", Value: Bytes(f32data)})
-	arr := Array(row1, row2)
-
-	hints := []ColumnHint{
-		NewTensorHint("embedding", HintFloat32, []int{3}, 0),
-	}
-
-	data, err := EncodeWithHints(arr, hints)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cr, err := NewColumnReader(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tensors, err := cr.ReadFloat32Tensor("embedding")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tensors) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(tensors))
-	}
-	if len(tensors[0]) != 3 {
-		t.Fatalf("expected 3 elements, got %d", len(tensors[0]))
-	}
-}
-
-func TestColumnReader_Float64Tensor(t *testing.T) {
-	f64data := make([]byte, 2*8)
-	for i := 0; i < 2; i++ {
-		bits := math.Float64bits(float64(i) + 1.0)
-		binary.LittleEndian.PutUint64(f64data[i*8:], bits)
-	}
-
-	row1 := Object(Member{Key: "vec", Value: Bytes(f64data)})
-	row2 := Object(Member{Key: "vec", Value: Bytes(f64data)})
-	arr := Array(row1, row2)
-
-	hints := []ColumnHint{
-		NewTensorHint("vec", HintFloat64, []int{2}, 0),
-	}
-
-	data, err := EncodeWithHints(arr, hints)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cr, err := NewColumnReader(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tensors, err := cr.ReadFloat64Tensor("vec")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(tensors) != 2 {
-		t.Fatalf("expected 2 rows, got %d", len(tensors))
-	}
-}
-
-func TestColumnReader_Errors(t *testing.T) {
-	f32data := make([]byte, 4)
-	row := Object(Member{Key: "x", Value: Bytes(f32data)})
-	arr := Array(row)
-
-	hints := []ColumnHint{
-		NewTensorHint("x", HintFloat64, []int{1}, 0),
-	}
-	data, err := EncodeWithHints(arr, hints)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cr, err := NewColumnReader(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = cr.ReadFloat32Tensor("x")
-	if err != ErrIncompatibleType {
-		t.Errorf("expected ErrIncompatibleType, got %v", err)
-	}
-
-	_, err = cr.ReadFloat32Tensor("nonexistent")
-	if err != ErrFieldNotFound {
-		t.Errorf("expected ErrFieldNotFound, got %v", err)
-	}
-
-	hints2 := []ColumnHint{
-		NewTensorHint("y", HintFloat32, []int{1}, 0),
-	}
-	data2, err := EncodeWithHints(arr, hints2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cr2, err := NewColumnReader(data2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = cr2.ReadFloat64Tensor("y")
-	if err != ErrIncompatibleType {
-		t.Errorf("expected ErrIncompatibleType, got %v", err)
 	}
 }
 

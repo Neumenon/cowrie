@@ -93,57 +93,6 @@ func TestDecompressZstdInvalid2(t *testing.T) {
 	}
 }
 
-// column_reader.go: Root, Len, Stats via EncodeWithHints
-
-func TestColumnReaderWithHints(t *testing.T) {
-	items := Array(
-		Object(Member{Key: "name", Value: String("Alice")}, Member{Key: "age", Value: Int64(30)}),
-		Object(Member{Key: "name", Value: String("Bob")}, Member{Key: "age", Value: Int64(25)}),
-	)
-
-	hints := []ColumnHint{
-		{Field: "name", Type: HintString},
-		{Field: "age", Type: HintInt64},
-	}
-	data, err := EncodeWithHints(items, hints)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cr, err := NewColumnReader(data)
-	if err != nil {
-		t.Skipf("NewColumnReader: %v", err)
-	}
-
-	root, err := cr.Root()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if root.Type() != TypeArray {
-		t.Fatalf("expected array root, got %s", root.Type())
-	}
-
-	n, err := cr.Len()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 2 {
-		t.Fatalf("expected 2 rows, got %d", n)
-	}
-
-	// Stats
-	stats, err := cr.Stats("name")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stats.Count != 2 {
-		t.Fatalf("expected 2, got %d", stats.Count)
-	}
-	if stats.ValidCount != 2 {
-		t.Fatalf("expected 2 valid, got %d", stats.ValidCount)
-	}
-}
-
 // schema.go: fnvHashBytes
 
 func TestFnvHashBytes2(t *testing.T) {
@@ -156,23 +105,6 @@ func TestFnvHashBytes2(t *testing.T) {
 	h3 := fnvHashBytes(h, []byte("hello"))
 	if h1 != h3 {
 		t.Fatal("same input should produce same hash")
-	}
-}
-
-// hints.go: uvarintBytes
-
-func TestUvarintBytes2(t *testing.T) {
-	b := uvarintBytes(0)
-	if len(b) != 1 || b[0] != 0 {
-		t.Fatalf("expected [0], got %v", b)
-	}
-	b = uvarintBytes(127)
-	if len(b) != 1 {
-		t.Fatalf("expected 1 byte for 127, got %d", len(b))
-	}
-	b = uvarintBytes(128)
-	if len(b) != 2 {
-		t.Fatalf("expected 2 bytes for 128, got %d", len(b))
 	}
 }
 

@@ -114,7 +114,7 @@ func TestSpecCoreTags(t *testing.T) {
 	}
 }
 
-// TestSpecV21Tags verifies all 7 v2.1 extension type tags.
+// TestSpecV21Tags verifies the v2.1 extension type tags for kept types.
 func TestSpecV21Tags(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -125,9 +125,6 @@ func TestSpecV21Tags(t *testing.T) {
 		{"tensorRef", TensorRef(0, []byte("key")), 0x21},
 		{"image", Image(ImageFormatJPEG, 640, 480, make([]byte, 10)), 0x22},
 		{"audio", Audio(AudioEncodingPCMInt16, 44100, 2, make([]byte, 10)), 0x23},
-		{"adjlist", Adjlist(IDWidthInt32, 3, 2, []uint64{0, 1, 2, 2}, make([]byte, 8)), 0x30},
-		{"richtext", RichText("text", nil, nil), 0x31},
-		{"delta", Delta(0, nil), 0x32},
 	}
 
 	for _, tt := range tests {
@@ -206,23 +203,6 @@ func TestSpecInvalidEnumValues(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid_id_width", func(t *testing.T) {
-		// Build an adjlist with invalid ID width (0xFF)
-		data := buildAdjlistWithIDWidth(0xFF)
-		_, err := Decode(data)
-		if err != ErrInvalidIDWidth {
-			t.Errorf("expected ErrInvalidIDWidth, got: %v", err)
-		}
-	})
-
-	t.Run("invalid_delta_opcode", func(t *testing.T) {
-		// Build a delta with invalid opcode (0xFF)
-		data := buildDeltaWithOpCode(0xFF)
-		_, err := Decode(data)
-		if err != ErrInvalidDeltaOp {
-			t.Errorf("expected ErrInvalidDeltaOp, got: %v", err)
-		}
-	})
 }
 
 // TestSpecInt64ZigZagEncoding verifies int64 uses zigzag encoding.
@@ -354,9 +334,6 @@ func TestSpecRoundTrip(t *testing.T) {
 		{"tensorRef", TensorRef(5, []byte("model-key"))},
 		{"image", Image(ImageFormatPNG, 100, 200, []byte{0x89, 0x50, 0x4E, 0x47})},
 		{"audio", Audio(AudioEncodingOPUS, 48000, 1, []byte{0x4F, 0x67, 0x67, 0x53})},
-		{"adjlist", Adjlist(IDWidthInt64, 2, 1, []uint64{0, 1, 1}, make([]byte, 8))},
-		{"richtext", RichText("Hello", []int32{1, 2}, []RichTextSpan{{0, 5, 1}})},
-		{"delta", Delta(123, []DeltaOp{{DeltaOpSetField, 0, String("new")}})},
 	}
 
 	for _, tt := range tests {
@@ -447,31 +424,6 @@ func buildAudioWithEncoding(encoding byte) []byte {
 	buf = append(buf, 0x02)                   // Channels = 2
 	buf = append(buf, 0x04)                   // Data length = 4
 	buf = append(buf, 0x00, 0x00, 0x00, 0x00) // Data
-	return buf
-}
-
-// buildAdjlistWithIDWidth builds an adjlist with a specific ID width.
-func buildAdjlistWithIDWidth(idWidth byte) []byte {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
-	buf = append(buf, 0x30)                   // Adjlist tag
-	buf = append(buf, idWidth)                // ID width
-	buf = append(buf, 0x02)                   // Node count = 2
-	buf = append(buf, 0x01)                   // Edge count = 1
-	buf = append(buf, 0x00, 0x01, 0x01)       // Row offsets [0, 1, 1]
-	buf = append(buf, 0x00, 0x00, 0x00, 0x00) // Col indices (1 int32)
-	return buf
-}
-
-// buildDeltaWithOpCode builds a delta with a specific opcode.
-func buildDeltaWithOpCode(opCode byte) []byte {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
-	buf = append(buf, 0x32)                   // Delta tag
-	buf = append(buf, 0x00)                   // Base ID = 0
-	buf = append(buf, 0x01)                   // Op count = 1
-	buf = append(buf, opCode)                 // OpCode
-	buf = append(buf, 0x00)                   // Field ID = 0
-	// If opCode requires value (0x01 or 0x03), this will fail parsing anyway
-	// For DeleteField (0x02), no value needed
 	return buf
 }
 

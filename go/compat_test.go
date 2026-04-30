@@ -100,112 +100,6 @@ func TestCrossLanguageCompatibility(t *testing.T) {
 		}
 	})
 
-	t.Run("adjlist_3node_4edge", func(t *testing.T) {
-		data := readTestVector(t, testdataDir, "adjlist_3node_4edge.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeAdjlist {
-			t.Fatalf("expected TypeAdjlist, got %v", v.Type())
-		}
-		adj := v.Adjlist()
-		if adj.IDWidth != IDWidthInt32 {
-			t.Errorf("idWidth: expected Int32, got %v", adj.IDWidth)
-		}
-		if adj.NodeCount != 3 {
-			t.Errorf("nodeCount: expected 3, got %d", adj.NodeCount)
-		}
-		if adj.EdgeCount != 4 {
-			t.Errorf("edgeCount: expected 4, got %d", adj.EdgeCount)
-		}
-		expectedOffsets := []uint64{0, 2, 3, 4}
-		for i, offset := range expectedOffsets {
-			if adj.RowOffsets[i] != offset {
-				t.Errorf("rowOffsets[%d]: expected %d, got %d", i, offset, adj.RowOffsets[i])
-			}
-		}
-	})
-
-	t.Run("rich_text_with_tokens_spans", func(t *testing.T) {
-		data := readTestVector(t, testdataDir, "rich_text_with_tokens_spans.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeRichText {
-			t.Fatalf("expected TypeRichText, got %v", v.Type())
-		}
-		rt := v.RichText()
-		if rt.Text != "Hello, world!" {
-			t.Errorf("text: expected 'Hello, world!', got %q", rt.Text)
-		}
-		expectedTokens := []int32{101, 7592, 1010, 2088, 999, 102}
-		if len(rt.Tokens) != len(expectedTokens) {
-			t.Errorf("tokens length: expected %d, got %d", len(expectedTokens), len(rt.Tokens))
-		} else {
-			for i, tok := range expectedTokens {
-				if rt.Tokens[i] != tok {
-					t.Errorf("tokens[%d]: expected %d, got %d", i, tok, rt.Tokens[i])
-				}
-			}
-		}
-		if len(rt.Spans) != 2 {
-			t.Errorf("spans length: expected 2, got %d", len(rt.Spans))
-		}
-		if rt.Spans[0].Start != 0 || rt.Spans[0].End != 5 || rt.Spans[0].KindID != 1 {
-			t.Errorf("spans[0]: expected {0, 5, 1}, got %+v", rt.Spans[0])
-		}
-		if rt.Spans[1].Start != 7 || rt.Spans[1].End != 12 || rt.Spans[1].KindID != 2 {
-			t.Errorf("spans[1]: expected {7, 12, 2}, got %+v", rt.Spans[1])
-		}
-	})
-
-	t.Run("rich_text_plain", func(t *testing.T) {
-		data := readTestVector(t, testdataDir, "rich_text_plain.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		rt := v.RichText()
-		if rt.Text != "Just plain text" {
-			t.Errorf("text: expected 'Just plain text', got %q", rt.Text)
-		}
-		if rt.Tokens != nil {
-			t.Errorf("expected nil tokens")
-		}
-		if rt.Spans != nil {
-			t.Errorf("expected nil spans")
-		}
-	})
-
-	t.Run("delta_3ops", func(t *testing.T) {
-		data := readTestVector(t, testdataDir, "delta_3ops.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeDelta {
-			t.Fatalf("expected TypeDelta, got %v", v.Type())
-		}
-		delta := v.Delta()
-		if delta.BaseID != 999 {
-			t.Errorf("baseID: expected 999, got %d", delta.BaseID)
-		}
-		if len(delta.Ops) != 3 {
-			t.Fatalf("ops length: expected 3, got %d", len(delta.Ops))
-		}
-		if delta.Ops[0].OpCode != DeltaOpSetField || delta.Ops[0].Value.String() != "updated" {
-			t.Errorf("op[0]: expected SetField with 'updated'")
-		}
-		if delta.Ops[1].OpCode != DeltaOpDeleteField {
-			t.Errorf("op[1]: expected DeleteField")
-		}
-		if delta.Ops[2].OpCode != DeltaOpAppendArray || delta.Ops[2].Value.Int64() != 42 {
-			t.Errorf("op[2]: expected AppendArray with 42")
-		}
-	})
-
 	t.Run("object_with_tensor", func(t *testing.T) {
 		data := readTestVector(t, testdataDir, "object_with_tensor.cowrie")
 		v, err := Decode(data)
@@ -285,26 +179,6 @@ func TestGenerateCrossLanguageFixtures(t *testing.T) {
 			[]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46}),
 		"audio_pcm16_44100_stereo": Audio(AudioEncodingPCMInt16, 44100, 2,
 			[]byte{0x00, 0x01, 0x02, 0x03}),
-		"adjlist_3node_4edge": Adjlist(IDWidthInt32, 3, 4,
-			[]uint64{0, 2, 3, 4},
-			[]byte{
-				1, 0, 0, 0, // 0->1
-				2, 0, 0, 0, // 0->2
-				2, 0, 0, 0, // 1->2
-				0, 0, 0, 0, // 2->0
-			}),
-		"rich_text_with_tokens_spans": RichText("Hello, world!",
-			[]int32{101, 7592, 1010, 2088, 999, 102},
-			[]RichTextSpan{
-				{Start: 0, End: 5, KindID: 1},
-				{Start: 7, End: 12, KindID: 2},
-			}),
-		"rich_text_plain": RichText("Just plain text", nil, nil),
-		"delta_3ops": Delta(999, []DeltaOp{
-			{OpCode: DeltaOpSetField, FieldID: 0, Value: String("updated")},
-			{OpCode: DeltaOpDeleteField, FieldID: 1, Value: nil},
-			{OpCode: DeltaOpAppendArray, FieldID: 2, Value: Int64(42)},
-		}),
 		"object_with_tensor": Object(
 			Member{Key: "embedding", Value: Tensor(DTypeFloat32, []uint64{4}, []byte{0, 0, 0, 0, 0, 0, 128, 63, 0, 0, 0, 64, 0, 0, 64, 64})},
 			Member{Key: "name", Value: String("test")},
@@ -350,10 +224,8 @@ func TestGoToCCompatibility(t *testing.T) {
 			return data
 		}()),
 		"go_tensor_ref": TensorRef(7, []byte{0xDE, 0xAD, 0xBE, 0xEF}),
-		"go_image":      Image(ImageFormatPNG, 800, 600, []byte("fake png")),
-		"go_audio":      Audio(AudioEncodingOPUS, 48000, 2, []byte("fake opus")),
-		"go_rich_text":  RichText("Go says hello!", []int32{1, 2, 3}, []RichTextSpan{{0, 2, 1}}),
-		"go_delta":      Delta(100, []DeltaOp{{DeltaOpSetField, 0, String("from_go")}}),
+		"go_image": Image(ImageFormatPNG, 800, 600, []byte("fake png")),
+		"go_audio": Audio(AudioEncodingOPUS, 48000, 2, []byte("fake opus")),
 	}
 
 	for name, v := range vectors {

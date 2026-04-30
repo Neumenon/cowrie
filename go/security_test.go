@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"math"
 	"strings"
 	"testing"
 )
@@ -96,8 +95,8 @@ func TestSecurity_DecodeWithHintsDepthLimit(t *testing.T) {
 
 	data := buf.bytes()
 
-	// DecodeWithHints uses DefaultDecodeOptions (MaxDepth=1000)
-	_, err := DecodeWithHints(data)
+	// Decode uses DefaultDecodeOptions (MaxDepth=1000)
+	_, err := Decode(data)
 	if err == nil {
 		t.Fatal("expected ErrDepthExceeded for depth=2000, got nil")
 	}
@@ -116,126 +115,7 @@ func TestSecurity_DecodeWithHintsDepthLimit(t *testing.T) {
 }
 
 // =============================================================================
-// Test 3: Adjlist nodeCount overflow (MaxUint64)
-// Regression: nodeCount = MaxUint64 must return ErrMalformedLength, not panic
-// or wrap around on nodeCount+1 overflow
-// =============================================================================
-
-func TestSecurity_AdjlistNodeCountOverflow(t *testing.T) {
-	var buf bytes.Buffer
-
-	// Cowrie v2 header
-	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
-
-	// Empty dictionary
-	buf.WriteByte(0x00)
-
-	// Adjlist tag
-	buf.WriteByte(TagAdjlist)
-
-	// IDWidth = int32
-	buf.WriteByte(byte(IDWidthInt32))
-
-	// nodeCount = MaxUint64 (varint encoding: 10 bytes of 0xFF, final 0x01)
-	var varintBuf [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(varintBuf[:], math.MaxUint64)
-	buf.Write(varintBuf[:n])
-
-	// edgeCount = 0
-	buf.WriteByte(0x00)
-
-	data := buf.Bytes()
-
-	_, err := Decode(data)
-	if err == nil {
-		t.Fatal("expected error for nodeCount=MaxUint64, got nil")
-	}
-	if !errors.Is(err, ErrMalformedLength) {
-		t.Fatalf("expected ErrMalformedLength, got: %v", err)
-	}
-}
-
-// Also test that a legitimately large (but still overflowing) nodeCount is caught.
-func TestSecurity_AdjlistNodeCountExceedsRemaining(t *testing.T) {
-	var buf bytes.Buffer
-
-	// Cowrie v2 header
-	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
-
-	// Empty dictionary
-	buf.WriteByte(0x00)
-
-	// Adjlist tag
-	buf.WriteByte(TagAdjlist)
-
-	// IDWidth = int64
-	buf.WriteByte(byte(IDWidthInt64))
-
-	// nodeCount = 1 billion (way more than the remaining bytes)
-	var varintBuf [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(varintBuf[:], 1_000_000_000)
-	buf.Write(varintBuf[:n])
-
-	// edgeCount = 0
-	buf.WriteByte(0x00)
-
-	data := buf.Bytes()
-
-	_, err := Decode(data)
-	if err == nil {
-		t.Fatal("expected error for huge nodeCount, got nil")
-	}
-	// Should be ErrMalformedLength (nodeCount+1 > remaining)
-	if !errors.Is(err, ErrMalformedLength) {
-		t.Fatalf("expected ErrMalformedLength, got: %v", err)
-	}
-}
-
-// =============================================================================
-// Test 4: RichText MaxStringLen enforcement
-// Regression: RichText text field must be subject to MaxStringLen limits
-// =============================================================================
-
-func TestSecurity_RichTextMaxStringLen(t *testing.T) {
-	// Create a RichText with a text string of known length
-	longText := strings.Repeat("A", 10000) // 10KB text
-	original := RichText(longText, nil, nil)
-
-	// Encode it normally (no string length limit on encode)
-	encoded, err := Encode(original)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Decode with a restrictive MaxStringLen (smaller than the text)
-	opts := DefaultDecodeOptions()
-	opts.MaxStringLen = 5000 // 5KB limit, text is 10KB
-
-	_, err = DecodeWithOptions(encoded, opts)
-	if err == nil {
-		t.Fatal("expected ErrStringTooLarge for RichText text exceeding MaxStringLen, got nil")
-	}
-	if !errors.Is(err, ErrStringTooLarge) {
-		t.Fatalf("expected ErrStringTooLarge, got: %v", err)
-	}
-
-	// Verify it works when MaxStringLen is large enough
-	opts.MaxStringLen = 20000
-	decoded, err := DecodeWithOptions(encoded, opts)
-	if err != nil {
-		t.Fatalf("Decode with sufficient MaxStringLen failed: %v", err)
-	}
-	if decoded.Type() != TypeRichText {
-		t.Fatalf("expected TypeRichText, got %v", decoded.Type())
-	}
-	rt := decoded.RichText()
-	if rt.Text != longText {
-		t.Error("RichText text round-trip mismatch")
-	}
-}
-
-// =============================================================================
-// Test 5: Default limits are sane
+// Test 3: Default limits are sane
 // Regression: DefaultDecodeOptions must return non-zero values for all limits
 // =============================================================================
 
@@ -253,7 +133,6 @@ func TestSecurity_DefaultLimitsSane(t *testing.T) {
 		{"MaxBytesLen", opts.MaxBytesLen},
 		{"MaxExtLen", opts.MaxExtLen},
 		{"MaxDictLen", opts.MaxDictLen},
-		{"MaxHintCount", opts.MaxHintCount},
 		{"MaxRank", opts.MaxRank},
 	}
 
@@ -284,9 +163,6 @@ func TestSecurity_DefaultLimitsSane(t *testing.T) {
 	}
 	if opts.MaxDictLen != DefaultMaxDictLen {
 		t.Errorf("MaxDictLen: got %d, want %d", opts.MaxDictLen, DefaultMaxDictLen)
-	}
-	if opts.MaxHintCount != DefaultMaxHintCount {
-		t.Errorf("MaxHintCount: got %d, want %d", opts.MaxHintCount, DefaultMaxHintCount)
 	}
 	if opts.MaxRank != DefaultMaxRank {
 		t.Errorf("MaxRank: got %d, want %d", opts.MaxRank, DefaultMaxRank)

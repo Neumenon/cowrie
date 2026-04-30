@@ -27,14 +27,10 @@ func TestTypeString_Coverage(t *testing.T) {
 		{TypeTensorRef, "tensor_ref"},
 		{TypeImage, "image"},
 		{TypeAudio, "audio"},
-		{TypeAdjlist, "adjlist"},
-		{TypeRichText, "rich_text"},
-		{TypeDelta, "delta"},
 		{TypeNode, "node"},
 		{TypeEdge, "edge"},
 		{TypeNodeBatch, "node_batch"},
 		{TypeEdgeBatch, "edge_batch"},
-		{TypeGraphShard, "graph_shard"},
 		{TypeBitmask, "bitmask"},
 		{TypeUnknownExt, "unknown_ext"},
 		{Type(255), "unknown"},
@@ -122,13 +118,6 @@ func TestSchemaFingerprint64_Coverage(t *testing.T) {
 	h8 := SchemaFingerprint64(aud)
 	if h8 == 0 {
 		t.Error("audio fingerprint")
-	}
-
-	// Adjlist
-	adj := Adjlist(IDWidthInt32, 2, 1, []uint64{0, 0, 1}, []byte{1, 0, 0, 0})
-	h9 := SchemaFingerprint64(adj)
-	if h9 == 0 {
-		t.Error("adjlist fingerprint")
 	}
 
 	// UnknownExt
