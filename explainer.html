@@ -646,9 +646,9 @@ details .details-body {
 </p>
 
 <p style="color: var(--text-dim); font-size: 0.88rem; margin-bottom: 2.5rem;">
-  Cowrie is a binary serialization format for structured data with native ML extensions &mdash;
-  "JSON++" as its own source code puts it. It encodes tensors, graph shards, images, audio,
-  bitmasks, and delta patches alongside the usual strings, numbers, and nested objects.
+  Cowrie is a binary JSON bridge for structured data with native ML extensions.
+  It encodes tensors, images, audio, bitmasks, graph nodes and edges alongside the usual
+  strings, numbers, and nested objects, and round-trips cleanly to and from JSON.
   Five language implementations produce byte-identical output. This is the story of how it
   was built, what it encodes, and why it exists.
 </p>
@@ -686,7 +686,7 @@ details .details-body {
 
 <p class="drop-cap">JSON won the internet. It is the lingua franca of APIs, configuration files, and data interchange. But JSON has a ceiling, and if you work with machine learning, real-time agents, or graph-structured data, you hit it fast. JSON cannot represent a tensor without base64-encoding it into a string. It cannot carry an image without doubling its size. It has no integers&mdash;only IEEE 754 doubles that silently mangle values above 2<sup>53</sup>. It has no schema fingerprinting, no streaming framing, no compression, no checksums. And it is <em>slow</em>&mdash;parsing JSON is dominated by string allocation, UTF-8 validation, and hash table construction for every object key, every time.</p>
 
-<p>Cowrie exists because the systems that need structured data most&mdash;ML inference engines, agent orchestration layers, graph databases, multimodal pipelines&mdash;need more than JSON can offer. Cowrie is a binary codec with 26 native types: the JSON basics (null, bool, int64, float64, string, bytes, array, object) plus tensors with 20+ dtypes, images with format metadata, audio with sample rates, adjacency lists in CSR format, rich text with token spans, semantic deltas, bitmasks, UUIDs, datetime64, decimal128, and bigints. Dictionary-coded object keys eliminate redundancy. Varint encoding keeps small values small. A single-byte <code>FIXINT</code> tag encodes integers 0-127 with zero overhead. Five language implementations&mdash;Go, Python, TypeScript, Rust, C&mdash;all produce identical bytes.</p>
+<p>Cowrie exists because the systems that need structured data most&mdash;ML inference engines, agent orchestration layers, graph databases, multimodal pipelines&mdash;need more than JSON can offer. Cowrie is a binary JSON bridge with native types: the JSON basics (null, bool, int64, float64, string, bytes, array, object) plus tensors with 20+ dtypes, images with format metadata, audio with sample rates, bitmasks, UUIDs, datetime64, decimal128, and bigints. Graph node and edge types carry structured graph data at the wire level. Dictionary-coded object keys eliminate redundancy. Varint encoding keeps small values small. A single-byte <code>FIXINT</code> tag encodes integers 0-127 with zero overhead. Five language implementations&mdash;Go, Python, TypeScript, Rust, C&mdash;all produce identical bytes.</p>
 
 <p>The name comes from the cowrie shell, one of humanity's oldest units of exchange. The ambition is similar: a universal token of value that any system can accept.</p>
 
@@ -718,9 +718,7 @@ details .details-body {
 
 <p>A <strong>tensor</strong> is a first-class citizen. You don't base64-encode a numpy array into a JSON string&mdash;you write the dtype, the shape, and the raw bytes directly into the wire format. The decoder on the other side can hand you a zero-copy view into the buffer without ever allocating. A 1MB embedding vector that takes 1.33MB in base64 JSON takes exactly 1MB plus 12 bytes of metadata in Cowrie.</p>
 
-<p>An <strong>adjacency list</strong> uses compressed sparse row (CSR) format&mdash;the same layout your GNN framework expects. Row offsets and column indices, packed as contiguous integer arrays. No JSON array-of-arrays. No deserialization into a hash map that you immediately convert to CSR anyway. The wire format <em>is</em> the in-memory layout.</p>
-
-<p>A <strong>delta</strong> encodes semantic patches: "set field X to value Y, delete field Z, append to list W." These aren't textual diffs&mdash;they're typed operations with dictionary-coded field IDs. An agent can stream state updates as deltas, and the receiver can apply them without parsing the full state.</p>
+<p>A <strong>delta</strong> was originally designed to encode semantic patches: "set field X to value Y, delete field Z, append to list W." These aren't textual diffs&mdash;they're typed operations with dictionary-coded field IDs. Delta (0x32), AdjList/CSR (0x30), RichText (0x31), and GraphShard (0x39) were all carried forward from Agent-GO at this point. They have since been <strong>reserved/parked</strong> (moved to <code>attic/</code>) as the project narrowed scope; their tags remain reserved and decoders skip them silently.</p>
 
 <table>
   <thead><tr><th>Type</th><th>JSON Equivalent</th><th>What Cowrie Adds</th></tr></thead>
@@ -728,16 +726,14 @@ details .details-body {
     <tr><td><code>Tensor</code></td><td>Base64 string + metadata object</td><td>20+ dtypes, zero-copy views, raw binary data</td></tr>
     <tr><td><code>Image</code></td><td>Base64 string (2x size)</td><td>Format tag (JPEG/PNG/WEBP), width/height, raw bytes</td></tr>
     <tr><td><code>Audio</code></td><td>Base64 string</td><td>Encoding (PCM/Opus/AAC), sample rate, channels</td></tr>
-    <tr><td><code>Adjacency List</code></td><td>Array of arrays (sparse, slow)</td><td>CSR format, INT32/INT64, contiguous memory</td></tr>
+    <tr><td><code>Node/Edge/Batch</code></td><td>Nested JSON objects</td><td>Typed graph primitives with dictionary-coded properties</td></tr>
     <tr><td><code>Bitmask</code></td><td>Array of booleans (8x larger)</td><td>LSB-first packed bits, 7.8x compression</td></tr>
-    <tr><td><code>Delta</code></td><td>Custom JSON patch (ad-hoc)</td><td>Typed ops (set/delete/append), dictionary-coded fields</td></tr>
-    <tr><td><code>RichText</code></td><td>String + separate token array</td><td>Text + optional token IDs + byte-offset spans</td></tr>
     <tr><td><code>Decimal128</code></td><td>String (loss-prone float)</td><td>128-bit decimal, exact financial arithmetic</td></tr>
     <tr><td><code>DateTime64</code></td><td>String (ISO-8601 parsing)</td><td>int64 nanoseconds, no parsing overhead</td></tr>
   </tbody>
 </table>
 
-<p>The codec also carries higher-level packages that consume the wire format without defining it: a reflection-based <code>Marshal</code>/<code>Unmarshal</code> system (Go only), a framed streaming protocol with CRC-32 per frame, graph neural network primitives (PageRank, Louvain, Tarjan SCC), a structural diff/patch engine, and JSON-LD context resolution. These are Go-only because they operate at the application layer&mdash;they are <em>consumers</em> of Cowrie, not part of its specification.</p>
+<p>The codec also carries higher-level packages that consume the wire format without defining it: a reflection-based <code>Marshal</code>/<code>Unmarshal</code> system (Go only), a framed streaming protocol with CRC-32 per frame, and JSON bridge utilities. Graph neural network primitives, the structural diff/patch engine, and JSON-LD context resolution have moved to <code>attic/</code> along with the parked wire types.</p>
 
 <h3>Security From Day One</h3>
 
@@ -838,7 +834,7 @@ details .details-body {
 
 <h3>Dictionary Coding</h3>
 
-<p>After the header (and optional column hints), the message contains a string dictionary. Object field names are encoded once in this dictionary, then referenced by index throughout the message. From <code>types.go</code>:</p>
+<p>After the header, the message contains a string dictionary. Object field names are encoded once in this dictionary, then referenced by index throughout the message. From <code>types.go</code>:</p>
 
 <pre><code><span class="code-dim">// Wire format:</span>
 <span class="code-dim">//   DictLen: uvarint</span>
@@ -849,31 +845,9 @@ details .details-body {
 
 <p>Consider a 1000-element array of user objects, each with a <code>"name"</code> field. Without dictionary coding, the 4-byte string <code>"name"</code> is repeated 1000 times (5 bytes per instance: length varint + 4 chars = 5,000 bytes). With dictionary coding, <code>"name"</code> appears once in the dictionary (5 bytes) and each reference is a single-byte varint index (1,000 bytes). That's an 80% reduction on key data alone.</p>
 
-<h3>Column Hints</h3>
+<h3>Column Hints (Reserved)</h3>
 
-<p>An optional metadata block sits between the header and the dictionary when flag bit 3 is set. Column hints describe the expected schema of objects within the root array &mdash; field names, types, tensor shapes, and flags:</p>
-
-<pre><code><span class="code-accent">ColumnHints</span>:
-  HintCount: <span class="code-cyan">uvarint</span>
-  Repeat HintCount times:
-    Field:    <span class="code-green">[len:uvarint][utf8 bytes]</span>
-    Type:     <span class="code-pink">u8</span>               <span class="code-dim">// maps to tag values</span>
-    ShapeLen: <span class="code-cyan">uvarint</span>
-    ShapeDims:<span class="code-cyan">uvarint * ShapeLen</span>
-    Flags:    <span class="code-pink">u8</span>               <span class="code-dim">// Required | Columnar</span></code></pre>
-
-<p>The Go implementation provides a <code>ColumnReader</code> that uses these hints for partial decoding &mdash; reading specific fields from deeply nested structures without deserializing the entire message. From <code>column_reader.go</code>:</p>
-
-<pre><code><span class="code-dim">// ColumnReader provides columnar access to Cowrie data using hints.</span>
-<span class="code-dim">// It enables partial decoding of specific fields without fully</span>
-<span class="code-dim">// decoding the data.</span>
-<span class="code-accent">type</span> ColumnReader <span class="code-accent">struct</span> {
-    data   []<span class="code-green">byte</span>
-    hints  []ColumnHint
-    dict   []<span class="code-green">string</span>
-    root   *Value  <span class="code-dim">// Lazily decoded</span>
-    offset <span class="code-green">int</span>     <span class="code-dim">// Position after header, hints, dict</span>
-}</code></pre>
+<p>Flag bit 3 (<code>FlagHasColumnHints = 0x08</code>) is reserved but unused in the current release. The column hints block and the <code>ColumnReader</code> partial-decode API have moved to <code>attic/</code>. Decoders must skip this flag bit silently when encountered.</p>
 
 <h3>Compression Framing</h3>
 
@@ -1022,16 +996,16 @@ details .details-body {
   <div class="tag-cell" title="0x2E"></div>
   <div class="tag-cell" title="0x2F"></div>
   <!-- Row 0x30 -->
-  <div class="tag-cell graph" title="0x30 ADJLIST">ADJ</div>
-  <div class="tag-cell graph" title="0x31 RICHTEXT">RTX</div>
-  <div class="tag-cell graph" title="0x32 DELTA">DLT</div>
+  <div class="tag-cell reserved" title="0x30 ADJLIST (reserved)">ADJ</div>
+  <div class="tag-cell reserved" title="0x31 RICHTEXT (reserved)">RTX</div>
+  <div class="tag-cell reserved" title="0x32 DELTA (reserved)">DLT</div>
   <div class="tag-cell" title="0x33"></div>
   <div class="tag-cell" title="0x34"></div>
   <div class="tag-cell graph" title="0x35 NODE">NOD</div>
   <div class="tag-cell graph" title="0x36 EDGE">EDG</div>
   <div class="tag-cell graph" title="0x37 NODE_BATCH">NB</div>
   <div class="tag-cell graph" title="0x38 EDGE_BATCH">EB</div>
-  <div class="tag-cell graph" title="0x39 GRAPH_SHARD">GS</div>
+  <div class="tag-cell reserved" title="0x39 GRAPH_SHARD (reserved)">GS</div>
   <div class="tag-cell" title="0x3A"></div>
   <div class="tag-cell" title="0x3B"></div>
   <div class="tag-cell" title="0x3C"></div>
@@ -1327,7 +1301,7 @@ details .details-body {
       <li>11 core type tags (0x00-0x0D)</li>
       <li>No dictionary coding &mdash; keys inline</li>
       <li>Proto-tensors: arrays auto-promote to typed arrays when homogeneous and &ge;4 elements</li>
-      <li>6 graph types (Node, Edge, AdjList, NodeBatch, EdgeBatch, GraphShard)</li>
+      <li>4 graph types (Node, Edge, NodeBatch, EdgeBatch) — AdjList and GraphShard are reserved</li>
       <li>Float32 scalar + Float32Array</li>
       <li>Lightweight JSON alternative</li>
     </ul>
@@ -1341,9 +1315,10 @@ details .details-body {
       <li>Full Tensor with 17 dtypes, rank metadata</li>
       <li>Image (JPEG/PNG/WEBP/AVIF/BMP)</li>
       <li>Audio (PCM/OPUS/AAC)</li>
-      <li>Bitmask, Delta, RichText</li>
+      <li>Bitmask</li>
       <li>TagExt forward-compat envelope</li>
-      <li>Column hints, compression (gzip/zstd)</li>
+      <li>Compression (gzip/zstd)</li>
+      <li><em>Delta, RichText, GraphShard, AdjList, ColumnHints — reserved/parked</em></li>
     </ul>
   </div>
 </div>
@@ -1539,9 +1514,11 @@ details .details-body {
   <p>Bitmask achieves a <strong>7.8x</strong> size reduction over bool arrays. For a 2048-element mask: <code>ceil(2048/8) = 256</code> bytes of data + 3 bytes overhead (tag + uvarint count) = <strong>259 bytes</strong> vs. <code>2048 * 2 = 4096</code> bytes for FIXINT-encoded booleans.</p>
 </div>
 
-<h3>Adjacency List</h3>
+<h3>Adjacency List <em style="color: var(--text-dim); font-size: 0.85em;">(reserved — moved to attic/)</em></h3>
 
-<p>The AdjList type (<code>0x30</code>) encodes graph topology in Compressed Sparse Row (CSR) format &mdash; the standard in-memory representation for GNN frameworks:</p>
+<p>The AdjList type (<code>0x30</code>) was designed to encode graph topology in Compressed Sparse Row (CSR) format. It has been reserved in the current release; the tag is skipped silently by decoders. The implementation is preserved in <code>attic/</code>.</p>
+
+<p>Original design: CSR format &mdash; the standard in-memory representation for GNN frameworks:</p>
 
 <pre><code><span class="code-accent">type</span> AdjlistData <span class="code-accent">struct</span> {
     IDWidth    IDWidth   <span class="code-dim">// 1=int32, 2=int64</span>
@@ -1572,9 +1549,9 @@ details .details-body {
   <p>During invariant testing (March 9), a bug was found in the C adjacency list decoder: the <code>ro_alloc</code> buffer was allocated based on node count but the bounds check used <code>ro_count</code>, a different variable. This could cause an out-of-bounds read when the row offsets array was shorter than expected. The fix was a one-line guard: check <code>ro_count</code> against the actual allocation size before accessing the array.</p>
 </div>
 
-<h3>Delta</h3>
+<h3>Delta <em style="color: var(--text-dim); font-size: 0.85em;">(reserved — moved to attic/)</em></h3>
 
-<p>The Delta type (<code>0x32</code>) represents semantic patches with three operations: <code>SetField</code>, <code>DeleteField</code>, and <code>AppendArray</code>. Field IDs are dictionary-coded, matching the parent object's encoding:</p>
+<p>The Delta type (<code>0x32</code>) is reserved in the current release; decoders skip it silently. Original design: semantic patches with three operations: <code>SetField</code>, <code>DeleteField</code>, and <code>AppendArray</code>. Field IDs are dictionary-coded, matching the parent object's encoding:</p>
 
 <pre><code><span class="code-accent">type</span> DeltaOp <span class="code-accent">struct</span> {
     OpCode  DeltaOpCode  <span class="code-dim">// 0x01=Set, 0x02=Delete, 0x03=Append</span>
@@ -1582,9 +1559,9 @@ details .details-body {
     Value   *Value       <span class="code-dim">// For SetField and AppendArray</span>
 }</code></pre>
 
-<h3>RichText</h3>
+<h3>RichText <em style="color: var(--text-dim); font-size: 0.85em;">(reserved — moved to attic/)</em></h3>
 
-<p>RichText (<code>0x31</code>) combines UTF-8 text with optional token IDs and annotated spans &mdash; the output format of tokenizers and NER pipelines, encoded in a single wire value instead of three separate fields:</p>
+<p>RichText (<code>0x31</code>) is reserved in the current release; decoders skip it silently. Original design: UTF-8 text combined with optional token IDs and annotated spans &mdash; the output format of tokenizers and NER pipelines, encoded in a single wire value instead of three separate fields:</p>
 
 <pre><code><span class="code-accent">type</span> RichTextData <span class="code-accent">struct</span> {
     Text   <span class="code-green">string</span>          <span class="code-dim">// UTF-8 text</span>
@@ -1602,24 +1579,22 @@ details .details-body {
 
 <h3>Graph Types</h3>
 
-<p>The graph extension region (0x35-0x39) provides a complete vocabulary for serializing graph data &mdash; from individual nodes to entire graph shards. These are the types that the <code>go/gnn/</code> and <code>go/graph/</code> packages were built to consume:</p>
+<p>The live graph types (0x35-0x38) provide wire-level primitives for graph data. GraphShard (0x39) is reserved in the current release.</p>
 
 <table>
-  <thead><tr><th>Tag</th><th>Type</th><th>Wire Format</th></tr></thead>
+  <thead><tr><th>Tag</th><th>Type</th><th>Status</th><th>Wire Format</th></tr></thead>
   <tbody>
-    <tr><td><code>0x35</code></td><td>Node</td><td>id:string + labelCount:uvar + labels:string* + propCount:uvar + (dictIdx:uvar + value)*</td></tr>
-    <tr><td><code>0x36</code></td><td>Edge</td><td>src:string + dst:string + type:string + propCount:uvar + (dictIdx:uvar + value)*</td></tr>
-    <tr><td><code>0x37</code></td><td>NodeBatch</td><td>count:uvar + Node[count]</td></tr>
-    <tr><td><code>0x38</code></td><td>EdgeBatch</td><td>count:uvar + Edge[count]</td></tr>
-    <tr><td><code>0x39</code></td><td>GraphShard</td><td>nodeCount:uvar + nodes + edgeCount:uvar + edges + metaCount:uvar + metadata</td></tr>
+    <tr><td><code>0x35</code></td><td>Node</td><td>live</td><td>id:string + labelCount:uvar + labels:string* + propCount:uvar + (dictIdx:uvar + value)*</td></tr>
+    <tr><td><code>0x36</code></td><td>Edge</td><td>live</td><td>src:string + dst:string + type:string + propCount:uvar + (dictIdx:uvar + value)*</td></tr>
+    <tr><td><code>0x37</code></td><td>NodeBatch</td><td>live</td><td>count:uvar + Node[count]</td></tr>
+    <tr><td><code>0x38</code></td><td>EdgeBatch</td><td>live</td><td>count:uvar + Edge[count]</td></tr>
+    <tr><td><code>0x39</code></td><td>GraphShard</td><td><em>reserved</em></td><td>nodeCount:uvar + nodes + edgeCount:uvar + edges + metaCount:uvar + metadata</td></tr>
   </tbody>
 </table>
 
-<p>The <code>GraphShard</code> is the heaviest type &mdash; a self-contained subgraph with nodes, edges, and arbitrary metadata. It serves as the unit of serialization for distributed graph processing: partition a large graph into shards, serialize each independently, process in parallel.</p>
-
 <div class="insight">
   <div class="insight-label">Design Pattern</div>
-  <p>Notice that Node and Edge properties use dictionary-coded keys (<code>dictIdx:uvar</code>), sharing the same dictionary as the containing message. This means a GraphShard containing 10,000 nodes with a <code>"feature_vector"</code> property on each stores the string <code>"feature_vector"</code> exactly once, regardless of node count.</p>
+  <p>Node and Edge properties use dictionary-coded keys (<code>dictIdx:uvar</code>), sharing the same dictionary as the containing message. A NodeBatch containing 10,000 nodes with a <code>"feature_vector"</code> property on each stores the string <code>"feature_vector"</code> exactly once, regardless of node count.</p>
 </div>
 
 <h3>The JSON Bridge</h3>
@@ -1881,7 +1856,7 @@ opts := DecodeOptions{
   <span class="code-accent">basic_types.cowrie</span>       <span class="code-dim"># null, bool, int, float, string</span>
   <span class="code-accent">nested_objects.cowrie</span>    <span class="code-dim"># dictionary-coded keys, nesting</span>
   <span class="code-accent">tensors.cowrie</span>           <span class="code-dim"># float32/64, int8/16/32/64 tensors</span>
-  <span class="code-accent">graph_types.cowrie</span>       <span class="code-dim"># node, edge, adjlist, shard</span>
+  <span class="code-accent">graph_types.cowrie</span>       <span class="code-dim"># node, edge, node_batch, edge_batch</span>
   <span class="code-accent">edge_cases.cowrie</span>        <span class="code-dim"># empty arrays, max values, unicode</span>
   <span class="code-accent">v3_inline.cowrie</span>         <span class="code-dim"># FIXINT, FIXNEG, FIXARRAY, FIXMAP</span>
   <span class="code-accent">error_*.cowrie</span>           <span class="code-dim"># malformed inputs → expected errors</span></code></pre>
@@ -2200,7 +2175,7 @@ opts := DecodeOptions{
 
 <p>In 17 days, Cowrie went from a fork to a hardened, multi-language binary codec with 26+ type tags, seven codec invariants, a robustness framework, and performance optimizations that approach zero-copy. The "SJ" magic bytes still anchor every message to its SJSON origins &mdash; a deliberate choice that prioritizes wire compatibility over branding.</p>
 
-<p>The code tells the story of a format designed for a specific moment: when LLMs, GNNs, and multimodal models all need to exchange structured data that JSON can't efficiently represent. Tensors, graph shards, attention masks, rich text with token IDs &mdash; these aren't abstract features. They're the data types of the AI stack, encoded in a format that five languages can produce and consume, byte-for-byte identical, with security limits and invariants tested at every layer.</p>
+<p>The code tells the story of a format designed for a specific moment: when LLMs, GNNs, and multimodal models all need to exchange structured data that JSON can't efficiently represent. Tensors, images, audio, attention masks, graph nodes and edges &mdash; these aren't abstract features. They're the data types of the AI stack, encoded in a format that five languages can produce and consume, byte-for-byte identical, with security limits and invariants tested at every layer.</p>
 
 <h3>The Commit Graph</h3>
 
@@ -2315,7 +2290,7 @@ opts := DecodeOptions{
     <tr>
       <td>10K-node graph adjacency</td>
       <td>Edge list array: ~200KB</td>
-      <td>AdjList CSR: ~80KB</td>
+      <td>AdjList CSR: ~80KB <em>(reserved)</em></td>
       <td>2.5x smaller, zero-copy to GNN</td>
     </tr>
     <tr>
@@ -2399,14 +2374,14 @@ opts := DecodeOptions{
     <tr><td><code>0x22</code></td><td>Image</td><td>ML</td><td>fmt(u8) + w(u16) + h(u16) + len(uvar) + data</td></tr>
     <tr><td><code>0x23</code></td><td>Audio</td><td>ML</td><td>enc(u8) + rate(u32) + ch(u8) + len(uvar) + data</td></tr>
     <tr><td><code>0x24</code></td><td>Bitmask</td><td>ML</td><td>count(uvar) + ceil(count/8) bytes</td></tr>
-    <tr><td><code>0x30</code></td><td>AdjList</td><td>Graph</td><td>idWidth(u8) + nodes(uvar) + edges(uvar) + offsets + indices</td></tr>
-    <tr><td><code>0x31</code></td><td>RichText</td><td>Graph</td><td>text(str) + flags(u8) + [tokens] + [spans]</td></tr>
-    <tr><td><code>0x32</code></td><td>Delta</td><td>Graph</td><td>baseId(uvar) + opCount(uvar) + ops</td></tr>
+    <tr><td><code>0x30</code></td><td>AdjList</td><td><em>reserved</em></td><td>idWidth(u8) + nodes(uvar) + edges(uvar) + offsets + indices</td></tr>
+    <tr><td><code>0x31</code></td><td>RichText</td><td><em>reserved</em></td><td>text(str) + flags(u8) + [tokens] + [spans]</td></tr>
+    <tr><td><code>0x32</code></td><td>Delta</td><td><em>reserved</em></td><td>baseId(uvar) + opCount(uvar) + ops</td></tr>
     <tr><td><code>0x35</code></td><td>Node</td><td>Graph</td><td>id(str) + labels + props</td></tr>
     <tr><td><code>0x36</code></td><td>Edge</td><td>Graph</td><td>src(str) + dst(str) + type(str) + props</td></tr>
     <tr><td><code>0x37</code></td><td>NodeBatch</td><td>Graph</td><td>count(uvar) + Node[count]</td></tr>
     <tr><td><code>0x38</code></td><td>EdgeBatch</td><td>Graph</td><td>count(uvar) + Edge[count]</td></tr>
-    <tr><td><code>0x39</code></td><td>GraphShard</td><td>Graph</td><td>nodes + edges + metadata</td></tr>
+    <tr><td><code>0x39</code></td><td>GraphShard</td><td><em>reserved</em></td><td>nodes + edges + metadata</td></tr>
     <tr><td><code>0x40-BF</code></td><td>FIXINT</td><td>v3</td><td><em>none</em> (value = tag - 0x40)</td></tr>
     <tr><td><code>0xC0-CF</code></td><td>FIXARRAY</td><td>v3</td><td>values (count = tag - 0xC0)</td></tr>
     <tr><td><code>0xD0-DF</code></td><td>FIXMAP</td><td>v3</td><td>(dictIdx + value)* (count = tag - 0xD0)</td></tr>
@@ -2451,8 +2426,6 @@ opts := DecodeOptions{
     json.go                  <span class="code-dim">JSON bridge (FromJSON, ToJSON, enriched)</span>
     any_api.go               <span class="code-dim">EncodeAny/DecodeAny with tensorization</span>
     schema.go                <span class="code-dim">SchemaFingerprint (FNV-1a)</span>
-    hints.go                 <span class="code-dim">Column hint types and encoding</span>
-    column_reader.go         <span class="code-dim">Partial decode via hints</span>
     view.go                  <span class="code-dim">Zero-copy tensor views</span>
     <span class="code-accent">gen1/</span>
       gen1.go                <span class="code-dim">Legacy codec (456 lines)</span>
@@ -2461,11 +2434,8 @@ opts := DecodeOptions{
       cowrie_master_stream.go<span class="code-dim">Framed streaming protocol</span>
       registry.go            <span class="code-dim">Type registry for polymorphic decode</span>
       tensor.go              <span class="code-dim">Tensor utilities</span>
-    <span class="code-accent">gnn/</span>                     <span class="code-dim">Graph neural network primitives</span>
-    <span class="code-accent">delta/</span>                   <span class="code-dim">Structural diff/patch engine</span>
-    <span class="code-accent">graph/</span>                   <span class="code-dim">Graph frame operations</span>
-    <span class="code-accent">ld/</span>                      <span class="code-dim">Linked data / JSON-LD</span>
     <span class="code-accent">glyph/</span>                   <span class="code-dim">Glyph text codec</span>
+    <span class="code-dim">// gnn/, delta/, graph/, ld/, hints.go, column_reader.go → attic/ (parked)</span>
   <span class="code-pink">python/</span>
     cowrie/gen2.py            <span class="code-dim">Full Gen2 codec (2,727 lines)</span>
     cowrie/gen1.py            <span class="code-dim">Gen1 codec (456 lines)</span>

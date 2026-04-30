@@ -18,9 +18,8 @@ Two wire formats. Gen1 is a straightforward binary JSON (null, bool, int64, floa
 
 - **Single dependency**: `github.com/klauspost/compress` for zstd. Everything else is stdlib.
 - **Streaming decoder**: `gen1.NewStreamDecoder(reader)` for record-by-record decode from an `io.Reader`. Gen2 has `MasterFrame` with framed streaming and metadata.
-- **Column reader**: `gen2.NewColumnReader(data)` lets you read specific columns without full decode — useful for log processing.
 - **CLI tool**: `go install github.com/Neumenon/cowrie/cmd/cowrie@latest` gives you `cowrie encode/decode/info` for command-line use.
-- **Graph types**: Node, Edge, GraphShard, AdjList (CSR format) — first-class wire types, not application conventions.
+- **Graph types**: Node, Edge, NodeBatch, EdgeBatch — first-class wire types, not application conventions. (GraphShard and AdjList are reserved/parked for now.)
 
 **Quick example:**
 
@@ -77,7 +76,7 @@ A binary codec for JSON-like data in two variants:
 - **Gen1**: Simple binary encoding, no header. `{"name":"Alice","age":30,"active":true}` goes from 46 bytes JSON to 35 bytes.
 - **Gen2**: 4-byte header with dictionary-coded keys and optional compression. 1,000 repeated-schema objects go from 48KB to 23KB (47% of JSON).
 
-Gen2 also adds native ML types (Tensor with 12 dtypes, Image, Audio) and graph types (Node, Edge, GraphShard, CSR AdjList).
+Gen2 also adds native ML types (Tensor with 12 dtypes, Image, Audio) and graph types (Node, Edge, NodeBatch, EdgeBatch). GraphShard and AdjList are reserved in the current release.
 
 **Dependency footprint:**
 
@@ -159,11 +158,11 @@ Cowrie has two variants:
 1. **Dictionary-coded keys** — object keys are deduplicated into a shared dictionary. 1,000 objects with the same schema: 48KB JSON becomes 23KB (47%).
 2. **Compression** — gzip or zstd on the payload, compounds with dictionary coding.
 3. **ML types** — Tensor (12 dtypes including float16 and bfloat16, with shape), Image (format + dimensions + bytes), Audio (encoding + sample rate + channels + bytes).
-4. **Graph types** — Node, Edge, NodeBatch, EdgeBatch, GraphShard, CSR AdjList.
+4. **Graph types** — Node, Edge, NodeBatch, EdgeBatch. (GraphShard and AdjList are reserved in the current release.)
 
 **Cross-language parity:**
 
-All 5 implementations pass the same 23 test fixtures (7 core, 7 ML, 5 graph, 4 negative). The fixture suite covers encode/decode round-trips, ML type handling, graph types, and error cases (invalid magic, bad version, truncated input, invalid tags).
+All 5 implementations pass the same cross-language test fixtures (core types, ML types, graph node/edge types, and negative cases). The fixture suite covers encode/decode round-trips, ML type handling, and error cases (invalid magic, bad version, truncated input, invalid tags).
 
 **Comparison with alternatives:**
 
@@ -173,7 +172,7 @@ All 5 implementations pass the same 23 test fixtures (7 core, 7 ML, 5 graph, 4 n
 | Code generation | No | No | No | Yes | No |
 | Dictionary coding | No | No | No | N/A | Yes |
 | ML types | No | No | No | Manual | Native |
-| Graph types | No | No | No | Manual | Native |
+| Graph types (Node/Edge/Batch) | No | No | No | Manual | Native |
 | Compression | No | No | No | No | gzip/zstd |
 
 **When NOT to use Cowrie:**

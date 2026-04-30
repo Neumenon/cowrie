@@ -272,19 +272,20 @@ Small, but it compounds with transfer costs when artifacts are copied between re
 | Format | Size | Notes |
 |--------|------|-------|
 | JSON (nodes + edges as arrays) | ~15 GB | Keys repeated per node/edge |
-| Cowrie Gen2 GraphShard | ~4-5 GB | Dictionary-coded properties |
-| Cowrie Gen2 GraphShard + zstd | ~1-2 GB | Compressed |
-| CSR AdjList (adjacency only) | ~800 MB | Raw int32 indices |
+| Cowrie Gen2 NodeBatch+EdgeBatch | ~4-5 GB | Dictionary-coded properties |
+| Cowrie Gen2 NodeBatch+EdgeBatch + zstd | ~1-2 GB | Compressed |
+
+> **Note:** GraphShard (0x39) and AdjList/CSR (0x30) are reserved in the current release; NodeBatch/EdgeBatch pairs are the recommended approach for bulk graph transfer.
 
 ### Mini-Batch Transfer
 
-GNN training samples mini-batches of ~1,000-10,000 nodes with their neighborhoods. Each mini-batch is a self-contained GraphShard.
+GNN training samples mini-batches of ~1,000-10,000 nodes with their neighborhoods. Each mini-batch can be serialized as a NodeBatch+EdgeBatch pair.
 
 | Format | Mini-batch size (5K nodes, 20K edges) | Transfer/sec at 10K batches/hr |
 |--------|---------------------------------------|-------------------------------|
 | JSON | ~5 MB | 14 MB/s |
-| Cowrie GraphShard | ~1.5 MB | 4.2 MB/s |
-| Cowrie GraphShard + zstd | ~300 KB | 0.8 MB/s |
+| Cowrie NodeBatch+EdgeBatch | ~1.5 MB | 4.2 MB/s |
+| Cowrie NodeBatch+EdgeBatch + zstd | ~300 KB | 0.8 MB/s |
 
 At 10K mini-batches/hour for 24 hours of training:
 - JSON: 1.2 TB transferred
@@ -393,7 +394,7 @@ Backups are proportional to data size. If you back up to another region (cross-r
 | Arrays of same-schema objects (logs, events, features) | Gen2 + zstd | 90-95% | Almost always yes |
 | Mixed API responses (varied schemas) | Gen2 (dict only) | 30-50% | Yes if high volume |
 | Numeric arrays / embeddings | Gen2 Tensor | 40-57% | Yes for hot storage (Redis/DynamoDB) |
-| Graph data (GNN) | Gen2 GraphShard | 70-80% | Yes if you have graph workloads |
+| Graph data (GNN) | Gen2 NodeBatch+EdgeBatch | 70-80% | Yes if you have graph workloads |
 | Single small messages | Gen1 | 20-30% | Maybe — depends on volume |
 | Already-compressed binary | Don't convert | ~0% | No |
 | Data queried by existing tools (ES, SQL) | Consider carefully | Storage savings exist | Integration cost may exceed savings |

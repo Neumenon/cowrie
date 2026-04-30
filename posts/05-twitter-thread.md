@@ -86,17 +86,17 @@ No more base64 hacks.
 
 Also: first-class graph types.
 
-Node, Edge, GraphShard, CSR AdjList — built into the wire format.
+Node, Edge, NodeBatch, EdgeBatch — built into the wire format.
 
-Designed for GNN mini-batch transfer and graph database snapshots. Dictionary-coded property keys in Gen2.
+Designed for GNN mini-batch transfer and bulk graph streaming. Dictionary-coded property keys in Gen2.
 
 ---
 
 **Tweet 8 (Cross-language parity)**
 
-Cross-language parity: 23 shared test fixtures.
+Cross-language parity: shared test fixtures across all 5 languages.
 
-7 core types, 7 ML types, 5 graph types, 4 negative cases.
+Core types, ML types (tensor/image/audio), graph node/edge types, negative cases.
 
 All 5 implementations must produce and consume identical bytes. If Go encodes it, Rust, Python, C, and TypeScript decode it the same way.
 

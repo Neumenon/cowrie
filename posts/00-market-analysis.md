@@ -38,11 +38,11 @@ Gen2's two-pass encoder collects all unique object keys in O(n), stores them onc
 
 ### Unlock 3: Graph Types as Wire Primitives
 
-The AdjList type is genuine CSR (Compressed Sparse Row) format — row offsets as varints, column indices as raw binary int32/int64 blocks. This is the native format used by PyTorch Geometric, DGL, and NetworkX internals.
+Cowrie encodes graph data as first-class wire types: Node, Edge, NodeBatch, and EdgeBatch carry typed ID, label, and property fields with dictionary-coded keys. A GNN training pipeline can stream a mini-batch as a NodeBatch+EdgeBatch pair, and the receiving service gets nodes and edges in one decode call without reconstructing from JSON arrays.
 
-GraphShard is a self-contained subgraph (nodes + edges + metadata) where all property keys are dictionary-coded through the shared dictionary. A GNN training pipeline can checkpoint a mini-batch as a single GraphShard, send it over the wire, and the receiving service gets nodes, edges, adjacency structure, and metadata in one decode call.
+**Note:** AdjList (CSR) and GraphShard are reserved in the current release (moved to `attic/`). They remain revivable but are not built or tested by default.
 
-**What this eliminates**: Flattening graphs into JSON arrays, reconstructing adjacency matrices on the receiving side, custom serialization code for each graph processing service.
+**What this eliminates**: Flattening graphs into JSON arrays, reconstructing graph structure on the receiving side, custom serialization code for each graph processing service.
 
 **Who this matters to**: GNN training pipelines, knowledge graph services, social network analysis, recommendation systems with graph-structured data.
 
@@ -242,7 +242,7 @@ Note: These are addressable markets for the *value delivered*, not for software 
 
 2. **Zero-copy tensor views across 5 languages.** Most tensor transfer solutions are language-specific (pickle, NumPy memmap, PyTorch's serialization). Cowrie makes this work across Go, Rust, Python, C, and TypeScript with a shared wire format.
 
-3. **CSR adjacency lists as a wire type.** No binary serialization format treats CSR as a first-class type. This is a real unlock for GNN infrastructure.
+3. **Graph node/edge types as wire primitives.** Native Node, Edge, NodeBatch, and EdgeBatch types avoid the JSON-array flattening step. AdjList (CSR) is parked for now but remains a planned extension.
 
 ### What's Incremental
 

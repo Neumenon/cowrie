@@ -30,7 +30,7 @@ cargo bench
 1. **Encode/Decode Speed** - Operations per second for various payload sizes
 2. **Payload Size** - Compressed size vs JSON
 3. **Memory Usage** - Allocations during encode/decode
-4. **Graph Types** - Performance of new v2.1 graph types
+4. **Graph Types** - Node, Edge, NodeBatch, EdgeBatch (GraphShard and AdjList are reserved/parked)
 
 ## Expected Results
 

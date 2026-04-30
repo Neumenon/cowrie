@@ -24,7 +24,7 @@ Hi HN, I built Cowrie to solve a specific problem: moving tensors and structured
 
 **What it is:** A binary codec for JSON-like data in two variants. Gen1 is a simple binary encoding (35 bytes vs 46 bytes JSON for a small object). Gen2 adds a header with dictionary-coded keys and optional gzip/zstd compression — for 1,000 objects with repeated schemas, it's 23KB vs 48KB JSON (47%).
 
-**What's different from MessagePack/CBOR:** Three things. (1) Dictionary coding — Gen2 deduplicates object keys into a shared dictionary, which is where most of the size savings come from on repeated schemas. MsgPack and CBOR encode keys inline every time. (2) Native ML types — Tensor (12 dtypes, shaped), Image (JPEG/PNG/WebP/AVIF/BMP with dimensions), Audio (PCM/Opus/AAC with sample rate and channels). These are wire-level types, not application conventions. (3) Graph types — Node, Edge, GraphShard, CSR adjacency lists. Designed for GNN mini-batch transfer.
+**What's different from MessagePack/CBOR:** Three things. (1) Dictionary coding — Gen2 deduplicates object keys into a shared dictionary, which is where most of the size savings come from on repeated schemas. MsgPack and CBOR encode keys inline every time. (2) Native ML types — Tensor (12 dtypes, shaped), Image (JPEG/PNG/WebP/AVIF/BMP with dimensions), Audio (PCM/Opus/AAC with sample rate and channels). These are wire-level types, not application conventions. (3) Graph types — Node, Edge, NodeBatch, EdgeBatch. Designed for GNN mini-batch transfer. (GraphShard and AdjList/CSR are reserved in the current release.)
 
 **What's different from Protobuf/FlatBuffers:** No schema files, no code generation. You pass a map/dict/object and get bytes. The trade-off is you lose compile-time type safety.
 

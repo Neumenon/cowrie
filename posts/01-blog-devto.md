@@ -1,6 +1,6 @@
 # Cowrie: A Binary JSON Codec for 5 Languages, No Code Generation Required
 
-*TL;DR: Cowrie is a binary codec for JSON-like data with native ML types (tensors, images, audio), dictionary coding for ~50% size reduction, and graph types for GNN workloads. Implementations in Go, Rust, Python, C, and TypeScript. Apache 2.0 licensed, no code generation, no schema files.*
+*TL;DR: Cowrie is a binary JSON bridge — it round-trips JSON data with native ML types (tensors, images, audio), dictionary coding for ~50% size reduction, and graph types for GNN workloads. Implementations in Go, Rust, Python, C, and TypeScript. Apache 2.0 licensed, no code generation, no schema files.*
 
 ---
 
@@ -14,7 +14,7 @@ If you've worked on a system where a Python ML service talks to a Go API server,
 
 **Code generation adds friction.** Protobuf and FlatBuffers solve the size problem, but they require `.proto` files, generated code, and build pipeline integration. When your schema changes, you regenerate, recompile, redeploy. For teams that iterate fast on data shapes, this overhead slows you down.
 
-**Graph data is an afterthought.** GNN training pipelines need to move nodes, edges, and adjacency structures between services. The standard approach is to flatten everything into JSON arrays and reconstruct the graph on the other side. It works, but it's tedious and error-prone.
+**Graph data is an afterthought.** GNN training pipelines need to move nodes, edges, and node/edge batches between services. The standard approach is to flatten everything into JSON arrays and reconstruct the graph on the other side. It works, but it's tedious and error-prone.
 
 Cowrie was built to solve these four problems together.
 
@@ -30,7 +30,7 @@ Gen1 is a straightforward binary encoding for JSON types with a few additions. N
 
 - Null, Boolean, Int64, Float64, String, Bytes, Array, Object
 - Proto-tensors: `Int64Array` and `Float64Array` for homogeneous numeric data
-- Graph types: Node, Edge, NodeBatch, EdgeBatch, GraphShard, AdjList
+- Graph types: Node, Edge, NodeBatch, EdgeBatch (GraphShard and AdjList are reserved)
 
 For a small object like `{"name": "Alice", "age": 30, "active": true}`:
 - JSON: 46 bytes
@@ -241,7 +241,7 @@ These types mean an ML pipeline can pass tensors, images, and audio clips betwee
 
 ## Deep Dive: Graph Types
 
-Both Gen1 and Gen2 support six graph types designed for GNN workloads and graph databases:
+Gen2 supports four live graph types for GNN workloads and graph databases:
 
 | Type | Tag (Gen2) | Purpose |
 |------|-----------|---------|
@@ -249,8 +249,8 @@ Both Gen1 and Gen2 support six graph types designed for GNN workloads and graph 
 | Edge | 0x36 | Single edge with src, dst, type, properties |
 | NodeBatch | 0x37 | Batch of nodes for streaming |
 | EdgeBatch | 0x38 | Batch of edges for bulk loading |
-| GraphShard | 0x39 | Self-contained subgraph (nodes + edges + metadata) |
-| AdjList | 0x30 | CSR adjacency list (compressed sparse row) |
+
+> **Note:** `GraphShard` (0x39) and `AdjList` (0x30) are reserved in the current release and moved to `attic/`. Use `NodeBatch`/`EdgeBatch` for bulk graph transfer.
 
 ### Why Wire-Level Graph Types?
 
@@ -267,31 +267,6 @@ This works but loses type information. The decoder doesn't know it's looking at 
 
 In Gen2, graph property keys are dictionary-coded (shared with the main dictionary), so graphs with many nodes sharing the same property schema get the same size benefits as regular objects.
 
-### GraphShard for GNN Mini-Batches
-
-A `GraphShard` is a self-contained subgraph with nodes, edges, and metadata. It's designed for:
-- GNN mini-batch checkpointing
-- Distributed graph processing (partition shards)
-- Graph database snapshots
-- Streaming graph partitions
-
-```go
-shard := gen2.GraphShard(nodes, edges, metadata)
-data, _ := gen2.Encode(shard)
-// Send to another service, another language
-```
-
-### AdjList for CSR Adjacency
-
-The `AdjList` type encodes a compressed sparse row adjacency matrix directly:
-
-```
-Tag(0x30) | idWidth:u8 | nodeCount:varint | edgeCount:varint
-         | rowOffsets:(nodeCount+1)*varint | colIndices:edgeCount*(4|8 bytes)
-```
-
-This is the native format used by most graph libraries (PyG, DGL, NetworkX internals), so no conversion is needed on either end.
-
 ---
 
 ## Comparison Matrix
@@ -304,7 +279,7 @@ This is the native format used by most graph libraries (PyG, DGL, NetworkX inter
 | Binary | No | Yes | Yes | Yes | Yes | Yes | Yes |
 | Dictionary coding | No | No | No | N/A | N/A | No | Yes |
 | ML types (tensor) | No | No | No | Manual | Manual | Proto-tensor | Native |
-| Graph types | No | No | No | Manual | Manual | Yes | Yes |
+| Graph types (Node/Edge/Batch) | No | No | No | Manual | Manual | Yes | Yes |
 | Compression | No | No | No | No | No | No | gzip/zstd |
 | Streaming | No | Yes | Yes | Yes | No | Yes | Yes |
 | Language support | All | Many | Many | Many | Many | 5 | 5 |
@@ -315,7 +290,7 @@ This is the native format used by most graph libraries (PyG, DGL, NetworkX inter
 - **Protobuf/FlatBuffers**: Stronger type safety through schemas, better tooling ecosystem, zero-copy reads (FlatBuffers). If you have stable schemas and want compile-time type checking, they're the right choice.
 - **JSON**: Universal. Every language, every tool, every service understands it. Human-readable. Debuggable with `curl | jq`. If you're not bandwidth-constrained, JSON is hard to beat for simplicity.
 
-Cowrie's niche is the intersection of: schemaless + binary + ML types + graph types. If you need all four, there isn't a direct alternative.
+Cowrie's niche is the intersection of: schemaless + binary + ML types + graph node/edge types. If you need all four, there isn't a direct alternative.
 
 ---
 

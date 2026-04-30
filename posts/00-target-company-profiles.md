@@ -1,5 +1,7 @@
 # Cowrie Target Company Profiles: Storage, Transfer & Pitch Analysis
 
+> **Scope note (current release):** `GraphShard` (0x39), `AdjList`/CSR (0x30), `RichText` (0x31), and `Delta` (0x32) are **reserved/parked** in the current release (moved to `attic/`). Several profiles below were written when these types were planned as live features. Where a pitch centers on GraphShard or AdjList, treat them as a future roadmap item or substitute `NodeBatch`/`EdgeBatch` for the near-term pitch.
+
 20 companies across 5 verticals, profiled for Cowrie adoption potential. Each profile includes current serialization pain, Cowrie fit analysis, cost impact estimates, a tailored pitch, and a concrete POC scope.
 
 ---

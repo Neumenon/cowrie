@@ -6,7 +6,7 @@ Initial public release of Cowrie — a multi-language binary codec for structure
 
 ### Two Wire Formats
 
-- **Gen1**: Simple binary JSON encoding — 12 core types + graph types. No header, single-pass encode/decode. A 46-byte JSON object encodes to 35 bytes (76%).
+- **Gen1**: Simple binary JSON encoding — core types, no header, single-pass encode/decode. A 46-byte JSON object encodes to 35 bytes (76%).
 - **Gen2**: Dictionary-coded keys, gzip/zstd compression, ML extensions, graph types. 1,000 repeated-schema objects go from 48KB JSON to 23KB (47%).
 
 ### 5 Language Implementations
@@ -27,11 +27,11 @@ All implementations are feature-complete and pass the same 23 cross-language tes
 - **Image**: Format (JPEG/PNG/WebP/AVIF/BMP) + dimensions + raw bytes
 - **Audio**: Encoding (PCM/Opus/AAC) + sample rate + channels + raw bytes
 
-### Graph Types (Gen1 & Gen2)
+### Graph Types (Gen2)
 
-- Node, Edge, NodeBatch, EdgeBatch, GraphShard, AdjList (CSR)
-- Dictionary-coded property keys in Gen2 for size-efficient graph encoding
-- Designed for GNN mini-batch transfer, graph database snapshots, streaming partitions
+- Node, Edge, NodeBatch, EdgeBatch — dictionary-coded property keys for size-efficient encoding
+- Designed for GNN mini-batch transfer and streaming node/edge data
+- GraphShard (0x39) and AdjList (0x30) are reserved in this release
 
 ### CLI Tool
 
@@ -57,7 +57,6 @@ cowrie info < data.cowrie
 | Small object (3 fields) | 46 B | 35 B (76%) | 43 B (93%) |
 | Large array (1000 objects) | 48 KB | 34 KB (70%) | 23 KB (47%) |
 | Float array (10K floats) | 86 KB | 80 KB (93%) | — |
-| Graph shard (100 nodes) | — | — | 10 KB |
 
 ## Install
 
@@ -81,12 +80,14 @@ cd cowrie/c && mkdir build && cd build && cmake .. && make
 
 ## Cross-Language Test Fixtures
 
-23 shared fixtures ensure identical behavior across all implementations:
+Shared fixtures ensure identical behavior across all implementations:
 
 - **7 core**: null, true, int, float, string, array, object
-- **7 ML**: tensor, tensor_ref, image, audio, adjlist, richtext, delta
-- **5 graph**: node, edge, node_batch, edge_batch, graph_shard
+- **4 ML**: tensor, tensor_ref, image, audio
+- **4 graph**: node, edge, node_batch, edge_batch
 - **4 negative**: bad_magic, bad_version, truncated, invalid_tag
+
+> Note: adjlist, richtext, delta, and graph_shard fixtures are historical (those types are parked in `attic/`).
 
 ## Links
 
