@@ -23,7 +23,7 @@ export enum Compression {
 }
 
 const FLAG_COMPRESSED = 0x01;
-const FLAG_HAS_COLUMN_HINTS = 0x08;
+// bit 3 (0x08) is reserved — was FLAG_HAS_COLUMN_HINTS, now silently ignored on decode
 const COMPRESS_THRESHOLD = 256;
 
 // Security limits - aligned with Go reference implementation
@@ -35,7 +35,6 @@ export const Limits = {
   MAX_BYTES_LEN: 50_000_000,    // 50MB (tightened: was 1GB)
   MAX_EXT_LEN: 1_000_000,       // 1MB extension payload (tightened: was 100MB)
   MAX_RANK: 32,                  // Maximum tensor rank (dimensions)
-  MAX_HINT_COUNT: 10_000,        // Maximum column hints
   MAX_DICT_LEN: 1_000_000,      // 1M dictionary entries (tightened: was 10M)
   MAX_DECOMPRESSED_SIZE: 256 * 1024 * 1024, // 256MB decompressed limit
 };
@@ -63,7 +62,6 @@ export interface DecodeOptions {
   maxExtLen?: number;
   maxDictLen?: number;
   maxRank?: number;
-  maxHintCount?: number;
   maxDecompressedSize?: number;
 }
 
@@ -77,7 +75,6 @@ interface ResolvedLimits {
   maxExtLen: number;
   maxDictLen: number;
   maxRank: number;
-  maxHintCount: number;
   maxDecompressedSize: number;
 }
 
@@ -91,7 +88,6 @@ function resolveLimits(opts?: DecodeOptions): ResolvedLimits {
     maxExtLen: opts?.maxExtLen ?? Limits.MAX_EXT_LEN,
     maxDictLen: opts?.maxDictLen ?? Limits.MAX_DICT_LEN,
     maxRank: opts?.maxRank ?? Limits.MAX_RANK,
-    maxHintCount: opts?.maxHintCount ?? Limits.MAX_HINT_COUNT,
     maxDecompressedSize: opts?.maxDecompressedSize ?? Limits.MAX_DECOMPRESSED_SIZE,
   };
 }
@@ -120,16 +116,13 @@ enum Tag {
   IMAGE = 0x22,
   AUDIO = 0x23,
   BITMASK = 0x24, // v3: packed boolean bitmask
-  // Graph/Delta extensions (0x30-0x3F)
-  ADJLIST = 0x30,
-  RICHTEXT = 0x31,
-  DELTA = 0x32,
+  // 0x30-0x32 reserved (AdjList/RichText/Delta — moved to dedicated packages)
   // Graph types (v2.1)
   NODE = 0x35,
   EDGE = 0x36,
   NODE_BATCH = 0x37,
   EDGE_BATCH = 0x38,
-  GRAPH_SHARD = 0x39,
+  // 0x39 reserved (GraphShard — moved to dedicated package)
   // v3 inline types (0x40-0xFF)
   FIXINT_BASE = 0x40,
   FIXINT_MAX = 0xbf,
@@ -160,15 +153,11 @@ export enum Type {
   IMAGE,
   AUDIO,
   TENSOR_REF,
-  ADJLIST,
-  RICHTEXT,
-  DELTA,
   // Graph types (v2.1)
   NODE,
   EDGE,
   NODE_BATCH,
   EDGE_BATCH,
-  GRAPH_SHARD,
   BITMASK,
   UNKNOWN_EXT,
 }
@@ -188,19 +177,6 @@ export enum AudioEncoding {
   PCM_FLOAT32 = 0x02,
   OPUS = 0x03,
   AAC = 0x04,
-}
-
-// ID width for adjacency lists - aligned with Go reference implementation
-export enum IDWidth {
-  INT32 = 0x01,
-  INT64 = 0x02,
-}
-
-// Delta operation codes - aligned with Go reference implementation
-export enum DeltaOpCode {
-  SET_FIELD = 0x01,
-  DELETE_FIELD = 0x02,
-  APPEND_ARRAY = 0x03,
 }
 
 // Decimal128 type
@@ -231,42 +207,6 @@ export interface TensorRefData {
   key: Uint8Array; // Lookup key (UUID, hash, etc.)
 }
 
-// Adjacency list data type (CSR format for graphs)
-export interface AdjlistData {
-  idWidth: IDWidth;
-  nodeCount: number;
-  edgeCount: number;
-  rowOffsets: number[]; // [nodeCount + 1] offsets into colIndices
-  colIndices: Uint8Array; // Edge destinations (int32/int64 LE based on idWidth)
-}
-
-// Rich text span for annotation
-export interface RichTextSpan {
-  start: number; // Byte offset start
-  end: number; // Byte offset end
-  kindId: number; // Application-defined kind
-}
-
-// Rich text data type
-export interface RichTextData {
-  text: string;
-  tokens?: number[]; // Token IDs (e.g., BPE tokens)
-  spans?: RichTextSpan[]; // Annotated spans
-}
-
-// Delta operation
-export interface DeltaOp {
-  opCode: DeltaOpCode;
-  fieldId: number; // Dictionary-coded field ID
-  value?: Value; // For SET_FIELD and APPEND_ARRAY
-}
-
-// Delta data type (semantic diff/patch)
-export interface DeltaData {
-  baseId: number; // Reference to base object
-  ops: DeltaOp[]; // Operations
-}
-
 // Graph types (v2.1)
 
 // Graph node with ID, labels, and properties
@@ -292,13 +232,6 @@ export interface NodeBatchData {
 // Batch of edges for streaming/bulk operations
 export interface EdgeBatchData {
   edges: EdgeData[];
-}
-
-// Self-contained subgraph with nodes, edges, and metadata
-export interface GraphShardData {
-  nodes: NodeData[];
-  edges: EdgeData[];
-  metadata: Record<string, Value>;
 }
 
 // Bitmask data type (v3: packed boolean bitmask)
@@ -385,15 +318,6 @@ export const SJ = {
   tensorRef(storeId: number, key: Uint8Array): Value {
     return { type: Type.TENSOR_REF, data: { storeId, key } as TensorRefData };
   },
-  adjlist(idWidth: IDWidth, nodeCount: number, edgeCount: number, rowOffsets: number[], colIndices: Uint8Array): Value {
-    return { type: Type.ADJLIST, data: { idWidth, nodeCount, edgeCount, rowOffsets, colIndices } as AdjlistData };
-  },
-  richtext(text: string, tokens?: number[], spans?: RichTextSpan[]): Value {
-    return { type: Type.RICHTEXT, data: { text, tokens, spans } as RichTextData };
-  },
-  delta(baseId: number, ops: DeltaOp[]): Value {
-    return { type: Type.DELTA, data: { baseId, ops } as DeltaData };
-  },
   // Graph types (v2.1)
   node(id: string, labels: string[], props: Record<string, Value>): Value {
     return { type: Type.NODE, data: { id, labels, props } as NodeData };
@@ -406,9 +330,6 @@ export const SJ = {
   },
   edgeBatch(edges: EdgeData[]): Value {
     return { type: Type.EDGE_BATCH, data: { edges } as EdgeBatchData };
-  },
-  graphShard(nodes: NodeData[], edges: EdgeData[], metadata: Record<string, Value>): Value {
-    return { type: Type.GRAPH_SHARD, data: { nodes, edges, metadata } as GraphShardData };
   },
   bitmask(count: number, bits: Uint8Array): Value {
     return { type: Type.BITMASK, data: { count, bits } as BitmaskData };
@@ -569,14 +490,6 @@ class Encoder {
         this.addKey(key);
         this.collectKeys(val);
       }
-    } else if (v.type === Type.DELTA) {
-      // Delta ops may contain nested values
-      const delta = v.data as DeltaData;
-      for (const op of delta.ops) {
-        if (op.value) {
-          this.collectKeys(op.value);
-        }
-      }
     } else if (v.type === Type.NODE) {
       const node = v.data as NodeData;
       this.collectPropsKeys(node.props);
@@ -593,15 +506,6 @@ class Encoder {
       for (const edge of batch.edges) {
         this.collectPropsKeys(edge.props);
       }
-    } else if (v.type === Type.GRAPH_SHARD) {
-      const shard = v.data as GraphShardData;
-      for (const node of shard.nodes) {
-        this.collectPropsKeys(node.props);
-      }
-      for (const edge of shard.edges) {
-        this.collectPropsKeys(edge.props);
-      }
-      this.collectPropsKeys(shard.metadata);
     }
   }
 
@@ -796,70 +700,6 @@ class Encoder {
         this.write(ref.key);
         break;
       }
-      case Type.ADJLIST: {
-        const adj = v.data as AdjlistData;
-        this.writeByte(Tag.ADJLIST);
-        this.writeByte(adj.idWidth);
-        this.writeUvarint(adj.nodeCount);
-        this.writeUvarint(adj.edgeCount);
-        // Write row_offsets as varints
-        for (const offset of adj.rowOffsets) {
-          this.writeUvarint(offset);
-        }
-        // Write col_indices as raw bytes
-        this.write(adj.colIndices);
-        break;
-      }
-      case Type.RICHTEXT: {
-        const rt = v.data as RichTextData;
-        this.writeByte(Tag.RICHTEXT);
-        // Text (writeString format: len:varint + bytes)
-        const textBytes = sharedTextEncoder.encode(rt.text);
-        this.writeUvarint(textBytes.length);
-        this.write(textBytes);
-        // Calculate and write flags byte
-        const tokens = rt.tokens || [];
-        const spans = rt.spans || [];
-        let flags = 0;
-        if (tokens.length > 0) flags |= 0x01;
-        if (spans.length > 0) flags |= 0x02;
-        this.writeByte(flags);
-        // Write tokens if present
-        if (flags & 0x01) {
-          this.writeUvarint(tokens.length);
-          for (const tok of tokens) {
-            const buf = new ArrayBuffer(4);
-            new DataView(buf).setInt32(0, tok, true);
-            this.write(new Uint8Array(buf));
-          }
-        }
-        // Write spans if present
-        if (flags & 0x02) {
-          this.writeUvarint(spans.length);
-          for (const span of spans) {
-            this.writeUvarint(span.start);
-            this.writeUvarint(span.end);
-            this.writeUvarint(span.kindId);
-          }
-        }
-        break;
-      }
-      case Type.DELTA: {
-        const delta = v.data as DeltaData;
-        this.writeByte(Tag.DELTA);
-        this.writeUvarint(delta.baseId);
-        this.writeUvarint(delta.ops.length);
-        for (const op of delta.ops) {
-          this.writeByte(op.opCode);
-          this.writeUvarint(op.fieldId);
-          if (op.opCode === DeltaOpCode.SET_FIELD || op.opCode === DeltaOpCode.APPEND_ARRAY) {
-            if (op.value) {
-              this.encodeValue(op.value);
-            }
-          }
-        }
-        break;
-      }
       // Graph types
       case Type.NODE: {
         const node = v.data as NodeData;
@@ -889,23 +729,6 @@ class Encoder {
         for (const edge of batch.edges) {
           this.encodeEdge(edge);
         }
-        break;
-      }
-      case Type.GRAPH_SHARD: {
-        const shard = v.data as GraphShardData;
-        this.writeByte(Tag.GRAPH_SHARD);
-        // Encode nodes
-        this.writeUvarint(shard.nodes.length);
-        for (const node of shard.nodes) {
-          this.encodeNode(node);
-        }
-        // Encode edges
-        this.writeUvarint(shard.edges.length);
-        for (const edge of shard.edges) {
-          this.encodeEdge(edge);
-        }
-        // Encode metadata
-        this.encodeProps(shard.metadata);
         break;
       }
       case Type.BITMASK: {
@@ -1181,83 +1004,6 @@ class Decoder {
         const key = this.read(keyLen);
         return SJ.tensorRef(storeId, key);
       }
-      case Tag.ADJLIST: {
-        const idWidth = this.readByte() as IDWidth;
-        const nodeCount = this.readUvarintAsNumber();
-        if (nodeCount > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Adjlist node count too large: ${nodeCount} > ${this.limits.maxArrayLen}`);
-        }
-        const edgeCount = this.readUvarintAsNumber();
-        if (edgeCount > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Adjlist edge count too large: ${edgeCount} > ${this.limits.maxArrayLen}`);
-        }
-        // Read row_offsets (node_count + 1 varints)
-        const rowOffsets: number[] = [];
-        for (let i = 0; i < nodeCount + 1; i++) {
-          rowOffsets.push(this.readUvarintAsNumber());
-        }
-        // Read col_indices (edge_count * id_size bytes)
-        const idSize = idWidth === IDWidth.INT32 ? 4 : 8;
-        const colIndices = this.read(edgeCount * idSize);
-        return SJ.adjlist(idWidth, nodeCount, edgeCount, rowOffsets, colIndices);
-      }
-      case Tag.RICHTEXT: {
-        // Text (readString format: len:varint + bytes)
-        const textLen = this.readUvarintAsNumber();
-        if (textLen > this.limits.maxStringLen) {
-          throw new SecurityLimitExceeded(`RichText text too long: ${textLen} > ${this.limits.maxStringLen}`);
-        }
-        const text = this.textDecoder.decode(this.read(textLen));
-        // Read flags byte
-        const flags = this.readByte();
-        // Read tokens if present (flags & 0x01)
-        let tokens: number[] | undefined;
-        if (flags & 0x01) {
-          const tokenCount = this.readUvarintAsNumber();
-          if (tokenCount > this.limits.maxArrayLen) {
-            throw new SecurityLimitExceeded(`RichText token count too large: ${tokenCount} > ${this.limits.maxArrayLen}`);
-          }
-          tokens = [];
-          for (let i = 0; i < tokenCount; i++) {
-            const buf = this.read(4);
-            tokens.push(new DataView(buf.buffer, buf.byteOffset, 4).getInt32(0, true));
-          }
-        }
-        // Read spans if present (flags & 0x02)
-        let spans: RichTextSpan[] | undefined;
-        if (flags & 0x02) {
-          const spanCount = this.readUvarintAsNumber();
-          if (spanCount > this.limits.maxArrayLen) {
-            throw new SecurityLimitExceeded(`RichText span count too large: ${spanCount} > ${this.limits.maxArrayLen}`);
-          }
-          spans = [];
-          for (let i = 0; i < spanCount; i++) {
-            const start = this.readUvarintAsNumber();
-            const end = this.readUvarintAsNumber();
-            const kindId = this.readUvarintAsNumber();
-            spans.push({ start, end, kindId });
-          }
-        }
-        return SJ.richtext(text, tokens, spans);
-      }
-      case Tag.DELTA: {
-        const baseId = this.readUvarintAsNumber();
-        const opCount = this.readUvarintAsNumber();
-        if (opCount > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Delta op count too large: ${opCount} > ${this.limits.maxArrayLen}`);
-        }
-        const ops: DeltaOp[] = [];
-        for (let i = 0; i < opCount; i++) {
-          const opCode = this.readByte() as DeltaOpCode;
-          const fieldId = this.readUvarintAsNumber();
-          let value: Value | undefined;
-          if (opCode === DeltaOpCode.SET_FIELD || opCode === DeltaOpCode.APPEND_ARRAY) {
-            value = this.decodeValue();
-          }
-          ops.push({ opCode, fieldId, value });
-        }
-        return SJ.delta(baseId, ops);
-      }
       // Graph types
       case Tag.NODE: {
         const node = this.decodeNode();
@@ -1288,29 +1034,6 @@ class Decoder {
           edges.push(this.decodeEdge());
         }
         return SJ.edgeBatch(edges);
-      }
-      case Tag.GRAPH_SHARD: {
-        // Decode nodes
-        const nodeCount = this.readUvarintAsNumber();
-        if (nodeCount > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Graph shard node count too large: ${nodeCount} > ${this.limits.maxArrayLen}`);
-        }
-        const nodes: NodeData[] = [];
-        for (let i = 0; i < nodeCount; i++) {
-          nodes.push(this.decodeNode());
-        }
-        // Decode edges
-        const edgeCount = this.readUvarintAsNumber();
-        if (edgeCount > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Graph shard edge count too large: ${edgeCount} > ${this.limits.maxArrayLen}`);
-        }
-        const edges: EdgeData[] = [];
-        for (let i = 0; i < edgeCount; i++) {
-          edges.push(this.decodeEdge());
-        }
-        // Decode metadata
-        const metadata = this.decodeProps();
-        return SJ.graphShard(nodes, edges, metadata);
       }
       case Tag.BITMASK: {
         const count = this.readUvarintAsNumber();
@@ -1360,26 +1083,18 @@ class Decoder {
         if (tag >= Tag.FIXNEG_BASE && tag <= Tag.FIXNEG_MAX) {
           return SJ.int64(BigInt(-1 - (tag - Tag.FIXNEG_BASE)));
         }
+        // Reserved tags 0x30–0x32 and 0x39 (AdjList/RichText/Delta/GraphShard —
+        // moved to dedicated packages). These are length-prefixed: skip silently
+        // and return null so a stream can still advance past them.
+        if (tag === 0x30 || tag === 0x31 || tag === 0x32 || tag === 0x39) {
+          const skipLen = this.readUvarintAsNumber();
+          if (skipLen > this.limits.maxExtLen) {
+            throw new SecurityLimitExceeded(`Reserved tag 0x${tag.toString(16)} payload too large: ${skipLen} > ${this.limits.maxExtLen}`);
+          }
+          this.read(skipLen);
+          return SJ.null();
+        }
         throw new Error(`Invalid tag: ${tag}`);
-    }
-  }
-
-  private skipHints(): void {
-    const count = this.readUvarintAsNumber();
-    if (count > this.limits.maxHintCount) {
-      throw new SecurityLimitExceeded(`Too many hints: ${count} > ${this.limits.maxHintCount}`);
-    }
-    for (let i = 0; i < count; i++) {
-      this.readString(); // field name
-      this.readByte();   // type
-      const shapeLen = this.readUvarintAsNumber();
-      if (shapeLen > this.limits.maxRank) {
-        throw new SecurityLimitExceeded(`Hint shape too large: ${shapeLen} > ${this.limits.maxRank}`);
-      }
-      for (let j = 0; j < shapeLen; j++) {
-        this.readUvarint();
-      }
-      this.readByte();   // flags
     }
   }
 
@@ -1393,10 +1108,7 @@ class Decoder {
     if (version !== VERSION) {
       throw new Error(`Unsupported version: ${version}`);
     }
-    const flags = this.readByte();
-    if (flags & FLAG_HAS_COLUMN_HINTS) {
-      this.skipHints();
-    }
+    this.readByte(); // flags byte — bit 3 (ColumnHints) is reserved, silently ignored
 
     // Dictionary
     const dictLen = this.readUvarintAsNumber();
@@ -1661,55 +1373,6 @@ export function toAny(v: Value): unknown {
         key: btoa(binary),
       };
     }
-    case Type.ADJLIST: {
-      const adj = v.data as AdjlistData;
-      let binary = "";
-      for (const b of adj.colIndices) binary += String.fromCharCode(b);
-      return {
-        _type: "adjlist",
-        idWidth: adj.idWidth === IDWidth.INT32 ? "int32" : "int64",
-        nodeCount: adj.nodeCount,
-        edgeCount: adj.edgeCount,
-        rowOffsets: adj.rowOffsets,
-        colIndices: btoa(binary),
-      };
-    }
-    case Type.RICHTEXT: {
-      const rt = v.data as RichTextData;
-      const result: Record<string, unknown> = {
-        _type: "richtext",
-        text: rt.text,
-      };
-      if (rt.tokens && rt.tokens.length > 0) {
-        result.tokens = rt.tokens;
-      }
-      if (rt.spans && rt.spans.length > 0) {
-        result.spans = rt.spans.map((s) => ({
-          start: s.start,
-          end: s.end,
-          kindId: s.kindId,
-        }));
-      }
-      return result;
-    }
-    case Type.DELTA: {
-      const delta = v.data as DeltaData;
-      const opsJson = delta.ops.map((op) => {
-        const opDict: Record<string, unknown> = {
-          opCode: DeltaOpCode[op.opCode]?.toLowerCase() ?? op.opCode,
-          fieldId: op.fieldId,
-        };
-        if (op.value) {
-          opDict.value = toAny(op.value);
-        }
-        return opDict;
-      });
-      return {
-        _type: "delta",
-        baseId: delta.baseId,
-        ops: opsJson,
-      };
-    }
     // Graph types
     case Type.NODE: {
       const node = v.data as NodeData;
@@ -1763,30 +1426,6 @@ export function toAny(v: Value): unknown {
             Object.entries(e.props).map(([k, val]) => [k, toAny(val)])
           ),
         })),
-      };
-    }
-    case Type.GRAPH_SHARD: {
-      const shard = v.data as GraphShardData;
-      return {
-        _type: "graph_shard",
-        nodes: shard.nodes.map((n) => ({
-          id: n.id,
-          labels: n.labels,
-          props: Object.fromEntries(
-            Object.entries(n.props).map(([k, val]) => [k, toAny(val)])
-          ),
-        })),
-        edges: shard.edges.map((e) => ({
-          from: e.fromId,
-          to: e.toId,
-          type: e.edgeType,
-          props: Object.fromEntries(
-            Object.entries(e.props).map(([k, val]) => [k, toAny(val)])
-          ),
-        })),
-        metadata: Object.fromEntries(
-          Object.entries(shard.metadata).map(([k, val]) => [k, toAny(val)])
-        ),
       };
     }
     case Type.BITMASK: {
@@ -1871,14 +1510,6 @@ class DeterministicEncoder extends Encoder {
       for (const [key, val] of entries) {
         this.addKeySorted(key);
         this.collectKeysSorted(val);
-      }
-    } else if (v.type === Type.DELTA) {
-      // Delta ops may contain nested values
-      const delta = v.data as DeltaData;
-      for (const op of delta.ops) {
-        if (op.value) {
-          this.collectKeysSorted(op.value);
-        }
       }
     }
   }
@@ -2055,67 +1686,6 @@ class DeterministicEncoder extends Encoder {
         this.writeSorted(ref.key);
         break;
       }
-      case Type.ADJLIST: {
-        const adj = v.data as AdjlistData;
-        this.writeByteSorted(Tag.ADJLIST);
-        this.writeByteSorted(adj.idWidth);
-        this.writeUvarintSorted(adj.nodeCount);
-        this.writeUvarintSorted(adj.edgeCount);
-        for (const offset of adj.rowOffsets) {
-          this.writeUvarintSorted(offset);
-        }
-        this.writeSorted(adj.colIndices);
-        break;
-      }
-      case Type.RICHTEXT: {
-        const rt = v.data as RichTextData;
-        this.writeByteSorted(Tag.RICHTEXT);
-        const textBytes = sharedTextEncoder.encode(rt.text);
-        this.writeUvarintSorted(textBytes.length);
-        this.writeSorted(textBytes);
-        // Calculate and write flags byte
-        const tokens = rt.tokens || [];
-        const spans = rt.spans || [];
-        let flags = 0;
-        if (tokens.length > 0) flags |= 0x01;
-        if (spans.length > 0) flags |= 0x02;
-        this.writeByteSorted(flags);
-        // Write tokens if present
-        if (flags & 0x01) {
-          this.writeUvarintSorted(tokens.length);
-          for (const tok of tokens) {
-            const buf = new ArrayBuffer(4);
-            new DataView(buf).setInt32(0, tok, true);
-            this.writeSorted(new Uint8Array(buf));
-          }
-        }
-        // Write spans if present
-        if (flags & 0x02) {
-          this.writeUvarintSorted(spans.length);
-          for (const span of spans) {
-            this.writeUvarintSorted(span.start);
-            this.writeUvarintSorted(span.end);
-            this.writeUvarintSorted(span.kindId);
-          }
-        }
-        break;
-      }
-      case Type.DELTA: {
-        const delta = v.data as DeltaData;
-        this.writeByteSorted(Tag.DELTA);
-        this.writeUvarintSorted(delta.baseId);
-        this.writeUvarintSorted(delta.ops.length);
-        for (const op of delta.ops) {
-          this.writeByteSorted(op.opCode);
-          this.writeUvarintSorted(op.fieldId);
-          if (op.opCode === DeltaOpCode.SET_FIELD || op.opCode === DeltaOpCode.APPEND_ARRAY) {
-            if (op.value) {
-              this.encodeValueSorted(op.value);
-            }
-          }
-        }
-        break;
-      }
       case Type.BITMASK: {
         const bm = v.data as BitmaskData;
         this.writeByteSorted(Tag.BITMASK);
@@ -2190,7 +1760,8 @@ function fnvHashString(h: bigint, s: string): bigint {
  * Map Type enum to ordinal for cross-language fingerprint compatibility.
  * Matches Go's Type enum: Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
  * String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
- * Tensor=13, TensorRef=14, Image=15, Audio=16, Adjlist=17, RichText=18, Delta=19
+ * Tensor=13, TensorRef=14, Image=15, Audio=16
+ * (AdjList=17, RichText=18, Delta=19 removed — moved to dedicated packages)
  */
 function typeToOrd(type: Type): number {
   switch (type) {
@@ -2228,12 +1799,6 @@ function typeToOrd(type: Type): number {
       return 15;
     case Type.AUDIO:
       return 16;
-    case Type.ADJLIST:
-      return 17;
-    case Type.RICHTEXT:
-      return 18;
-    case Type.DELTA:
-      return 19;
     default:
       return 0xff;
   }
@@ -2304,30 +1869,6 @@ function hashSchema(v: Value, h: bigint): bigint {
       // Include store_id in schema (key is data)
       const ref = v.data as TensorRefData;
       h = fnvHashByte(h, ref.storeId);
-      break;
-    }
-
-    case Type.ADJLIST: {
-      // Include id_width in schema (counts are data)
-      const adj = v.data as AdjlistData;
-      h = fnvHashByte(h, adj.idWidth);
-      break;
-    }
-
-    case Type.RICHTEXT:
-      // Type tag is sufficient for schema (text/tokens/spans are data)
-      break;
-
-    case Type.DELTA: {
-      // Include op codes in schema
-      const delta = v.data as DeltaData;
-      h = fnvHashU64(h, BigInt(delta.ops.length));
-      for (const op of delta.ops) {
-        h = fnvHashByte(h, op.opCode);
-        if (op.value) {
-          h = hashSchema(op.value, h);
-        }
-      }
       break;
     }
   }
