@@ -26,6 +26,7 @@ extern "C" {
 
 /* Header flags (in header byte 3) */
 #define COWRIE_FLAG_COMPRESSED       0x01
+/* Reserved (formerly column hints — feature parked, decoders MUST ignore). */
 #define COWRIE_FLAG_HAS_COLUMN_HINTS 0x08
 #define COWRIE_COMP_NONE         0
 #define COWRIE_COMP_GZIP         1
@@ -328,7 +329,7 @@ typedef struct {
 #define COWRIE_DEFAULT_MAX_EXT_LEN    1000000     /* 1MB (tightened: was 100MB) */
 #define COWRIE_DEFAULT_MAX_RANK       32
 #define COWRIE_DEFAULT_MAX_DICT_LEN   1000000     /* 1M (tightened: was 10M) */
-#define COWRIE_DEFAULT_MAX_HINT_COUNT 10000       /* 10K column hints */
+#define COWRIE_DEFAULT_MAX_HINT_COUNT 10000       /* Reserved — column hints feature parked. */
 
 /* Decode options for configurable security limits */
 typedef struct {
@@ -339,7 +340,7 @@ typedef struct {
     size_t max_bytes_len;   /* Maximum bytes length */
     size_t max_ext_len;     /* Maximum ext payload length */
     size_t max_dict_len;    /* Maximum dictionary entry count */
-    size_t max_hint_count;  /* Maximum column hint count */
+    size_t max_hint_count;  /* Reserved — column hints feature parked, no-op. */
     int    max_rank;        /* Maximum tensor rank (dimensions) */
     int unknown_ext;        /* Unknown ext behavior (0=keep,1=skip,2=error) */
 } COWRIEDecodeOpts;
