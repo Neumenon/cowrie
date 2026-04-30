@@ -334,19 +334,21 @@ else:
 
 ## JSON Interoperability
 
-### Drop-In Replacement
+### JSON Bridge
+
+GLYPH round-trips JSON-compatible values losslessly. Primitive types, objects, and arrays
+survive the round-trip intact; GLYPH-specific extensions (typed refs, struct names) have
+no JSON equivalent and must be handled separately.
 
 ```python
 import glyph
 
-# Your existing code
 data = {"action": "search", "query": "test"}
 
-# One-line change
-text = glyph.json_to_glyph(data)  # Instead of json.dumps()
-restored = glyph.glyph_to_json(text)  # Instead of json.loads()
+text = glyph.json_to_glyph(data)   # Convert to GLYPH text
+restored = glyph.glyph_to_json(text)  # Back to Python dict
 
-assert restored == data  # Perfect round-trip
+assert restored == data  # Round-trip intact for JSON-compatible data
 ```
 
 ### Gradual Migration

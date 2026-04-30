@@ -60,9 +60,9 @@ Tag(0x35) | id:zigzag-varint | labelLen:varint | labelBytes | propCount:varint |
 Tag(0x36) | src:zigzag-varint | dst:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
 ```
 
-#### Reserved (0x30)
-> Tag 0x30 (AdjList) is reserved (deprecated). Decoders MUST skip the
-> length-prefixed payload silently. Encoders MUST NOT emit it.
+#### Reserved (0x30-0x32)
+> Tags 0x30 (AdjList), 0x31 (RichText), and 0x32 (Delta) are reserved (deprecated).
+> Decoders MUST skip the length-prefixed payload silently. Encoders MUST NOT emit them.
 
 #### NodeBatch (0x37)
 ```
@@ -122,7 +122,9 @@ The formats differ only in header presence and which tag ranges they use:
 | 0x00-0x0F | Core types (unified) | Core types (unified) |
 | 0x16-0x19 | Proto-tensor arrays | — (use Tensor 0x20 instead) |
 | 0x20-0x24 | — | ML extensions (Tensor, Image, Audio, Bitmask) |
-| 0x30-0x39 | Reserved (deprecated graph/Delta/RichText — decoders skip) | Reserved (deprecated graph/Delta/RichText — decoders skip) |
+| 0x30-0x32 | Reserved (AdjList/RichText/Delta — decoders skip) | Reserved (AdjList/RichText/Delta — decoders skip) |
+| 0x35-0x38 | Graph types (Node/Edge/NodeBatch/EdgeBatch) | Graph types (Node/Edge/NodeBatch/EdgeBatch) |
+| 0x39 | Reserved (GraphShard — decoders skip) | Reserved (GraphShard — decoders skip) |
 | 0x40-0xEF | FIXINT/FIXARRAY/FIXMAP/FIXNEG | FIXINT/FIXARRAY/FIXMAP/FIXNEG |
 
 Gen2 adds dictionary coding (header contains string dictionary, Object/Graph keys use dictionary indices)
@@ -140,7 +142,7 @@ Byte 2:    Version (0x02)
 Byte 3:    Flags
            - Bit 0: Compressed
            - Bits 1-2: Compression type (0=none, 1=gzip, 2=zstd)
-           - Bit 3: Has column hints
+           - Bit 3: Reserved (was FlagHasColumnHints — decoders MUST ignore)
 Bytes 4+:  DictLen:varint
            Dict: DictLen * (len:varint + UTF-8 bytes)
            RootValue: encoded value
@@ -282,12 +284,12 @@ Implementations may allow overrides; “unlimited” must be explicit (not defau
 | Limit | Default | Meaning |
 |-------|---------|---------|
 | MaxDepth | 1000 | Maximum nested depth (arrays/objects) |
-| MaxArrayLen | 100,000,000 | Maximum array element count |
-| MaxObjectLen | 10,000,000 | Maximum object field count |
-| MaxStringLen | 500,000,000 | Maximum string length (bytes) |
-| MaxBytesLen | 1,000,000,000 | Maximum bytes length (also tensor/image/audio) |
-| MaxDictLen | 10,000,000 | Maximum dictionary entries |
-| MaxExtLen | 100,000,000 | Maximum TagExt payload length |
+| MaxArrayLen | 1,000,000 | Maximum array element count |
+| MaxObjectLen | 1,000,000 | Maximum object field count |
+| MaxStringLen | 10,000,000 | Maximum string length (bytes) |
+| MaxBytesLen | 50,000,000 | Maximum bytes length (also tensor/image/audio) |
+| MaxDictLen | 1,000,000 | Maximum dictionary entries |
+| MaxExtLen | 1,000,000 | Maximum TagExt payload length |
 | MaxRank | 32 | Maximum tensor rank (dims count) |
 
 ### Tensor Rank Limits
@@ -450,12 +452,12 @@ Decoders should enforce limits to prevent denial-of-service:
 | Limit | Default |
 |-------|---------|
 | Max nesting depth | 1000 |
-| Max array length | 100M |
-| Max object fields | 10M |
-| Max string length | 500MB |
-| Max bytes length | 1GB |
-| Max extension length | 100MB |
-| Max dictionary size | 10M |
+| Max array length | 1M |
+| Max object fields | 1M |
+| Max string length | 10MB |
+| Max bytes length | 50MB |
+| Max extension length | 1MB |
+| Max dictionary size | 1M |
 | Max tensor rank | 32 |
 
 ## Schema Fingerprinting

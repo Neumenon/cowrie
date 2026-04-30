@@ -230,44 +230,30 @@ echo '{"name":"Alice","age":30}' | ./cowrie encode --gen2 > data.cowrie
 | Simple JSON APIs | Gen1 | Faster, simpler |
 | Repeated schemas (logs, events) | Gen2 | Dictionary coding saves ~50% |
 | ML pipelines (tensors, images) | Gen2 | Native ML type support |
-| Graph data (GNN) | Gen2 | Node, Edge, GraphShard types |
+| Graph data (GNN) | Gen2 | Node, Edge, NodeBatch, EdgeBatch types |
 | Embedded/IoT | Gen1 | Smaller code footprint |
 | Real-time systems | Gen1 | Single-pass, predictable latency |
 
 ## Graph Types (v2.1)
 
-Gen2 graph data structures:
+Gen2 graph data structures (Node/Edge/NodeBatch/EdgeBatch — 0x35-0x38):
 
 ```go
 // Go - Gen2 Graph Types
-node := cowrie.NodeData{
-    ID:     "person_42",
-    Labels: []string{"Person", "Employee"},
-    Props:  map[string]any{"name": "Alice", "age": int64(30)},
-}
+node := cowrie.NewNode("person_42", []string{"Person", "Employee"}, map[string]any{
+    "name": "Alice",
+    "age":  int64(30),
+})
 
-edge := cowrie.EdgeData{
-    From:  "person_42",
-    To:    "company_1",
-    Type:  "WORKS_AT",
-    Props: map[string]any{"since": int64(2020)},
-}
+edge := cowrie.NewEdge("person_42", "company_1", "WORKS_AT", map[string]any{
+    "since": int64(2020),
+})
 
-shard := cowrie.GraphShard(
-    []cowrie.NodeData{node},
-    []cowrie.EdgeData{edge},
-    map[string]any{"source": "example"},
-)
+batch := cowrie.NewNodeBatch([]cowrie.NodeData{node.Node()})
 ```
 
-```python
-# Python - Gen2 Graph Types
-from cowrie.gen2 import Value, NodeData, EdgeData
-
-node = NodeData(id="person_42", labels=["Person"], props={"name": Value.string("Alice")})
-edge = EdgeData(from_id="person_42", to_id="company_1", edge_type="WORKS_AT", props={})
-shard = Value.graph_shard([node], [edge], {"source": Value.string("example")})
-```
+> **Note:** Tag 0x39 (GraphShard) is reserved and no longer emitted. Use
+> NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data in Gen2.
 
 ## Streaming Support
 
@@ -320,14 +306,6 @@ payload = write_master_frame(
 frame, _ = read_master_frame(payload)
 ```
 
-### Gen2: Column-wise Access
-
-```go
-// Go - Read specific columns without full decode
-cr, _ := cowrie.NewColumnReader(data)
-names, _ := cr.ReadColumn("name")   // Only decode "name" field
-ages, _, _ := cr.ReadInt64Column("age")
-```
 
 ## Wire Format
 
