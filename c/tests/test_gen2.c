@@ -641,53 +641,6 @@ static int test_edge_roundtrip(void) {
     return 1;
 }
 
-static int test_graph_shard_roundtrip(void) {
-    /* Create a simple node */
-    COWRIENode nodes[1];
-    nodes[0].id = "n1";
-    nodes[0].id_len = 2;
-    nodes[0].labels = NULL;
-    nodes[0].label_lens = NULL;
-    nodes[0].label_count = 0;
-    nodes[0].props = NULL;
-    nodes[0].prop_count = 0;
-
-    /* Create a simple edge */
-    COWRIEEdge edges[1];
-    edges[0].from_id = "n1";
-    edges[0].from_id_len = 2;
-    edges[0].to_id = "n1";
-    edges[0].to_id_len = 2;
-    edges[0].edge_type = "SELF";
-    edges[0].edge_type_len = 4;
-    edges[0].props = NULL;
-    edges[0].prop_count = 0;
-
-    /* Create metadata */
-    COWRIEMember meta[1];
-    meta[0].key = "version";
-    meta[0].key_len = 7;
-    meta[0].value = cowrie_new_int64(1);
-
-    COWRIEValue *shard = cowrie_new_graph_shard(nodes, 1, edges, 1, meta, 1);
-    ASSERT(shard != NULL);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(shard, &buf) == 0);
-
-    COWRIEValue *decoded;
-    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
-
-    ASSERT(decoded->type == COWRIE_GRAPH_SHARD);
-    ASSERT(decoded->as.graph_shard.node_count == 1);
-    ASSERT(decoded->as.graph_shard.edge_count == 1);
-    ASSERT(decoded->as.graph_shard.meta_count == 1);
-
-    cowrie_free(shard);
-    cowrie_free(decoded);
-    cowrie_buf_free(&buf);
-    return 1;
-}
 
 /* ============================================================
  * Fixture Tests (Core)
@@ -788,52 +741,6 @@ static size_t encode_uvarint(uint8_t *buf, uint64_t v) {
     return i;
 }
 
-/* Test: adjlist with node_count that would overflow (node_count+1)*sizeof(size_t) */
-static int test_oversized_adjlist_rejects(void) {
-    /* Build: header(4) + dict_count(1) + tag(1) + id_width(1) + node_count(varint) + edge_count(varint)
-     * Set node_count to SIZE_MAX so (node_count+1) wraps to 0 */
-    uint8_t payload[30];
-    size_t pos = 0;
-    payload[pos++] = 0x53; /* S */
-    payload[pos++] = 0x4A; /* J */
-    payload[pos++] = 0x02; /* version 2 */
-    payload[pos++] = 0x00; /* flags */
-    payload[pos++] = 0x00; /* dict count = 0 */
-    payload[pos++] = 0x30; /* SJT_ADJLIST */
-    payload[pos++] = 0x00; /* id_width = INT32 */
-    /* node_count = 0xFFFFFFFFFFFFFFFF (max uint64) */
-    pos += encode_uvarint(payload + pos, UINT64_MAX);
-    /* edge_count = 0 */
-    payload[pos++] = 0x00;
-
-    COWRIEValue *result = NULL;
-    int rc = cowrie_decode(payload, pos, &result);
-    ASSERT(rc != 0);  /* Must reject */
-    ASSERT(result == NULL);
-    return 1;
-}
-
-/* Test: richtext with huge token_count that would overflow token_count*sizeof(int32_t) */
-static int test_oversized_richtext_tokens_rejects(void) {
-    uint8_t payload[30];
-    size_t pos = 0;
-    payload[pos++] = 0x53; /* S */
-    payload[pos++] = 0x4A; /* J */
-    payload[pos++] = 0x02; /* version 2 */
-    payload[pos++] = 0x00; /* flags */
-    payload[pos++] = 0x00; /* dict count = 0 */
-    payload[pos++] = 0x31; /* SJT_RICH_TEXT */
-    payload[pos++] = 0x00; /* text_len = 0 */
-    payload[pos++] = 0x01; /* flags: has tokens */
-    /* token_count = 0x4000000000000000 — would overflow when * 4 */
-    pos += encode_uvarint(payload + pos, (uint64_t)0x4000000000000000ULL);
-
-    COWRIEValue *result = NULL;
-    int rc = cowrie_decode(payload, pos, &result);
-    ASSERT(rc != 0);  /* Must reject */
-    ASSERT(result == NULL);
-    return 1;
-}
 
 /* Test: array with count exceeding remaining input */
 static int test_oversized_array_rejects(void) {
@@ -971,153 +878,6 @@ static int test_empty_bitmask(void) {
     return 1;
 }
 
-static int test_adjlist_construct_encode(void) {
-    /* Full roundtrip: construct → encode → decode → compare all fields */
-    size_t row_offsets[] = {0, 2, 3};
-    int32_t col_indices[] = {1, 2, 0};
-    COWRIEValue *v = cowrie_new_adjlist(COWRIE_ID_INT32, 2, 3, row_offsets, col_indices);
-    ASSERT(v != NULL);
-    ASSERT(v->type == COWRIE_ADJLIST);
-    ASSERT(v->as.adjlist.node_count == 2);
-    ASSERT(v->as.adjlist.edge_count == 3);
-    ASSERT(v->as.adjlist.id_width == COWRIE_ID_INT32);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(v, &buf) == 0);
-    ASSERT(buf.len > 0);
-
-    /* Decode and verify all fields match */
-    COWRIEValue *decoded;
-    ASSERT(cowrie_decode(buf.data, buf.len, &decoded) == 0);
-    ASSERT(decoded->type == COWRIE_ADJLIST);
-    ASSERT(decoded->as.adjlist.node_count == 2);
-    ASSERT(decoded->as.adjlist.edge_count == 3);
-    ASSERT(decoded->as.adjlist.id_width == COWRIE_ID_INT32);
-
-    /* Compare row_offsets */
-    for (size_t i = 0; i <= 2; i++) {
-        ASSERT(decoded->as.adjlist.row_offsets[i] == row_offsets[i]);
-    }
-
-    /* Compare col_indices */
-    int32_t *dec_cols = (int32_t *)decoded->as.adjlist.col_indices;
-    for (size_t i = 0; i < 3; i++) {
-        ASSERT(dec_cols[i] == col_indices[i]);
-    }
-
-    cowrie_free(v);
-    cowrie_free(decoded);
-    cowrie_buf_free(&buf);
-    return 1;
-}
-
-static int test_adjlist_int64_construct_encode(void) {
-    size_t row_offsets[] = {0, 1, 2};
-    int64_t col_indices[] = {100, 200};
-    COWRIEValue *v = cowrie_new_adjlist(COWRIE_ID_INT64, 2, 2, row_offsets, col_indices);
-    ASSERT(v != NULL);
-    ASSERT(v->type == COWRIE_ADJLIST);
-    ASSERT(v->as.adjlist.id_width == COWRIE_ID_INT64);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(v, &buf) == 0);
-    ASSERT(buf.len > 0);
-
-    cowrie_free(v);
-    cowrie_buf_free(&buf);
-    return 1;
-}
-
-static int test_rich_text_roundtrip(void) {
-    const char *text = "Hello, World!";
-    int32_t tokens[] = {101, 102, 103};
-    COWRIERichTextSpan spans[] = {{0, 5, 1}, {7, 12, 2}};
-
-    COWRIEValue *v = cowrie_new_rich_text(text, strlen(text), tokens, 3, spans, 2);
-    ASSERT(v != NULL);
-    ASSERT(v->type == COWRIE_RICH_TEXT);
-    ASSERT(v->as.rich_text.text_len == strlen(text));
-    ASSERT(v->as.rich_text.token_count == 3);
-    ASSERT(v->as.rich_text.span_count == 2);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(v, &buf) == 0);
-
-    COWRIEValue *dec;
-    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == COWRIE_RICH_TEXT);
-    ASSERT(strcmp(dec->as.rich_text.text, text) == 0);
-    ASSERT(dec->as.rich_text.token_count == 3);
-    ASSERT(dec->as.rich_text.tokens[0] == 101);
-    ASSERT(dec->as.rich_text.tokens[2] == 103);
-    ASSERT(dec->as.rich_text.span_count == 2);
-    ASSERT(dec->as.rich_text.spans[0].start == 0);
-    ASSERT(dec->as.rich_text.spans[0].end == 5);
-    ASSERT(dec->as.rich_text.spans[1].kind_id == 2);
-
-    cowrie_free(v);
-    cowrie_free(dec);
-    cowrie_buf_free(&buf);
-    return 1;
-}
-
-static int test_rich_text_plain(void) {
-    const char *text = "Just plain text";
-    COWRIEValue *v = cowrie_new_rich_text(text, strlen(text), NULL, 0, NULL, 0);
-    ASSERT(v != NULL);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(v, &buf) == 0);
-
-    COWRIEValue *dec;
-    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == COWRIE_RICH_TEXT);
-    ASSERT(strcmp(dec->as.rich_text.text, text) == 0);
-    ASSERT(dec->as.rich_text.token_count == 0);
-    ASSERT(dec->as.rich_text.span_count == 0);
-
-    cowrie_free(v);
-    cowrie_free(dec);
-    cowrie_buf_free(&buf);
-    return 1;
-}
-
-static int test_delta_roundtrip(void) {
-    COWRIEDeltaOp_t ops[3];
-    ops[0].op_code = COWRIE_DELTA_SET_FIELD;
-    ops[0].field_id = 0;
-    ops[0].value = cowrie_new_int64(42);
-    ops[1].op_code = COWRIE_DELTA_DELETE_FIELD;
-    ops[1].field_id = 1;
-    ops[1].value = NULL;
-    ops[2].op_code = COWRIE_DELTA_APPEND_ARRAY;
-    ops[2].field_id = 2;
-    ops[2].value = cowrie_new_string("appended", 8);
-
-    COWRIEValue *v = cowrie_new_delta(100, ops, 3);
-    ASSERT(v != NULL);
-    ASSERT(v->type == COWRIE_DELTA);
-    ASSERT(v->as.delta.base_id == 100);
-    ASSERT(v->as.delta.op_count == 3);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(v, &buf) == 0);
-
-    COWRIEValue *dec;
-    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == COWRIE_DELTA);
-    ASSERT(dec->as.delta.base_id == 100);
-    ASSERT(dec->as.delta.op_count == 3);
-    ASSERT(dec->as.delta.ops[0].op_code == COWRIE_DELTA_SET_FIELD);
-    ASSERT(dec->as.delta.ops[0].value->as.i64 == 42);
-    ASSERT(dec->as.delta.ops[1].op_code == COWRIE_DELTA_DELETE_FIELD);
-    ASSERT(dec->as.delta.ops[2].op_code == COWRIE_DELTA_APPEND_ARRAY);
-
-    cowrie_free(v);
-    cowrie_free(dec);
-    cowrie_buf_free(&buf);
-    return 1;
-}
 
 static int test_fixint_encoding(void) {
     /* Values 0-127 should use FIXINT inline encoding */
@@ -1907,29 +1667,6 @@ static int test_schema_fingerprint_ext_types(void) {
     uint32_t fp_aud = cowrie_schema_fingerprint32(audio);
     ASSERT(fp_aud != 0);
 
-    /* Adjlist */
-    size_t row_offsets[] = {0, 1};
-    int32_t col_indices[] = {0};
-    COWRIEValue *adj = cowrie_new_adjlist(COWRIE_ID_INT32, 1, 1, row_offsets, col_indices);
-    uint32_t fp_adj = cowrie_schema_fingerprint32(adj);
-    ASSERT(fp_adj != 0);
-
-    /* RichText */
-    int32_t tokens[] = {1};
-    COWRIERichTextSpan spans[] = {{0, 2, 1}};
-    COWRIEValue *rt = cowrie_new_rich_text("hi", 2, tokens, 1, spans, 1);
-    uint32_t fp_rt = cowrie_schema_fingerprint32(rt);
-    ASSERT(fp_rt != 0);
-
-    /* Delta */
-    COWRIEDeltaOp_t ops[1];
-    ops[0].op_code = COWRIE_DELTA_SET_FIELD;
-    ops[0].field_id = 1;
-    ops[0].value = cowrie_new_int64(99);
-    COWRIEValue *delta = cowrie_new_delta(0, ops, 1);
-    uint32_t fp_delta = cowrie_schema_fingerprint32(delta);
-    ASSERT(fp_delta != 0);
-
     /* All types should have distinct fingerprints */
     ASSERT(fp_tensor != fp_ext);
     ASSERT(fp_ext != fp_img);
@@ -1941,9 +1678,6 @@ static int test_schema_fingerprint_ext_types(void) {
     cowrie_free(ext);
     cowrie_free(image);
     cowrie_free(audio);
-    cowrie_free(adj);
-    cowrie_free(rt);
-    cowrie_free(delta);
     return 1;
 }
 
@@ -1992,73 +1726,6 @@ static int test_utf8_4byte_string(void) {
     return 1;
 }
 
-/* Test graph_shard with properties on nodes/edges (covers collect_keys/dict_find paths) */
-static int test_graph_shard_with_props(void) {
-    /* Create nodes with properties */
-    const char *labels[] = {"Person"};
-    size_t label_lens[] = {6};
-
-    COWRIEMember props1[1];
-    COWRIEValue *age1 = cowrie_new_int64(25);
-    props1[0].key = "age";
-    props1[0].key_len = 3;
-    props1[0].value = age1;
-    COWRIEValue *node1 = cowrie_new_node("n1", 2, labels, label_lens, 1, props1, 1);
-    ASSERT(node1 != NULL);
-
-    COWRIEMember props2[1];
-    COWRIEValue *age2 = cowrie_new_int64(30);
-    props2[0].key = "age";
-    props2[0].key_len = 3;
-    props2[0].value = age2;
-    COWRIEValue *node2 = cowrie_new_node("n2", 2, labels, label_lens, 1, props2, 1);
-    ASSERT(node2 != NULL);
-
-    /* Create edge with properties */
-    COWRIEMember eprops[1];
-    COWRIEValue *weight = cowrie_new_float64(0.5);
-    eprops[0].key = "weight";
-    eprops[0].key_len = 6;
-    eprops[0].value = weight;
-    COWRIEValue *edge = cowrie_new_edge("n1", 2, "n2", 2, "knows", 5, eprops, 1);
-    ASSERT(edge != NULL);
-
-    /* Build graph shard */
-    COWRIENode nodes[2];
-    nodes[0] = node1->as.node;
-    nodes[1] = node2->as.node;
-    COWRIEEdge edges[1];
-    edges[0] = edge->as.edge;
-
-    COWRIEMember meta_props[1];
-    COWRIEValue *version = cowrie_new_int64(1);
-    meta_props[0].key = "version";
-    meta_props[0].key_len = 7;
-    meta_props[0].value = version;
-
-    COWRIEValue *shard = cowrie_new_graph_shard(nodes, 2, edges, 1, meta_props, 1);
-    ASSERT(shard != NULL);
-    ASSERT(shard->type == COWRIE_GRAPH_SHARD);
-
-    COWRIEBuf buf;
-    ASSERT(cowrie_encode(shard, &buf) == 0);
-
-    COWRIEValue *dec;
-    ASSERT(cowrie_decode(buf.data, buf.len, &dec) == 0);
-    ASSERT(dec->type == COWRIE_GRAPH_SHARD);
-    ASSERT(dec->as.graph_shard.node_count == 2);
-    ASSERT(dec->as.graph_shard.edge_count == 1);
-
-    /* Clean up - note: node1/node2/edge own the values, shard copies them */
-    cowrie_free(shard);
-    cowrie_free(dec);
-    cowrie_buf_free(&buf);
-    /* node1, node2, edge still own their original values */
-    cowrie_free(node1);
-    cowrie_free(node2);
-    cowrie_free(edge);
-    return 1;
-}
 
 /* Test node with multiple labels */
 static int test_node_multi_label(void) {
@@ -2189,6 +1856,70 @@ static int test_decode_rejects_truncated(void) {
 }
 
 /* ============================================================
+ * Skip-Reserved-Tag Round-trip Test
+ * ============================================================
+ *
+ * Constructs a raw Gen2 stream whose root value is a 2-element fixarray:
+ *   [ <0x30-tagged blob, 4-byte payload>, "kept" ]
+ *
+ * The decoder must:
+ *   (a) return no error,
+ *   (b) produce an array of length 2,
+ *   (c) treat the unknown 0x30 element as null (silently skipped),
+ *   (d) decode the following string element correctly.
+ *
+ * Wire layout (11 bytes of value payload, preceded by the 5-byte header):
+ *   Header : 0x53 0x4A 0x02 0x00   (magic + version + flags)
+ *   Dict   : 0x00                  (empty dictionary)
+ *   Root   : 0xC2                  (FIXARRAY, count=2)
+ *            0x30 0x04             (reserved tag, skip_len=4)
+ *            0x00 0x01 0x02 0x03   (4 payload bytes to skip)
+ *            0x05 0x04             (SJT_STRING, len=4)
+ *            0x6B 0x65 0x70 0x74   ("kept")
+ */
+static int test_skip_reserved_tag_roundtrip(void) {
+    /* Build the raw stream manually */
+    static const uint8_t stream[] = {
+        /* header */
+        0x53, 0x4A, 0x02, 0x00,
+        /* dict_len = 0 */
+        0x00,
+        /* root: fixarray(2) */
+        0xC2,
+        /* element 0: reserved tag 0x30, skip_len=4, 4 bytes payload */
+        0x30, 0x04, 0x00, 0x01, 0x02, 0x03,
+        /* element 1: string "kept" */
+        0x05, 0x04, 0x6B, 0x65, 0x70, 0x74
+    };
+
+    COWRIEValue *root = NULL;
+    int rc = cowrie_decode(stream, sizeof(stream), &root);
+
+    /* (a) no error */
+    ASSERT(rc == 0);
+    ASSERT(root != NULL);
+
+    /* (b) root is an array of length 2 */
+    ASSERT(root->type == COWRIE_ARRAY);
+    ASSERT(cowrie_array_len(root) == 2);
+
+    /* (c) first element: reserved tag silently decoded as null */
+    COWRIEValue *skipped = cowrie_array_get(root, 0);
+    ASSERT(skipped != NULL);
+    ASSERT(skipped->type == COWRIE_NULL);
+
+    /* (d) second element: the string "kept" decoded correctly */
+    COWRIEValue *kept = cowrie_array_get(root, 1);
+    ASSERT(kept != NULL);
+    ASSERT(kept->type == COWRIE_STRING);
+    ASSERT(kept->as.str.len == 4);
+    ASSERT(memcmp(kept->as.str.data, "kept", 4) == 0);
+
+    cowrie_free(root);
+    return 1;
+}
+
+/* ============================================================
  * Main
  * ============================================================ */
 
@@ -2221,7 +1952,6 @@ int main(void) {
     printf("\nGraph Types:\n");
     TEST(node_roundtrip);
     TEST(edge_roundtrip);
-    TEST(graph_shard_roundtrip);
 
     printf("\nSpecial Features:\n");
     TEST(deterministic_encoding);
@@ -2233,8 +1963,6 @@ int main(void) {
     TEST(fixtures_core);
 
     printf("\nOverflow Protection:\n");
-    TEST(oversized_adjlist_rejects);
-    TEST(oversized_richtext_tokens_rejects);
     TEST(oversized_array_rejects);
 
     printf("\nAdditional Type Tests:\n");
@@ -2243,11 +1971,6 @@ int main(void) {
     TEST(ext_roundtrip);
     TEST(bitmask_roundtrip);
     TEST(empty_bitmask);
-    TEST(adjlist_construct_encode);
-    TEST(adjlist_int64_construct_encode);
-    TEST(rich_text_roundtrip);
-    TEST(rich_text_plain);
-    TEST(delta_roundtrip);
 
     printf("\nv3 Inline Encoding Tests:\n");
     TEST(fixint_encoding);
@@ -2294,7 +2017,6 @@ int main(void) {
     TEST(schema_fingerprint_ext_types);
     TEST(utf8_multibyte_string);
     TEST(utf8_4byte_string);
-    TEST(graph_shard_with_props);
     TEST(master_stream_with_crc);
     TEST(invalid_magic_rejects);
     TEST(mixed_type_array);
@@ -2306,6 +2028,7 @@ int main(void) {
     printf("\nInvariant Tests:\n");
     TEST(decode_rejects_trailing_garbage);
     TEST(decode_rejects_truncated);
+    TEST(skip_reserved_tag_roundtrip);
 
     printf("\n=====================\n");
     printf("Results: %d/%d tests passed\n", tests_passed, tests_run);
