@@ -67,7 +67,6 @@ class Compression(IntEnum):
     ZSTD = 2
 
 FLAG_COMPRESSED = 0x01
-FLAG_HAS_COLUMN_HINTS = 0x08
 COMPRESS_THRESHOLD = 256
 
 # Security limits - aligned with Go reference implementation
@@ -78,7 +77,6 @@ MAX_STRING_LEN = 10_000_000   # 10MB (tightened: was 500MB)
 MAX_BYTES_LEN = 50_000_000    # 50MB (tightened: was 1GB)
 MAX_EXT_LEN = 1_000_000       # 1MB extension payload (tightened: was 100MB)
 MAX_RANK = 32                  # Maximum tensor rank (dimensions)
-MAX_HINT_COUNT = 10_000        # Maximum column hints
 MAX_DECOMPRESSED_SIZE = 256 * 1024 * 1024  # 256MB
 MAX_DICT_LEN = 1_000_000      # 1M dictionary entries (tightened: was 10M)
 
@@ -103,7 +101,6 @@ class DecodeOptions:
     max_ext_len: int = MAX_EXT_LEN
     max_dict_len: int = MAX_DICT_LEN
     max_rank: int = 32
-    max_hint_count: int = 10_000
     max_decompressed_size: int = 256 * 1024 * 1024
 
 
@@ -131,16 +128,11 @@ class Tag(IntEnum):
     IMAGE = 0x22
     AUDIO = 0x23
     BITMASK = 0x24     # v3: packed boolean bitmask
-    # Graph/Delta extensions (0x30-0x3F)
-    ADJLIST = 0x30
-    RICHTEXT = 0x31
-    DELTA = 0x32
     # Graph types (v2.1)
     NODE = 0x35
     EDGE = 0x36
     NODE_BATCH = 0x37
     EDGE_BATCH = 0x38
-    GRAPH_SHARD = 0x39
     # v3 inline types
     FIXINT_BASE = 0x40
     FIXINT_MAX = 0xBF
@@ -192,18 +184,6 @@ class AudioEncoding(IntEnum):
     AAC = 0x04
 
 
-# ID width for adjacency lists - aligned with Go reference implementation
-class IDWidth(IntEnum):
-    INT32 = 0x01
-    INT64 = 0x02
-
-
-# Delta operation codes - aligned with Go reference implementation
-class DeltaOpCode(IntEnum):
-    SET_FIELD = 0x01
-    DELETE_FIELD = 0x02
-    APPEND_ARRAY = 0x03
-
 
 class Type(IntEnum):
     """Cowrie value types."""
@@ -224,17 +204,13 @@ class Type(IntEnum):
     TENSOR_REF = 14
     IMAGE = 15
     AUDIO = 16
-    ADJLIST = 17
-    RICHTEXT = 18
-    DELTA = 19
     # Graph types (v2.1)
-    NODE = 20
-    EDGE = 21
-    NODE_BATCH = 22
-    EDGE_BATCH = 23
-    GRAPH_SHARD = 24
-    BITMASK = 25
-    UNKNOWN_EXT = 26
+    NODE = 17
+    EDGE = 18
+    NODE_BATCH = 19
+    EDGE_BATCH = 20
+    BITMASK = 21
+    UNKNOWN_EXT = 22
 
 
 class UnknownExtBehavior(IntEnum):
@@ -595,68 +571,6 @@ class TensorRefData:
             raise ValueError(f"Invalid store_id: {self.store_id}")
 
 
-@dataclass
-class AdjlistData:
-    """
-    CSR (Compressed Sparse Row) adjacency list for graphs.
-
-    Wire format: Tag(0x30) | id_width:u8 | node_count:varint | edge_count:varint |
-                 row_offsets:[(node_count+1) x varint] | col_indices:[edge_count x (4 or 8 bytes)]
-    """
-    id_width: IDWidth    # 1=int32, 2=int64
-    node_count: int
-    edge_count: int
-    row_offsets: list[int]  # [node_count + 1] offsets into col_indices
-    col_indices: bytes      # Edge destinations (int32/int64 LE based on id_width)
-
-    @property
-    def id_size(self) -> int:
-        """Return byte size of node IDs."""
-        return 4 if self.id_width == IDWidth.INT32 else 8
-
-
-@dataclass
-class RichTextSpan:
-    """Annotated span within rich text."""
-    start: int   # Byte offset start
-    end: int     # Byte offset end
-    kind_id: int # Application-defined kind
-
-
-@dataclass
-class RichTextData:
-    """
-    Text with optional tokens and spans for NLP/annotation.
-
-    Wire format: Tag(0x31) | textLen:varint | text |
-                 tokenCount:varint | tokens:[int32 LE...] |
-                 spanCount:varint | spans:[(start:varint, end:varint, kind:varint)...]
-    """
-    text: str
-    tokens: Optional[list[int]] = None  # Token IDs (e.g., BPE tokens)
-    spans: Optional[list[RichTextSpan]] = None  # Annotated spans
-
-
-@dataclass
-class DeltaOp:
-    """Single delta operation."""
-    op_code: DeltaOpCode
-    field_id: int  # Dictionary-coded field ID
-    value: Optional['Value'] = None  # For SET_FIELD and APPEND_ARRAY
-
-
-@dataclass
-class DeltaData:
-    """
-    Semantic diff/patch representing changes to an object.
-
-    Wire format: Tag(0x32) | baseID:varint | opCount:varint |
-                 ops:[(opCode:u8, fieldID:varint, [value])...]
-    """
-    base_id: int       # Reference to base object
-    ops: list[DeltaOp] # Operations
-
-
 # ============================================================
 # Graph Types (v2.1)
 # ============================================================
@@ -708,21 +622,6 @@ class EdgeBatchData:
     Wire format: Tag(0x38) | count:varint | Edge[count]
     """
     edges: list[EdgeData]
-
-
-@dataclass
-class GraphShardData:
-    """
-    Self-contained subgraph with nodes, edges, and metadata.
-    Useful for distributed graph processing and checkpointing.
-
-    Wire format: Tag(0x39) | nodeCount:varint | Node* |
-                 edgeCount:varint | Edge* |
-                 metaCount:varint | (dictIdx:varint + value)*
-    """
-    nodes: list[NodeData]
-    edges: list[EdgeData]
-    metadata: dict[str, Any]  # Keys are dictionary-coded
 
 
 @dataclass
@@ -847,29 +746,6 @@ class Value:
         return Value(Type.TENSOR_REF, TensorRefData(store_id=store_id, key=key))
 
     @staticmethod
-    def adjlist(id_width: IDWidth, node_count: int, edge_count: int,
-                row_offsets: list[int], col_indices: bytes) -> Value:
-        """Create an adjacency list value for graph data (CSR format)."""
-        return Value(Type.ADJLIST, AdjlistData(
-            id_width=id_width,
-            node_count=node_count,
-            edge_count=edge_count,
-            row_offsets=row_offsets,
-            col_indices=col_indices
-        ))
-
-    @staticmethod
-    def richtext(text: str, tokens: Optional[list[int]] = None,
-                 spans: Optional[list[RichTextSpan]] = None) -> Value:
-        """Create a rich text value with optional tokens and spans."""
-        return Value(Type.RICHTEXT, RichTextData(text=text, tokens=tokens, spans=spans))
-
-    @staticmethod
-    def delta(base_id: int, ops: list[DeltaOp]) -> Value:
-        """Create a delta value representing changes to an object."""
-        return Value(Type.DELTA, DeltaData(base_id=base_id, ops=ops))
-
-    @staticmethod
     def node(id: str, labels: list[str], props: dict[str, 'Value']) -> 'Value':
         """Create a graph node value."""
         return Value(Type.NODE, NodeData(id=id, labels=labels, props=props))
@@ -888,11 +764,6 @@ class Value:
     def edge_batch(edges: list[EdgeData]) -> 'Value':
         """Create a batch of edges."""
         return Value(Type.EDGE_BATCH, EdgeBatchData(edges=edges))
-
-    @staticmethod
-    def graph_shard(nodes: list[NodeData], edges: list[EdgeData], metadata: dict[str, 'Value']) -> 'Value':
-        """Create a graph shard containing nodes, edges, and metadata."""
-        return Value(Type.GRAPH_SHARD, GraphShardData(nodes=nodes, edges=edges, metadata=metadata))
 
     @staticmethod
     def bitmask(count: int, bits: bytes) -> 'Value':
@@ -1016,11 +887,6 @@ class Encoder:
             for key, val in v.data.items():
                 self._add_key(key)
                 self._collect_keys(val)
-        elif v.type == Type.DELTA:
-            # Delta ops may contain nested values
-            for op in v.data.ops:
-                if op.value is not None:
-                    self._collect_keys(op.value)
         # Graph types - collect property keys
         elif v.type == Type.NODE:
             self._collect_props_keys(v.data.props)
@@ -1032,12 +898,6 @@ class Encoder:
         elif v.type == Type.EDGE_BATCH:
             for edge in v.data.edges:
                 self._collect_props_keys(edge.props)
-        elif v.type == Type.GRAPH_SHARD:
-            for node in v.data.nodes:
-                self._collect_props_keys(node.props)
-            for edge in v.data.edges:
-                self._collect_props_keys(edge.props)
-            self._collect_props_keys(v.data.metadata)
 
     def _collect_props_keys(self, props: dict[str, Value]):
         """Collect keys from a properties dict."""
@@ -1170,56 +1030,6 @@ class Encoder:
             self._write_byte(ref.store_id)
             self._write_uvarint(len(ref.key))
             self._write(ref.key)
-        elif v.type == Type.ADJLIST:
-            adj = v.data  # AdjlistData
-            self._write_byte(Tag.ADJLIST)
-            self._write_byte(adj.id_width)
-            self._write_uvarint(adj.node_count)
-            self._write_uvarint(adj.edge_count)
-            # Write row_offsets as varints
-            for offset in adj.row_offsets:
-                self._write_uvarint(offset)
-            # Write col_indices as raw bytes
-            self._write(adj.col_indices)
-        elif v.type == Type.RICHTEXT:
-            rt = v.data  # RichTextData
-            self._write_byte(Tag.RICHTEXT)
-            # Text (writeString format: len:varint + bytes)
-            text_bytes = rt.text.encode('utf-8')
-            self._write_uvarint(len(text_bytes))
-            self._write(text_bytes)
-            # Calculate and write flags byte
-            tokens = rt.tokens or []
-            spans = rt.spans or []
-            flags = 0
-            if len(tokens) > 0:
-                flags |= 0x01
-            if len(spans) > 0:
-                flags |= 0x02
-            self._write_byte(flags)
-            # Write tokens if present
-            if flags & 0x01:
-                self._write_uvarint(len(tokens))
-                for tok in tokens:
-                    self._write(struct.pack('<i', tok))
-            # Write spans if present
-            if flags & 0x02:
-                self._write_uvarint(len(spans))
-                for span in spans:
-                    self._write_uvarint(span.start)
-                    self._write_uvarint(span.end)
-                    self._write_uvarint(span.kind_id)
-        elif v.type == Type.DELTA:
-            delta = v.data  # DeltaData
-            self._write_byte(Tag.DELTA)
-            self._write_uvarint(delta.base_id)
-            self._write_uvarint(len(delta.ops))
-            for op in delta.ops:
-                self._write_byte(op.op_code)
-                self._write_uvarint(op.field_id)
-                if op.op_code in (DeltaOpCode.SET_FIELD, DeltaOpCode.APPEND_ARRAY):
-                    if op.value is not None:
-                        self._encode_value(op.value)
         # Graph types
         elif v.type == Type.NODE:
             node = v.data  # NodeData
@@ -1241,19 +1051,6 @@ class Encoder:
             self._write_uvarint(len(batch.edges))
             for edge in batch.edges:
                 self._encode_edge(edge)
-        elif v.type == Type.GRAPH_SHARD:
-            shard = v.data  # GraphShardData
-            self._write_byte(Tag.GRAPH_SHARD)
-            # Encode nodes
-            self._write_uvarint(len(shard.nodes))
-            for node in shard.nodes:
-                self._encode_node(node)
-            # Encode edges
-            self._write_uvarint(len(shard.edges))
-            for edge in shard.edges:
-                self._encode_edge(edge)
-            # Encode metadata
-            self._encode_props(shard.metadata)
 
     def _encode_node(self, node: NodeData):
         """Encode a node without tag byte."""
@@ -1459,62 +1256,6 @@ class Decoder:
                 raise SecurityLimitExceeded(f"TensorRef key too long: {key_len} > {self.opts.max_string_len}")
             key = self._read(key_len)
             return Value.tensor_ref(store_id, key)
-        elif tag == Tag.ADJLIST:
-            id_width = IDWidth(self._read_byte())
-            node_count = self._read_uvarint()
-            if node_count > self.opts.max_array_len:
-                raise SecurityLimitExceeded(f"Adjlist node count too large: {node_count} > {self.opts.max_array_len}")
-            edge_count = self._read_uvarint()
-            if edge_count > self.opts.max_array_len:
-                raise SecurityLimitExceeded(f"Adjlist edge count too large: {edge_count} > {self.opts.max_array_len}")
-            # Read row_offsets (node_count + 1 varints)
-            row_offsets = [self._read_uvarint() for _ in range(node_count + 1)]
-            # Read col_indices (edge_count * id_size bytes)
-            id_size = 4 if id_width == IDWidth.INT32 else 8
-            col_indices = self._read(edge_count * id_size)
-            return Value.adjlist(id_width, node_count, edge_count, row_offsets, col_indices)
-        elif tag == Tag.RICHTEXT:
-            # Text (readString format: len:varint + bytes)
-            text_len = self._read_uvarint()
-            if text_len > self.opts.max_string_len:
-                raise SecurityLimitExceeded(f"RichText text too long: {text_len} > {self.opts.max_string_len}")
-            text = self._read(text_len).decode('utf-8')
-            # Read flags byte
-            flags = self._read_byte()
-            # Read tokens if present (flags & 0x01)
-            tokens = None
-            if flags & 0x01:
-                token_count = self._read_uvarint()
-                if token_count > self.opts.max_array_len:
-                    raise SecurityLimitExceeded(f"RichText token count too large: {token_count} > {self.opts.max_array_len}")
-                tokens = [struct.unpack('<i', self._read(4))[0] for _ in range(token_count)]
-            # Read spans if present (flags & 0x02)
-            spans = None
-            if flags & 0x02:
-                span_count = self._read_uvarint()
-                if span_count > self.opts.max_array_len:
-                    raise SecurityLimitExceeded(f"RichText span count too large: {span_count} > {self.opts.max_array_len}")
-                spans = []
-                for _ in range(span_count):
-                    start = self._read_uvarint()
-                    end = self._read_uvarint()
-                    kind_id = self._read_uvarint()
-                    spans.append(RichTextSpan(start=start, end=end, kind_id=kind_id))
-            return Value.richtext(text, tokens, spans)
-        elif tag == Tag.DELTA:
-            base_id = self._read_uvarint()
-            op_count = self._read_uvarint()
-            if op_count > self.opts.max_array_len:
-                raise SecurityLimitExceeded(f"Delta op count too large: {op_count} > {self.opts.max_array_len}")
-            ops = []
-            for _ in range(op_count):
-                op_code = DeltaOpCode(self._read_byte())
-                field_id = self._read_uvarint()
-                value = None
-                if op_code in (DeltaOpCode.SET_FIELD, DeltaOpCode.APPEND_ARRAY):
-                    value = self._decode_value()
-                ops.append(DeltaOp(op_code=op_code, field_id=field_id, value=value))
-            return Value.delta(base_id, ops)
         # Graph types
         elif tag == Tag.NODE:
             node = self._decode_node()
@@ -1534,20 +1275,6 @@ class Decoder:
                 raise SecurityLimitExceeded(f"Edge batch count too large: {count} > {self.opts.max_array_len}")
             edges = [self._decode_edge() for _ in range(count)]
             return Value.edge_batch(edges)
-        elif tag == Tag.GRAPH_SHARD:
-            # Decode nodes
-            node_count = self._read_uvarint()
-            if node_count > self.opts.max_array_len:
-                raise SecurityLimitExceeded(f"Graph shard node count too large: {node_count} > {self.opts.max_array_len}")
-            nodes = [self._decode_node() for _ in range(node_count)]
-            # Decode edges
-            edge_count = self._read_uvarint()
-            if edge_count > self.opts.max_array_len:
-                raise SecurityLimitExceeded(f"Graph shard edge count too large: {edge_count} > {self.opts.max_array_len}")
-            edges = [self._decode_edge() for _ in range(edge_count)]
-            # Decode metadata
-            metadata = self._decode_props()
-            return Value.graph_shard(nodes, edges, metadata)
         elif tag == Tag.BITMASK:
             count = self._read_uvarint()
             byte_len = (count + 7) // 8
@@ -1620,20 +1347,6 @@ class Decoder:
             props[key] = val
         return props
 
-    def _skip_hints(self) -> None:
-        count = self._read_uvarint()
-        if count > self.opts.max_hint_count:
-            raise SecurityLimitExceeded(f"Too many hints: {count} > {self.opts.max_hint_count}")
-        for _ in range(count):
-            _ = self._read_string()  # field name
-            _ = self._read_byte()    # type
-            shape_len = self._read_uvarint()
-            if shape_len > self.opts.max_rank:
-                raise SecurityLimitExceeded(f"Hint shape too large: {shape_len} > {self.opts.max_rank}")
-            for _ in range(shape_len):
-                _ = self._read_uvarint()
-            _ = self._read_byte()    # flags
-
     def decode(self) -> Value:
         # Read header
         magic = self._read(2)
@@ -1645,9 +1358,7 @@ class Decoder:
             raise ValueError(f"Unsupported version: {version}")
 
         flags = self._read_byte()
-        # For now, ignore compression flag (use decode_framed for compressed)
-        if flags & FLAG_HAS_COLUMN_HINTS:
-            self._skip_hints()
+        # For now, ignore flags (use decode_framed for compressed)
 
         # Read dictionary
         dict_len = self._read_uvarint()
@@ -1947,46 +1658,6 @@ def to_any(v: Value) -> Any:
             "store_id": ref.store_id,
             "key": base64.b64encode(ref.key).decode('ascii'),
         }
-    elif v.type == Type.ADJLIST:
-        adj = v.data  # AdjlistData
-        return {
-            "_type": "adjlist",
-            "id_width": "int32" if adj.id_width == IDWidth.INT32 else "int64",
-            "node_count": adj.node_count,
-            "edge_count": adj.edge_count,
-            "row_offsets": adj.row_offsets,
-            "col_indices": base64.b64encode(adj.col_indices).decode('ascii'),
-        }
-    elif v.type == Type.RICHTEXT:
-        rt = v.data  # RichTextData
-        result = {
-            "_type": "richtext",
-            "text": rt.text,
-        }
-        if rt.tokens:
-            result["tokens"] = rt.tokens
-        if rt.spans:
-            result["spans"] = [
-                {"start": s.start, "end": s.end, "kind_id": s.kind_id}
-                for s in rt.spans
-            ]
-        return result
-    elif v.type == Type.DELTA:
-        delta = v.data  # DeltaData
-        ops_json = []
-        for op in delta.ops:
-            op_dict = {
-                "op_code": op.op_code.name.lower(),
-                "field_id": op.field_id,
-            }
-            if op.value is not None:
-                op_dict["value"] = to_any(op.value)
-            ops_json.append(op_dict)
-        return {
-            "_type": "delta",
-            "base_id": delta.base_id,
-            "ops": ops_json,
-        }
     # Graph types
     elif v.type == Type.NODE:
         node = v.data  # NodeData
@@ -2031,29 +1702,6 @@ def to_any(v: Value) -> Any:
                 }
                 for e in batch.edges
             ],
-        }
-    elif v.type == Type.GRAPH_SHARD:
-        shard = v.data  # GraphShardData
-        return {
-            "_type": "graph_shard",
-            "nodes": [
-                {
-                    "id": n.id,
-                    "labels": n.labels,
-                    "props": {k: to_any(val) for k, val in n.props.items()},
-                }
-                for n in shard.nodes
-            ],
-            "edges": [
-                {
-                    "from": e.from_id,
-                    "to": e.to_id,
-                    "type": e.edge_type,
-                    "props": {k: to_any(val) for k, val in e.props.items()},
-                }
-                for e in shard.edges
-            ],
-            "metadata": {k: to_any(val) for k, val in shard.metadata.items()},
         }
     elif v.type == Type.BITMASK:
         bm = v.data  # BitmaskData
@@ -2126,12 +1774,6 @@ class DeterministicEncoder(Encoder):
                     continue
                 self._add_key(key)
                 self._collect_keys_sorted(val)
-        elif v.type == Type.DELTA:
-            # Delta ops may contain nested values
-            for op in v.data.ops:
-                if op.value is not None:
-                    self._collect_keys_sorted(op.value)
-
     def _encode_value_sorted(self, v: Value):
         """Encode value with sorted object keys."""
         if v is None or v.type == Type.NULL:
@@ -2240,54 +1882,6 @@ class DeterministicEncoder(Encoder):
             self._write_byte(ref.store_id)
             self._write_uvarint(len(ref.key))
             self._write(ref.key)
-        elif v.type == Type.ADJLIST:
-            adj = v.data  # AdjlistData
-            self._write_byte(Tag.ADJLIST)
-            self._write_byte(adj.id_width)
-            self._write_uvarint(adj.node_count)
-            self._write_uvarint(adj.edge_count)
-            for offset in adj.row_offsets:
-                self._write_uvarint(offset)
-            self._write(adj.col_indices)
-        elif v.type == Type.RICHTEXT:
-            rt = v.data  # RichTextData
-            self._write_byte(Tag.RICHTEXT)
-            text_bytes = rt.text.encode('utf-8')
-            self._write_uvarint(len(text_bytes))
-            self._write(text_bytes)
-            # Calculate and write flags byte
-            tokens = rt.tokens or []
-            spans = rt.spans or []
-            flags = 0
-            if len(tokens) > 0:
-                flags |= 0x01
-            if len(spans) > 0:
-                flags |= 0x02
-            self._write_byte(flags)
-            # Write tokens if present
-            if flags & 0x01:
-                self._write_uvarint(len(tokens))
-                for tok in tokens:
-                    self._write(struct.pack('<i', tok))
-            # Write spans if present
-            if flags & 0x02:
-                self._write_uvarint(len(spans))
-                for span in spans:
-                    self._write_uvarint(span.start)
-                    self._write_uvarint(span.end)
-                    self._write_uvarint(span.kind_id)
-        elif v.type == Type.DELTA:
-            delta = v.data  # DeltaData
-            self._write_byte(Tag.DELTA)
-            self._write_uvarint(delta.base_id)
-            self._write_uvarint(len(delta.ops))
-            for op in delta.ops:
-                self._write_byte(op.op_code)
-                self._write_uvarint(op.field_id)
-                if op.op_code in (DeltaOpCode.SET_FIELD, DeltaOpCode.APPEND_ARRAY):
-                    if op.value is not None:
-                        self._encode_value_sorted(op.value)
-
     def encode_with_opts(self, v: Value) -> bytes:
         """Encode with options."""
         if not self.opts.deterministic:
@@ -2377,9 +1971,6 @@ def _type_to_ord(t: Type) -> int:
         Type.TENSOR_REF: 14,
         Type.IMAGE: 15,
         Type.AUDIO: 16,
-        Type.ADJLIST: 17,
-        Type.RICHTEXT: 18,
-        Type.DELTA: 19,
     }
     return mapping.get(t, 0xFF)
 
@@ -2422,21 +2013,6 @@ def _hash_schema(v: Value, h: int) -> int:
         # Include store_id in schema (key is data)
         ref = v.data  # TensorRefData
         h = _fnv_hash_byte(h, ref.store_id)
-    elif v.type == Type.ADJLIST:
-        # Include id_width in schema (counts are data)
-        adj = v.data  # AdjlistData
-        h = _fnv_hash_byte(h, adj.id_width)
-    elif v.type == Type.RICHTEXT:
-        # Type tag is sufficient for schema (text/tokens/spans are data)
-        pass
-    elif v.type == Type.DELTA:
-        # Include op codes in schema
-        delta = v.data  # DeltaData
-        h = _fnv_hash_u64(h, len(delta.ops))
-        for op in delta.ops:
-            h = _fnv_hash_byte(h, op.op_code)
-            if op.value is not None:
-                h = _hash_schema(op.value, h)
 
     return h
 
