@@ -90,30 +90,6 @@ func hashSchema(v *Value, h uint64) uint64 {
 		h = fnvHashByte(h, byte(v.audioVal.Encoding))
 		h = fnvHashByte(h, v.audioVal.Channels)
 
-	case TypeAdjlist:
-		// Adjlist schema includes ID width
-		h = fnvHashByte(h, byte(v.adjlistVal.IDWidth))
-
-	case TypeRichText:
-		// RichText: include presence of tokens and spans in schema
-		var flags byte
-		if len(v.richTextVal.Tokens) > 0 {
-			flags |= 0x01
-		}
-		if len(v.richTextVal.Spans) > 0 {
-			flags |= 0x02
-		}
-		h = fnvHashByte(h, flags)
-
-	case TypeDelta:
-		// Delta: include base ID presence and op types in schema
-		h = fnvHashUint64(h, v.deltaVal.BaseID)
-		h = fnvHashUint64(h, uint64(len(v.deltaVal.Ops)))
-		for _, op := range v.deltaVal.Ops {
-			h = fnvHashByte(h, byte(op.OpCode))
-			h = hashSchema(op.Value, h)
-		}
-
 	case TypeUnknownExt:
 		// Unknown extensions: include ext type in schema
 		h = fnvHashUint64(h, v.unknownExtVal.ExtType)
@@ -224,12 +200,6 @@ func SchemaDescriptor(v *Value) string {
 		return "image"
 	case TypeAudio:
 		return "audio"
-	case TypeAdjlist:
-		return "adjlist"
-	case TypeRichText:
-		return "rich_text"
-	case TypeDelta:
-		return "delta"
 	case TypeUnknownExt:
 		return "ext"
 	default:

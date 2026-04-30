@@ -77,17 +77,17 @@ const (
 	TagAudio     = 0x23
 	TagBitmask   = 0x24 // v3: packed boolean bitmask
 
-	// v2.1 Graph/Delta extensions (0x30-0x3F)
-	TagAdjlist  = 0x30
-	TagRichText = 0x31
-	TagDelta    = 0x32
+	// v2.1 Graph/Delta extensions (0x30-0x32): reserved, moved to attic
+	// TagAdjlist  = 0x30
+	// TagRichText = 0x31
+	// TagDelta    = 0x32
 
-	// v2.1 Graph types (0x35-0x39)
-	TagNode       = 0x35
-	TagEdge       = 0x36
-	TagNodeBatch  = 0x37
-	TagEdgeBatch  = 0x38
-	TagGraphShard = 0x39
+	// v2.1 Graph types (0x35-0x38)
+	TagNode      = 0x35
+	TagEdge      = 0x36
+	TagNodeBatch = 0x37
+	TagEdgeBatch = 0x38
+	// 0x39 reserved (GraphShard moved to attic)
 
 	// v3 Inline types (0x40-0xFF)
 	// FIXINT: 0x40-0xBF → value = tag - 0x40 (0-127)
@@ -127,15 +127,11 @@ const (
 	TypeTensorRef
 	TypeImage
 	TypeAudio
-	TypeAdjlist
-	TypeRichText
-	TypeDelta
 	// v2.1 Graph types
 	TypeNode
 	TypeEdge
 	TypeNodeBatch
 	TypeEdgeBatch
-	TypeGraphShard
 	// v3 types
 	TypeBitmask // Packed boolean bitmask
 	// Forward compatibility
@@ -179,12 +175,6 @@ func (t Type) String() string {
 		return "image"
 	case TypeAudio:
 		return "audio"
-	case TypeAdjlist:
-		return "adjlist"
-	case TypeRichText:
-		return "rich_text"
-	case TypeDelta:
-		return "delta"
 	case TypeNode:
 		return "node"
 	case TypeEdge:
@@ -193,8 +183,6 @@ func (t Type) String() string {
 		return "node_batch"
 	case TypeEdgeBatch:
 		return "edge_batch"
-	case TypeGraphShard:
-		return "graph_shard"
 	case TypeBitmask:
 		return "bitmask"
 	case TypeUnknownExt:
@@ -259,23 +247,6 @@ const (
 	AudioEncodingPCMFloat32 AudioEncoding = 0x02
 	AudioEncodingOPUS       AudioEncoding = 0x03
 	AudioEncodingAAC        AudioEncoding = 0x04
-)
-
-// IDWidth represents adjacency list node ID width.
-type IDWidth uint8
-
-const (
-	IDWidthInt32 IDWidth = 0x01
-	IDWidthInt64 IDWidth = 0x02
-)
-
-// DeltaOpCode represents delta operation types.
-type DeltaOpCode uint8
-
-const (
-	DeltaOpSetField    DeltaOpCode = 0x01
-	DeltaOpDeleteField DeltaOpCode = 0x02
-	DeltaOpAppendArray DeltaOpCode = 0x03
 )
 
 // ============================================================
@@ -404,42 +375,6 @@ type AudioData struct {
 	Data       []byte        // Audio data bytes
 }
 
-// AdjlistData represents a CSR adjacency list for graphs.
-type AdjlistData struct {
-	IDWidth    IDWidth  // 1=int32, 2=int64
-	NodeCount  uint64   // Number of nodes
-	EdgeCount  uint64   // Number of edges
-	RowOffsets []uint64 // [NodeCount + 1] offsets
-	ColIndices []byte   // Edge destinations (int32/int64 LE based on IDWidth)
-}
-
-// RichTextSpan represents an annotated span within rich text.
-type RichTextSpan struct {
-	Start  uint64 // Byte offset start
-	End    uint64 // Byte offset end
-	KindID uint64 // Application-defined kind
-}
-
-// RichTextData represents text with optional tokens and spans.
-type RichTextData struct {
-	Text   string         // UTF-8 text
-	Tokens []int32        // Token IDs (optional, nil if not present)
-	Spans  []RichTextSpan // Annotated spans (optional, nil if not present)
-}
-
-// DeltaOp represents a single delta operation.
-type DeltaOp struct {
-	OpCode  DeltaOpCode // Operation type
-	FieldID uint64      // Dictionary-coded field ID
-	Value   *Value      // For SetField and AppendArray
-}
-
-// DeltaData represents a semantic diff/patch.
-type DeltaData struct {
-	BaseID uint64    // Reference to base object
-	Ops    []DeltaOp // Operations
-}
-
 // BitmaskData represents a packed boolean bitmask.
 // Bit ordering: LSB-first within each byte. Bit i is at bytes[i/8] & (1 << (i%8)).
 type BitmaskData struct {
@@ -497,15 +432,6 @@ type EdgeBatchData struct {
 	Edges []EdgeData
 }
 
-// GraphShardData represents a self-contained subgraph.
-// Includes nodes, edges, and optional metadata.
-// Useful for distributed graph processing and checkpointing.
-type GraphShardData struct {
-	Nodes    []NodeData     // Nodes in this shard
-	Edges    []EdgeData     // Edges in this shard
-	Metadata map[string]any // Shard metadata (keys are dictionary-coded)
-}
-
 // Member represents an object member (key-value pair).
 type Member struct {
 	Key   string
@@ -535,19 +461,15 @@ type Value struct {
 	tensorRefVal TensorRefData
 	imageVal     ImageData
 	audioVal     AudioData
-	adjlistVal   AdjlistData
-	richTextVal  RichTextData
-	deltaVal     DeltaData
 
 	// v3 type fields
 	bitmaskVal BitmaskData
 
 	// v2.1 graph type fields
-	nodeVal NodeData
-	edgeVal       EdgeData
-	nodeBatchVal  NodeBatchData
-	edgeBatchVal  EdgeBatchData
-	graphShardVal GraphShardData
+	nodeVal      NodeData
+	edgeVal      EdgeData
+	nodeBatchVal NodeBatchData
+	edgeBatchVal EdgeBatchData
 
 	// Forward compatibility
 	unknownExtVal UnknownExtData
@@ -756,30 +678,6 @@ func (v *Value) Audio() AudioData {
 		panic("cowrie: not an audio")
 	}
 	return v.audioVal
-}
-
-// Adjlist returns the adjacency list data. Panics if not an adjlist.
-func (v *Value) Adjlist() AdjlistData {
-	if v.typ != TypeAdjlist {
-		panic("cowrie: not an adjlist")
-	}
-	return v.adjlistVal
-}
-
-// RichText returns the rich text data. Panics if not a rich_text.
-func (v *Value) RichText() RichTextData {
-	if v.typ != TypeRichText {
-		panic("cowrie: not a rich_text")
-	}
-	return v.richTextVal
-}
-
-// Delta returns the delta data. Panics if not a delta.
-func (v *Value) Delta() DeltaData {
-	if v.typ != TypeDelta {
-		panic("cowrie: not a delta")
-	}
-	return v.deltaVal
 }
 
 // UnknownExt returns the unknown extension data. Panics if not an unknown_ext.
@@ -1018,22 +916,6 @@ func (v *Value) TryEdgeBatch() (EdgeBatchData, bool) {
 		return EdgeBatchData{}, false
 	}
 	return v.edgeBatchVal, true
-}
-
-// GraphShard returns the graph shard data. Panics if not a graph_shard.
-func (v *Value) GraphShard() GraphShardData {
-	if v.typ != TypeGraphShard {
-		panic("cowrie: not a graph_shard")
-	}
-	return v.graphShardVal
-}
-
-// TryGraphShard returns the graph shard data and true if this is a graph_shard, or (GraphShardData{}, false) otherwise.
-func (v *Value) TryGraphShard() (GraphShardData, bool) {
-	if v == nil || v.typ != TypeGraphShard {
-		return GraphShardData{}, false
-	}
-	return v.graphShardVal, true
 }
 
 // Bitmask returns the bitmask data. Panics if not a bitmask.

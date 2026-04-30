@@ -20,9 +20,6 @@ var (
 	ErrInvalidDType     = errors.New("cowrie: invalid tensor dtype")
 	ErrInvalidImgFormat = errors.New("cowrie: invalid image format")
 	ErrInvalidAudioEnc  = errors.New("cowrie: invalid audio encoding")
-	ErrInvalidIDWidth   = errors.New("cowrie: invalid ID width")
-	ErrInvalidDeltaOp   = errors.New("cowrie: invalid delta opcode")
-
 	// Security limit errors
 	ErrMalformedLength = errors.New("cowrie: malformed length exceeds remaining data")
 	ErrDepthExceeded   = errors.New("cowrie: maximum nesting depth exceeded")
@@ -160,16 +157,6 @@ func isValidImageFormat(f ImageFormat) bool {
 // isValidAudioEncoding checks if the audio encoding is a known value.
 func isValidAudioEncoding(e AudioEncoding) bool {
 	return e >= AudioEncodingPCMInt16 && e <= AudioEncodingAAC
-}
-
-// isValidIDWidth checks if the ID width is a known value.
-func isValidIDWidth(w IDWidth) bool {
-	return w == IDWidthInt32 || w == IDWidthInt64
-}
-
-// isValidDeltaOpCode checks if the delta opcode is a known value.
-func isValidDeltaOpCode(op DeltaOpCode) bool {
-	return op >= DeltaOpSetField && op <= DeltaOpAppendArray
 }
 
 // Decode decodes Cowrie v2 binary data into a Value.
@@ -498,12 +485,8 @@ func decode(r *reader) (*Value, error) {
 		return nil, err
 	}
 
-	// Skip column hints if present (use DecodeWithHints to extract them)
-	if flags&FlagHasColumnHints != 0 {
-		if err := skipHints(r); err != nil {
-			return nil, err
-		}
-	}
+	// bits 1-3 reserved; ignore unknown flag bits for forward compatibility
+	_ = flags
 
 	// Read dictionary
 	dictLen, err := r.readUvarint()
@@ -861,154 +844,6 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		}
 		return Audio(AudioEncoding(encoding), sampleRate, channels, data), nil
 
-	case TagAdjlist:
-		idWidth, err := r.readByte()
-		if err != nil {
-			return nil, err
-		}
-		if !isValidIDWidth(IDWidth(idWidth)) {
-			return nil, ErrInvalidIDWidth
-		}
-		nodeCount, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		edgeCount, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Guard against nodeCount+1 overflow (MaxUint64 + 1 wraps to 0)
-		if nodeCount == math.MaxUint64 {
-			return nil, ErrMalformedLength
-		}
-		// Sanity check: nodeCount+1 offsets, each at least 1 byte
-		if nodeCount+1 > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		rowOffsets := make([]uint64, nodeCount+1)
-		for i := uint64(0); i <= nodeCount; i++ {
-			offset, err := r.readUvarint()
-			if err != nil {
-				return nil, err
-			}
-			rowOffsets[i] = offset
-		}
-		// Calculate colIndices byte length with overflow-safe arithmetic
-		var adjIDWidth int
-		if IDWidth(idWidth) == IDWidthInt32 {
-			adjIDWidth = 4
-		} else {
-			adjIDWidth = 8
-		}
-		bytesPerID := uint64(adjIDWidth)
-		if edgeCount > 0 && bytesPerID > 0 && edgeCount > uint64(r.remaining())/bytesPerID {
-			return nil, ErrMalformedLength
-		}
-		colBytesLen := int(edgeCount * bytesPerID)
-		// Sanity check: colBytesLen can't exceed remaining data
-		if colBytesLen > r.remaining() {
-			return nil, ErrMalformedLength
-		}
-		colIndices, err := r.read(colBytesLen)
-		if err != nil {
-			return nil, err
-		}
-		return Adjlist(IDWidth(idWidth), nodeCount, edgeCount, rowOffsets, colIndices), nil
-
-	case TagRichText:
-		text, err := r.readStringWithLimit(r.opts.MaxStringLen)
-		if err != nil {
-			return nil, err
-		}
-		flags, err := r.readByte()
-		if err != nil {
-			return nil, err
-		}
-		var tokens []int32
-		if flags&0x01 != 0 {
-			tokenCount, err := r.readUvarint()
-			if err != nil {
-				return nil, err
-			}
-			// Sanity check: tokenCount * 4 bytes can't exceed remaining
-			if tokenCount*4 > uint64(r.remaining()) {
-				return nil, ErrMalformedLength
-			}
-			tokens = make([]int32, tokenCount)
-			for i := uint64(0); i < tokenCount; i++ {
-				tok, err := r.readInt32LE()
-				if err != nil {
-					return nil, err
-				}
-				tokens[i] = tok
-			}
-		}
-		var spans []RichTextSpan
-		if flags&0x02 != 0 {
-			spanCount, err := r.readUvarint()
-			if err != nil {
-				return nil, err
-			}
-			// Sanity check: each span needs at least 3 bytes (3 uvarints)
-			if spanCount*3 > uint64(r.remaining()) {
-				return nil, ErrMalformedLength
-			}
-			spans = make([]RichTextSpan, spanCount)
-			for i := uint64(0); i < spanCount; i++ {
-				start, err := r.readUvarint()
-				if err != nil {
-					return nil, err
-				}
-				end, err := r.readUvarint()
-				if err != nil {
-					return nil, err
-				}
-				kindID, err := r.readUvarint()
-				if err != nil {
-					return nil, err
-				}
-				spans[i] = RichTextSpan{Start: start, End: end, KindID: kindID}
-			}
-		}
-		return RichText(text, tokens, spans), nil
-
-	case TagDelta:
-		baseID, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		opCount, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Sanity check: each op needs at least 2 bytes (opCode + fieldID)
-		if opCount*2 > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		ops := make([]DeltaOp, opCount)
-		for i := uint64(0); i < opCount; i++ {
-			opCode, err := r.readByte()
-			if err != nil {
-				return nil, err
-			}
-			if !isValidDeltaOpCode(DeltaOpCode(opCode)) {
-				return nil, ErrInvalidDeltaOp
-			}
-			fieldID, err := r.readUvarint()
-			if err != nil {
-				return nil, err
-			}
-			var val *Value
-			if DeltaOpCode(opCode) == DeltaOpSetField || DeltaOpCode(opCode) == DeltaOpAppendArray {
-				val, err = decodeValue(r, dict)
-				if err != nil {
-					return nil, err
-				}
-			}
-			ops[i] = DeltaOp{OpCode: DeltaOpCode(opCode), FieldID: fieldID, Value: val}
-		}
-		return Delta(baseID, ops), nil
-
 	// v2.1 Graph Types
 	case TagNode:
 		nodeData, err := decodeNodeData(r, dict)
@@ -1069,81 +904,6 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			edges[i] = *edgeData
 		}
 		return EdgeBatch(edges), nil
-
-	case TagGraphShard:
-		// Depth tracking for nested structure
-		if err := r.enterNested(); err != nil {
-			return nil, err
-		}
-		defer r.exitNested()
-
-		// Decode nodes
-		nodeCount, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		if nodeCount > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		if r.opts.MaxArrayLen > 0 && nodeCount > uint64(r.opts.MaxArrayLen) {
-			return nil, ErrArrayTooLarge
-		}
-		nodes := make([]NodeData, nodeCount)
-		for i := uint64(0); i < nodeCount; i++ {
-			nodeData, err := decodeNodeData(r, dict)
-			if err != nil {
-				return nil, err
-			}
-			nodes[i] = *nodeData
-		}
-
-		// Decode edges
-		edgeCount, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		if edgeCount > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		if r.opts.MaxArrayLen > 0 && edgeCount > uint64(r.opts.MaxArrayLen) {
-			return nil, ErrArrayTooLarge
-		}
-		edges := make([]EdgeData, edgeCount)
-		for i := uint64(0); i < edgeCount; i++ {
-			edgeData, err := decodeEdgeData(r, dict)
-			if err != nil {
-				return nil, err
-			}
-			edges[i] = *edgeData
-		}
-
-		// Decode metadata
-		metaCount, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		if metaCount > uint64(r.remaining()/2) {
-			return nil, ErrMalformedLength
-		}
-		if r.opts.MaxObjectLen > 0 && metaCount > uint64(r.opts.MaxObjectLen) {
-			return nil, ErrObjectTooLarge
-		}
-		metadata := make(map[string]any, metaCount)
-		for i := uint64(0); i < metaCount; i++ {
-			fieldID, err := r.readUvarint()
-			if err != nil {
-				return nil, err
-			}
-			if fieldID >= uint64(len(dict)) {
-				return nil, ErrInvalidFieldID
-			}
-			v, err := decodeValue(r, dict)
-			if err != nil {
-				return nil, err
-			}
-			metadata[dict[fieldID]] = valueToAny(v)
-		}
-		return GraphShard(nodes, edges, metadata), nil
 
 	case TagBitmask:
 		count, err := r.readUvarint()
@@ -1437,12 +1197,6 @@ func valueToAny(v *Value) any {
 		return v.imageVal
 	case TypeAudio:
 		return v.audioVal
-	case TypeAdjlist:
-		return v.adjlistVal
-	case TypeRichText:
-		return v.richTextVal
-	case TypeDelta:
-		return v.deltaVal
 	case TypeNode:
 		return v.nodeVal
 	case TypeEdge:
@@ -1451,8 +1205,6 @@ func valueToAny(v *Value) any {
 		return v.nodeBatchVal
 	case TypeEdgeBatch:
 		return v.edgeBatchVal
-	case TypeGraphShard:
-		return v.graphShardVal
 	case TypeBitmask:
 		return v.bitmaskVal
 	case TypeUnknownExt:

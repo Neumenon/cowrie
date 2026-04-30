@@ -151,59 +151,6 @@ func Audio(encoding AudioEncoding, sampleRate uint32, channels uint8, data []byt
 	}
 }
 
-// Adjlist returns an adjacency list value (CSR format).
-func Adjlist(idWidth IDWidth, nodeCount, edgeCount uint64, rowOffsets []uint64, colIndices []byte) *Value {
-	rowOffsetsCopy := make([]uint64, len(rowOffsets))
-	copy(rowOffsetsCopy, rowOffsets)
-	colIndicesCopy := make([]byte, len(colIndices))
-	copy(colIndicesCopy, colIndices)
-	return &Value{
-		typ: TypeAdjlist,
-		adjlistVal: AdjlistData{
-			IDWidth:    idWidth,
-			NodeCount:  nodeCount,
-			EdgeCount:  edgeCount,
-			RowOffsets: rowOffsetsCopy,
-			ColIndices: colIndicesCopy,
-		},
-	}
-}
-
-// RichText returns a rich text value with optional tokens and spans.
-func RichText(text string, tokens []int32, spans []RichTextSpan) *Value {
-	var tokensCopy []int32
-	if tokens != nil {
-		tokensCopy = make([]int32, len(tokens))
-		copy(tokensCopy, tokens)
-	}
-	var spansCopy []RichTextSpan
-	if spans != nil {
-		spansCopy = make([]RichTextSpan, len(spans))
-		copy(spansCopy, spans)
-	}
-	return &Value{
-		typ: TypeRichText,
-		richTextVal: RichTextData{
-			Text:   text,
-			Tokens: tokensCopy,
-			Spans:  spansCopy,
-		},
-	}
-}
-
-// Delta returns a delta value (semantic diff/patch).
-func Delta(baseID uint64, ops []DeltaOp) *Value {
-	opsCopy := make([]DeltaOp, len(ops))
-	copy(opsCopy, ops)
-	return &Value{
-		typ: TypeDelta,
-		deltaVal: DeltaData{
-			BaseID: baseID,
-			Ops:    opsCopy,
-		},
-	}
-}
-
 // Bitmask returns a bitmask value from a count and packed bits.
 // Bits should be ceil(count/8) bytes, LSB-first within each byte.
 func Bitmask(count uint64, bits []byte) *Value {
@@ -317,22 +264,4 @@ func EdgeBatch(edges []EdgeData) *Value {
 	}
 }
 
-// GraphShard returns a graph shard value (self-contained subgraph).
-func GraphShard(nodes []NodeData, edges []EdgeData, metadata map[string]any) *Value {
-	nodesCopy := make([]NodeData, len(nodes))
-	copy(nodesCopy, nodes)
-	edgesCopy := make([]EdgeData, len(edges))
-	copy(edgesCopy, edges)
-	metaCopy := make(map[string]any, len(metadata))
-	for k, v := range metadata {
-		metaCopy[k] = v
-	}
-	return &Value{
-		typ: TypeGraphShard,
-		graphShardVal: GraphShardData{
-			Nodes:    nodesCopy,
-			Edges:    edgesCopy,
-			Metadata: metaCopy,
-		},
-	}
-}
+

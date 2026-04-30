@@ -130,12 +130,6 @@ func ToGoAny(v *Value) any {
 		return v.imageVal
 	case TypeAudio:
 		return v.audioVal
-	case TypeAdjlist:
-		return v.adjlistVal
-	case TypeRichText:
-		return v.richTextVal
-	case TypeDelta:
-		return v.deltaVal
 	case TypeUnknownExt:
 		return v.unknownExtVal
 	default:

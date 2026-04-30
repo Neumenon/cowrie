@@ -171,15 +171,6 @@ func collectKeys(v *Value, d *dict) {
 		for _, edge := range v.edgeBatchVal.Edges {
 			collectKeysFromAnyMap(edge.Props, d)
 		}
-	case TypeGraphShard:
-		// Collect property keys from all nodes, edges, and metadata
-		for _, node := range v.graphShardVal.Nodes {
-			collectKeysFromAnyMap(node.Props, d)
-		}
-		for _, edge := range v.graphShardVal.Edges {
-			collectKeysFromAnyMap(edge.Props, d)
-		}
-		collectKeysFromAnyMap(v.graphShardVal.Metadata, d)
 	}
 }
 
@@ -366,59 +357,6 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		buf.writeUvarint(uint64(len(v.audioVal.Data)))
 		buf.write(v.audioVal.Data)
 
-	case TypeAdjlist:
-		buf.writeByte(TagAdjlist)
-		buf.writeByte(byte(v.adjlistVal.IDWidth))
-		buf.writeUvarint(v.adjlistVal.NodeCount)
-		buf.writeUvarint(v.adjlistVal.EdgeCount)
-		for _, offset := range v.adjlistVal.RowOffsets {
-			buf.writeUvarint(offset)
-		}
-		buf.write(v.adjlistVal.ColIndices)
-
-	case TypeRichText:
-		buf.writeByte(TagRichText)
-		buf.writeString(v.richTextVal.Text)
-		// Calculate flags
-		var flags byte
-		if len(v.richTextVal.Tokens) > 0 {
-			flags |= 0x01
-		}
-		if len(v.richTextVal.Spans) > 0 {
-			flags |= 0x02
-		}
-		buf.writeByte(flags)
-		// Write tokens if present
-		if flags&0x01 != 0 {
-			buf.writeUvarint(uint64(len(v.richTextVal.Tokens)))
-			for _, tok := range v.richTextVal.Tokens {
-				buf.writeInt32LE(tok)
-			}
-		}
-		// Write spans if present
-		if flags&0x02 != 0 {
-			buf.writeUvarint(uint64(len(v.richTextVal.Spans)))
-			for _, span := range v.richTextVal.Spans {
-				buf.writeUvarint(span.Start)
-				buf.writeUvarint(span.End)
-				buf.writeUvarint(span.KindID)
-			}
-		}
-
-	case TypeDelta:
-		buf.writeByte(TagDelta)
-		buf.writeUvarint(v.deltaVal.BaseID)
-		buf.writeUvarint(uint64(len(v.deltaVal.Ops)))
-		for _, op := range v.deltaVal.Ops {
-			buf.writeByte(byte(op.OpCode))
-			buf.writeUvarint(op.FieldID)
-			if op.OpCode == DeltaOpSetField || op.OpCode == DeltaOpAppendArray {
-				if err := encodeValue(buf, op.Value, d); err != nil {
-					return err
-				}
-			}
-		}
-
 	case TypeNode:
 		buf.writeByte(TagNode)
 		// ID
@@ -467,31 +405,6 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		buf.writeUvarint(uint64(len(v.edgeBatchVal.Edges)))
 		for _, edge := range v.edgeBatchVal.Edges {
 			if err := encodeEdgeData(buf, &edge, d); err != nil {
-				return err
-			}
-		}
-
-	case TypeGraphShard:
-		buf.writeByte(TagGraphShard)
-		// Nodes
-		buf.writeUvarint(uint64(len(v.graphShardVal.Nodes)))
-		for _, node := range v.graphShardVal.Nodes {
-			if err := encodeNodeData(buf, &node, d); err != nil {
-				return err
-			}
-		}
-		// Edges
-		buf.writeUvarint(uint64(len(v.graphShardVal.Edges)))
-		for _, edge := range v.graphShardVal.Edges {
-			if err := encodeEdgeData(buf, &edge, d); err != nil {
-				return err
-			}
-		}
-		// Metadata (dictionary-coded keys)
-		buf.writeUvarint(uint64(len(v.graphShardVal.Metadata)))
-		for k, metaVal := range v.graphShardVal.Metadata {
-			buf.writeUvarint(uint64(d.get(k)))
-			if err := encodeAny(buf, metaVal, d); err != nil {
 				return err
 			}
 		}

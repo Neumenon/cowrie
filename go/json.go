@@ -459,62 +459,6 @@ func ToAny(v *Value) any {
 			"data":     base64.StdEncoding.EncodeToString(aud.Data),
 		}
 
-	case TypeAdjlist:
-		adj := v.adjlistVal
-		return map[string]any{
-			"_type":       "adjlist",
-			"id_width":    idWidthToString(adj.IDWidth),
-			"node_count":  adj.NodeCount,
-			"edge_count":  adj.EdgeCount,
-			"row_offsets": adj.RowOffsets,
-			"col_indices": base64.StdEncoding.EncodeToString(adj.ColIndices),
-		}
-
-	case TypeRichText:
-		rt := v.richTextVal
-		result := map[string]any{
-			"_type": "rich_text",
-			"text":  rt.Text,
-		}
-		if len(rt.Tokens) > 0 {
-			tokens := make([]int, len(rt.Tokens))
-			for i, t := range rt.Tokens {
-				tokens[i] = int(t)
-			}
-			result["tokens"] = tokens
-		}
-		if len(rt.Spans) > 0 {
-			spans := make([]map[string]any, len(rt.Spans))
-			for i, s := range rt.Spans {
-				spans[i] = map[string]any{
-					"start":   s.Start,
-					"end":     s.End,
-					"kind_id": s.KindID,
-				}
-			}
-			result["spans"] = spans
-		}
-		return result
-
-	case TypeDelta:
-		d := v.deltaVal
-		ops := make([]map[string]any, len(d.Ops))
-		for i, op := range d.Ops {
-			opMap := map[string]any{
-				"op":       deltaOpCodeToString(op.OpCode),
-				"field_id": op.FieldID,
-			}
-			if op.Value != nil {
-				opMap["value"] = ToAny(op.Value)
-			}
-			ops[i] = opMap
-		}
-		return map[string]any{
-			"_type":   "delta",
-			"base_id": d.BaseID,
-			"ops":     ops,
-		}
-
 	case TypeUnknownExt:
 		ext := v.unknownExtVal
 		return map[string]any{
@@ -596,30 +540,6 @@ func audioEncodingToString(e AudioEncoding) string {
 		return "opus"
 	case AudioEncodingAAC:
 		return "aac"
-	default:
-		return "unknown"
-	}
-}
-
-func idWidthToString(w IDWidth) string {
-	switch w {
-	case IDWidthInt32:
-		return "int32"
-	case IDWidthInt64:
-		return "int64"
-	default:
-		return "unknown"
-	}
-}
-
-func deltaOpCodeToString(op DeltaOpCode) string {
-	switch op {
-	case DeltaOpSetField:
-		return "set_field"
-	case DeltaOpDeleteField:
-		return "delete_field"
-	case DeltaOpAppendArray:
-		return "append_array"
 	default:
 		return "unknown"
 	}
