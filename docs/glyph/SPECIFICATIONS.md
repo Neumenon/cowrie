@@ -19,7 +19,7 @@
 GLYPH has two main specifications:
 
 **1. GLYPH-Loose** - Schema-optional JSON-compatible mode
-- Drop-in JSON replacement
+- Accepts any valid JSON as input
 - Deterministic canonical form
 - Cross-language parity
 
@@ -37,7 +37,7 @@ GLYPH has two main specifications:
 
 ### Design Goals
 
-1. **Drop-in JSON replacement** - Any valid JSON is valid input
+1. **Accepts any valid JSON** - JSON inputs decode without modification
 2. **Deterministic canonical form** - Same data always produces same output
 3. **Cross-language parity** - Go, JS, Python produce identical output
 4. **Token efficiency** - More compact than JSON

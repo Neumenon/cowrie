@@ -2333,7 +2333,7 @@ opts := DecodeOptions{
   </tbody>
 </table>
 
-<p>Each row represents a real data type from the AI stack that JSON handles poorly. Cowrie doesn't replace JSON for configuration files or REST APIs &mdash; it replaces JSON where JSON's text encoding creates overhead that matters at scale: model serving, embedding pipelines, graph databases, and real-time inference.</p>
+<p>Each row represents a real data type from the AI stack that JSON handles poorly. Cowrie isn't aimed at config files or REST APIs &mdash; it's for places where JSON's text encoding creates overhead that matters at scale: model serving, embedding pipelines, and real-time inference.</p>
 
 <p>The overhead isn't just about bytes on the wire. Consider the encode/decode CPU cost: JSON must convert every number to/from ASCII text (multiple divisions and multiplications per digit), while Cowrie reads and writes numbers as fixed-width binary values. A 768-dimensional float32 embedding requires 768 float-to-text conversions in JSON; in Cowrie, it's a single memcpy of 3,072 bytes. For a model serving pipeline handling thousands of requests per second, this difference is the gap between needing one server and needing three.</p>
 

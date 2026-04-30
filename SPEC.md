@@ -60,10 +60,9 @@ Tag(0x35) | id:zigzag-varint | labelLen:varint | labelBytes | propCount:varint |
 Tag(0x36) | src:zigzag-varint | dst:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
 ```
 
-#### AdjList (0x30)
-```
-Tag(0x30) | idWidth:u8 (1=int32, 2=int64) | nodeCount:varint | edgeCount:varint | rowOffsets:(nodeCount+1)*varint | colIndices:edgeCount*(4|8 bytes based on idWidth)
-```
+#### Reserved (0x30)
+> Tag 0x30 (AdjList) is reserved (deprecated). Decoders MUST skip the
+> length-prefixed payload silently. Encoders MUST NOT emit it.
 
 #### NodeBatch (0x37)
 ```
@@ -75,10 +74,9 @@ Tag(0x37) | count:varint | Node*
 Tag(0x38) | count:varint | Edge*
 ```
 
-#### GraphShard (0x39)
-```
-Tag(0x39) | nodeCount:varint | Node* | edgeCount:varint | Edge* | metaCount:varint | (keyLen:varint | keyBytes | value)*
-```
+#### Reserved (0x39)
+> Tag 0x39 (GraphShard) is reserved (deprecated). Decoders MUST skip the
+> length-prefixed payload silently. Encoders MUST NOT emit it.
 
 ### Varint Encoding
 
@@ -124,7 +122,7 @@ The formats differ only in header presence and which tag ranges they use:
 | 0x00-0x0F | Core types (unified) | Core types (unified) |
 | 0x16-0x19 | Proto-tensor arrays | — (use Tensor 0x20 instead) |
 | 0x20-0x24 | — | ML extensions (Tensor, Image, Audio, Bitmask) |
-| 0x30-0x39 | Graph types (inline keys) | Graph types (dict-coded keys) + Delta/RichText |
+| 0x30-0x39 | Reserved (deprecated graph/Delta/RichText — decoders skip) | Reserved (deprecated graph/Delta/RichText — decoders skip) |
 | 0x40-0xEF | FIXINT/FIXARRAY/FIXMAP/FIXNEG | FIXINT/FIXARRAY/FIXMAP/FIXNEG |
 
 Gen2 adds dictionary coding (header contains string dictionary, Object/Graph keys use dictionary indices)
@@ -143,8 +141,7 @@ Byte 3:    Flags
            - Bit 0: Compressed
            - Bits 1-2: Compression type (0=none, 1=gzip, 2=zstd)
            - Bit 3: Has column hints
-Bytes 4+:  [ColumnHints] (if FlagHasColumnHints set)
-           DictLen:varint
+Bytes 4+:  DictLen:varint
            Dict: DictLen * (len:varint + UTF-8 bytes)
            RootValue: encoded value
 ```
@@ -157,26 +154,7 @@ Flags are bit-packed in byte 3 of the header:
 |--------|------|---------|
 | 0 | Compressed | If set, payload is compressed and framed (see Compression Framing). |
 | 1-2 | Compression type | 0=none, 1=gzip, 2=zstd. Only valid if Compressed=1. |
-| 3 | Has column hints | If set, a ColumnHints block appears before DictLen. |
-
-### Column Hints
-
-Column hints are optional metadata for columnar readers. They appear immediately
-after the header **only** when FlagHasColumnHints is set, and **before** DictLen.
-
-```
-ColumnHints:
-  HintCount: varint
-  Repeat HintCount times:
-    Field: [len:varint][utf8 bytes]
-    Type:  u8
-    ShapeLen: varint
-    ShapeDims: ShapeLen * varint
-    Flags: u8
-```
-
-If the flag is set, decoders MUST skip or parse this block before reading DictLen.
-Malformed hints MUST result in a decode error.
+| 3 | (Reserved) | Bit 3 was FlagHasColumnHints in earlier drafts. Reserved — decoders MUST skip. |
 
 ### Type Tags
 
@@ -220,13 +198,11 @@ Bit ordering: LSB-first within each byte. Bit `i` is at `bytes[i/8] & (1 << (i%8
 Use cases: attention masks, padding masks, train/val/test splits, boolean selections.
 A 2048-element mask encodes in 259 bytes vs ~4000+ bytes as an int array.
 
-### Delta/RichText Tags (0x30-0x34)
+### Reserved Tags (0x30-0x32)
 
-| Tag | Type | Encoding |
-|-----|------|----------|
-| 0x30 | AdjList | idWidth:u8 + nodeCount:varint + edgeCount:varint + rowOffsets + colIndices |
-| 0x31 | RichText | text:string + flags:u8 + [tokens:count + int32*] + [spans:count + (start,end,kind)*] |
-| 0x32 | Delta | baseId:varint + opCount:varint + ops |
+Tags 0x30 (AdjList), 0x31 (RichText), and 0x32 (Delta) are reserved (deprecated).
+Decoders MUST skip the length-prefixed payload silently. Encoders MUST NOT emit
+these tags. The historical implementation lives in `attic/`.
 
 ### Graph Extension Tags (0x35-0x39)
 
@@ -236,7 +212,7 @@ A 2048-element mask encodes in 259 bytes vs ~4000+ bytes as an int array.
 | 0x36 | Edge | srcId:string + dstId:string + type:string + propCount:varint + (dictIdx:varint + value)* |
 | 0x37 | NodeBatch | count:varint + Node[count] |
 | 0x38 | EdgeBatch | count:varint + Edge[count] |
-| 0x39 | GraphShard | nodeCount:varint + Node* + edgeCount:varint + Edge* + metaCount:varint + (dictIdx:varint + value)* |
+| 0x39 | Reserved (deprecated GraphShard — decoders MUST skip) | length-prefixed |
 
 ### v3 Inline Types (0x40-0xEF)
 
@@ -312,7 +288,6 @@ Implementations may allow overrides; “unlimited” must be explicit (not defau
 | MaxBytesLen | 1,000,000,000 | Maximum bytes length (also tensor/image/audio) |
 | MaxDictLen | 10,000,000 | Maximum dictionary entries |
 | MaxExtLen | 100,000,000 | Maximum TagExt payload length |
-| MaxHintCount | 10,000 | Maximum column hints |
 | MaxRank | 32 | Maximum tensor rank (dims count) |
 
 ### Tensor Rank Limits
@@ -395,39 +370,13 @@ Tag(0x38) | count:varint | Edge[0] | Edge[1] | ... | Edge[count-1]
 
 Used for bulk edge loading. Edges encoded in COO (Coordinate) format.
 
-#### GraphShard (0x39)
-```
-Tag(0x39) | nodeCount:varint | Node* | edgeCount:varint | Edge* | metaCount:varint | (dictIdx:varint | value)*
-```
-
-Self-contained subgraph for:
-- GNN mini-batch checkpointing
-- Distributed graph processing
-- Graph database snapshots
-- Streaming graph partitions
-
-**Example**:
-```json
-{
-  "nodes": [
-    {"id": "1", "labels": ["Node"], "props": {"x": 0.1}},
-    {"id": "2", "labels": ["Node"], "props": {"x": 0.2}}
-  ],
-  "edges": [
-    {"from": "1", "to": "2", "type": "EDGE", "props": {"weight": 0.85}}
-  ],
-  "metadata": {"version": 1, "partitionId": 42}
-}
-```
-
 ### Dictionary Integration for Graph Types
 
 Graph property keys are collected into the shared dictionary during the first encoding pass:
 
 1. Traverse all Node.props keys
 2. Traverse all Edge.props keys
-3. Traverse all GraphShard.metadata keys
-4. Add to dictionary (same as Object keys)
+3. Add to dictionary (same as Object keys)
 
 This enables significant size savings when graphs have many nodes/edges with repeated property schemas.
 

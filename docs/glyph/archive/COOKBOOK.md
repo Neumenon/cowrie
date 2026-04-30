@@ -7,7 +7,7 @@ Practical recipes for common use cases. All examples are copy-paste ready.
 ## Table of Contents
 
 1. [Tool Calling with Streaming Validation](#1-tool-calling-with-streaming-validation)
-2. [Drop-in JSON Replacement](#2-drop-in-json-replacement)
+2. [JSON Bridge](#2-json-bridge)
 3. [Agent Memory & State Management](#3-agent-memory--state-management)
 4. [Batch Data with Tabular Mode](#4-batch-data-with-tabular-mode)
 5. [Real-time Progress Streaming](#5-real-time-progress-streaming)
@@ -122,7 +122,7 @@ asyncio.run(stream_with_validation("What's the weather in Tokyo?"))
 
 ---
 
-## 2. Drop-in JSON Replacement
+## 2. JSON Bridge
 
 **Problem:** You have existing JSON-based code but want token savings without a rewrite.
 

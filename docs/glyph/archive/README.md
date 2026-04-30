@@ -13,7 +13,7 @@ Original comprehensive cookbook with 10 detailed recipes.
 
 **Use cases covered:**
 1. Tool Calling with Streaming Validation
-2. Drop-in JSON Replacement
+2. JSON Bridge
 3. Agent Memory & State Management
 4. Batch Data with Tabular Mode
 5. Real-time Progress Streaming

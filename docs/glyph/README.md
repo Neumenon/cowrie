@@ -75,7 +75,7 @@ result = glyph.parse(text)
 print(result.value["home"])  # Arsenal
 ```
 
-### Drop-in JSON Replacement
+### JSON Bridge
 
 ```python
 import glyph
@@ -460,7 +460,7 @@ glyph.parse("[1, 2, 3]")      # Comma-separated list
 | State-verified patches | ✅ | ❌ | ❌ | ❌ |
 | No code generation | ✅ | ✅ | ❌ | ✅ |
 | Tabular mode | ✅ | ❌ | ❌ | ❌ |
-| Drop-in JSON replacement | ✅ | — | ❌ | ❌ |
+| JSON bridge (round-trips) | ✅ | — | ❌ | ❌ |
 
 ---
 
@@ -680,7 +680,7 @@ func main() {
 }
 ```
 
-### Drop-in JSON Replacement
+### JSON Bridge
 
 ```go
 // Convert JSON to GLYPH

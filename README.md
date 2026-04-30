@@ -1,9 +1,18 @@
-# Cowrie - Structured JSON Binary Codec
+# Cowrie — Structured Binary Codec
 
-A multi-language binary JSON codec with two variants:
+A multi-language binary codec for structured data with native ML extensions:
 
-- **Gen1**: Lightweight codec with proto-tensor support (16 core types + 4 proto-tensor + graph types)
-- **Gen2**: Full Cowrie v2 with ML extensions (20+ types, dictionary coding, compression)
+- **Gen1**: Lightweight codec — 16 core types + 4 proto-tensor types
+- **Gen2**: Full Cowrie v2 — 20+ types, dictionary coding, compression, schema fingerprint
+
+Cowrie's lead value is **deterministic encoding with native bytes (0x08), tensors
+(0x20), tensor refs (0x21), and a stable schema fingerprint** — useful where
+JSON's text shape and lack of binary primitives are the bottleneck.
+
+> **Reserved tags.** Tags `0x30` (AdjList), `0x31` (RichText), `0x32` (Delta),
+> and `0x39` (GraphShard) are deprecated. Decoders MUST skip their
+> length-prefixed payloads silently. Encoders MUST NOT emit them. The original
+> graph / rich-text / delta implementations live under `attic/`.
 
 ## Features
 
@@ -14,7 +23,6 @@ A multi-language binary JSON codec with two variants:
 | Dictionary coding | No | Yes |
 | Compression | No | gzip/zstd |
 | Schema fingerprint | No | Yes |
-| Graph types | 6 | 6 (Node, Edge, NodeBatch, EdgeBatch, GraphShard, Adjlist) |
 
 ## Language Implementations
 
@@ -23,8 +31,8 @@ A multi-language binary JSON codec with two variants:
 | Go | Yes | Yes | Complete |
 | Rust | Yes | Yes | Complete |
 | Python | Yes | Yes | Complete |
-| C | Yes (core + proto-tensor) | Yes | Partial (Gen1 graph types pending) |
-| TypeScript | Yes (core + proto-tensor) | Yes | Partial (Gen1 graph types pending) |
+| C | Yes | Yes | Complete |
+| TypeScript | Yes | Yes | Complete |
 
 ## Install
 
