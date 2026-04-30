@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Scope cut — graph types, RichText, Delta, ColumnHints parked
+
+Wire-format tags `0x30` (Adjlist), `0x31` (RichText), `0x32` (Delta), and
+`0x39` (GraphShard) are now reserved (deprecated). Encoders no longer emit
+them; decoders skip the length-prefixed payload silently. The dedicated
+packages (`go/graph/`, `go/gnn/`, `go/ld/`, `go/delta/`, hints/column
+helpers) moved to `attic/` — revivable but not built or tested by default.
+
+The `FlagHasColumnHints = 0x08` header bit remains listed but is reserved;
+decoders MUST skip it.
+
+**Fingerprint impact**: schema fingerprints of any historical objects that
+contained Adjlist, RichText, Delta, or GraphShard values will change after
+this cut, since their switch arms are gone. Acceptable because those types
+were experimental and not in production use.
+
 ## v2.0.0 (2026-02-26)
 
 Initial public release of Cowrie — a multi-language binary codec for structured data with ML extensions.
