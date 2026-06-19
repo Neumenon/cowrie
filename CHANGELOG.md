@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Fixed — graph-type cross-language determinism; added Gen1 fixtures
+
+Graph types (Node/Edge/NodeBatch/EdgeBatch, 0x35-0x38) now encode prop keys in
+UTF-8 byte order in **all** implementations, so deterministic encoding is
+byte-identical across Go, Rust, Python, and TypeScript. Previously Go assigned
+dictionary indices and emitted node/edge props in random map order; Python's and
+TypeScript's deterministic encoders had no graph arms and silently produced
+empty/zero-byte payloads. Each non-Go impl now pins a regression test to the Go
+canonical bytes. (Graph tags 0x35-0x38 remain active — see CUTLIST §6 D2.)
+
+Added the first Gen1 cross-language fixtures (`testdata/fixtures/gen1/`): core
+object/array/int/string plus Float64Array (0x17) and Float32Array (0x18)
+proto-tensors. The fixture manifest grows 34 → 40 cases.
+
 ### Dropped — C implementation; Glyph consolidated to Go-only
 
 The standalone C implementation (`c/`, incl. `c/glyph/`) is removed. It published

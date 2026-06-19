@@ -190,17 +190,20 @@ The original drop case is kept below for the record.
   SPEC + CHANGELOG so Gen1 keeps AdjList/GraphShard (the natural fit for "preserve
   Gen1"); or (b) also remove AdjList/GraphShard from Gen1 (a partial Gen1 cut).
 
-### D2 — Reserve graph wire tags `0x35-0x38` (Node/Edge/NodeBatch/EdgeBatch)
-- **For:** the app layer (`go/graph`, `go/gnn`, 8,875 LOC) is already attic'd;
-  two soundness bugs while active — Python `DeterministicEncoder` silently emits
-  zero bytes for these types; Go `encodeNodeData`/`encodeEdgeData` iterate props
-  by map-range (non-deterministic for ≥2 props).
-- **Against / reality:** SPEC still lists `0x35-0x38` as **active**; only
-  `0x30-0x32` and `0x39` are reserved. This is a wire-format breaking change (4
-  currently-passing fixtures would become `ERR_TRAILING_DATA`).
-- **Decision needed:** reserve them (then stub encoder+decoder arms in all impls,
-  update SPEC + CHANGELOG + `attic/README.md`) **or** keep them and *fix* the two
-  soundness bugs (sort props; add the missing deterministic-encoder arms).
+### D2 — ✅ RESOLVED 2026-06-19: **KEEP graph tags `0x35-0x38`, fixed to cross-language parity.**
+Chose "keep and fix" over "reserve." Graph types stay active and are now
+byte-identical across Go/Rust/Python/TS under deterministic encoding (commit
+`7c84c8f`). The two soundness bugs — plus a third the review missed — are fixed:
+- Go: random map-range in `encodeNodeData`/`encodeEdgeData` **and** randomized
+  dict-index assignment in `collectKeysFromAnyMap` → now sorted by UTF-8 byte order.
+- Python: `DeterministicEncoder` emitted **zero bytes** for graph types → graph
+  arms added; normal encoder now sorts props too.
+- TypeScript: deterministic `writeValueSorted` had no graph arms (near-empty
+  payload) → arms added; normal encoder sorts.
+- Rust: already correct (BTreeMap); pinned tests added.
+All four pin to the same Go canonical hex. No fixtures broke (still 0 graph
+`ERR_TRAILING_DATA`); the 4 graph decode fixtures still pass. SPEC already lists
+`0x35-0x38` as active, so no SPEC change was needed.
 
 ---
 
