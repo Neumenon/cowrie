@@ -38,7 +38,7 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 
 ```bash
 # Go
-go get github.com/Neumenon/cowrie/go@v2.0.0
+go get github.com/Neumenon/cowrie/go/v2@v2.0.0
 
 # Python
 pip install cowrie-py
@@ -64,8 +64,8 @@ cd cowrie/c && mkdir -p build && cd build && cmake .. && make
 
 ```go
 import (
-    cowrie "github.com/Neumenon/cowrie"
-    "github.com/Neumenon/cowrie/gen1"
+    cowrie "github.com/Neumenon/cowrie/go/v2"
+    "github.com/Neumenon/cowrie/go/v2/gen1"
 )
 
 // Gen1
@@ -240,16 +240,16 @@ Gen2 graph data structures (Node/Edge/NodeBatch/EdgeBatch — 0x35-0x38):
 
 ```go
 // Go - Gen2 Graph Types
-node := cowrie.NewNode("person_42", []string{"Person", "Employee"}, map[string]any{
+node := cowrie.Node("person_42", []string{"Person", "Employee"}, map[string]any{
     "name": "Alice",
     "age":  int64(30),
 })
 
-edge := cowrie.NewEdge("person_42", "company_1", "WORKS_AT", map[string]any{
+edge := cowrie.Edge("person_42", "company_1", "WORKS_AT", map[string]any{
     "since": int64(2020),
 })
 
-batch := cowrie.NewNodeBatch([]cowrie.NodeData{node.Node()})
+batch := cowrie.NodeBatch([]cowrie.NodeData{node.Node()})
 ```
 
 > **Note:** Tag 0x39 (GraphShard) is reserved and no longer emitted. Use
