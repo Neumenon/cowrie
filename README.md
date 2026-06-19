@@ -56,7 +56,7 @@ cd cowrie/c && mkdir -p build && cd build && cmake .. && make
 
 ## Benchmarks
 
-- [vLLM serialization comparison](benchmarks/vllm/) — Cowrie vs msgpack/pickle/JSON for inference payloads (5x compression on embeddings, zero-copy tensor decode)
+- [vLLM serialization benchmark](go/vllm_bench_test.go) — Cowrie vs JSON for inference payloads (~4.8x compression on a 1536-dim float32 embedding, zero-copy tensor decode)
 
 ## Quick Start
 
@@ -316,11 +316,8 @@ See [SPEC.md](SPEC.md) for the complete wire format specification.
 Run benchmarks:
 
 ```bash
-# Go
+# Go (includes the vLLM serialization benchmarks)
 cd go && go test -bench=. -benchmem ./...
-
-# Python
-cd python && python ../benchmarks/bench_python.py
 
 # Rust
 cd rust && cargo bench

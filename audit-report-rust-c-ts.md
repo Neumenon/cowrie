@@ -1,5 +1,11 @@
 # Cowrie Audit Report — Rust, C, TypeScript
 
+> ⚠️ **SUPERSEDED / PARTIALLY STALE (2026-06-19).** All Tier A items in this
+> report were applied before it was committed. The schema-fingerprint ordinal
+> bug it documents was fixed in commit `3855080` and no longer exists (its
+> evidence cited the *correct* current values as the bug). Tier B items B3–B6
+> may still be actionable. See `CUTLIST.md` for the current decision set.
+
 **Mode:** Audit-only (no code changes applied).
 **Scope:** `rust/`, `c/`, `typescript/`. Go + Python already cleaned in prior session (commits 302966c..5d3ca3f).
 **Source:** 8 parallel subagent reports (DRY, types, unused, cycles, weak-types, defensive-errors, legacy, AI-slop).

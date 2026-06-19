@@ -478,7 +478,6 @@ All implementations MUST produce byte-identical canonical forms.
 - [Agent Patterns](AGENTS.md) - AI integration
 
 **Research:**
-- [Codec Benchmarks](../../benchmarks/README.md)
 - [Top-level Cowrie Benchmarks](../../README.md#benchmarks)
 
 ---

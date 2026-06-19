@@ -582,12 +582,12 @@ print(f"Token savings: {savings:.1f}%")
 - [API Reference](API_REFERENCE.md) - Per-language APIs
 
 **Examples:**
-- [Cookbook](archive/COOKBOOK.md) - 10 detailed recipes
+- [Cookbook](COOKBOOK.md) - 10 detailed recipes
 - [GLYPH Quickstart](QUICKSTART.md) - End-to-end examples
 
 **Research:**
 - [GLYPH Specifications](SPECIFICATIONS.md) - Protocol and format details
-- [Codec Benchmarks](../../benchmarks/README.md) - Speed and efficiency metrics
+- [Top-level Cowrie Benchmarks](../../README.md#benchmarks) - Speed and efficiency metrics
 
 ---
 
