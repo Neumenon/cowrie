@@ -1973,6 +1973,12 @@ def _type_to_ord(t: Type) -> int:
         Type.TENSOR_REF: 14,
         Type.IMAGE: 15,
         Type.AUDIO: 16,
+        Type.NODE: 17,
+        Type.EDGE: 18,
+        Type.NODE_BATCH: 19,
+        Type.EDGE_BATCH: 20,
+        Type.BITMASK: 21,
+        Type.UNKNOWN_EXT: 22,
     }
     return mapping.get(t, 0xFF)
 
@@ -2008,13 +2014,19 @@ def _hash_schema(v: Value, h: int) -> int:
         img = v.data  # ImageData
         h = _fnv_hash_byte(h, img.format)
     elif v.type == Type.AUDIO:
-        # Include encoding in schema (sample_rate, channels are data)
+        # Include encoding AND channels in schema (sample_rate is data) — matches
+        # the Go reference (schema.go hashes encoding then channels).
         aud = v.data  # AudioData
         h = _fnv_hash_byte(h, aud.encoding)
+        h = _fnv_hash_byte(h, aud.channels)
     elif v.type == Type.TENSOR_REF:
         # Include store_id in schema (key is data)
         ref = v.data  # TensorRefData
         h = _fnv_hash_byte(h, ref.store_id)
+    elif v.type == Type.UNKNOWN_EXT:
+        # Include ext type in schema (payload is data) — matches Go.
+        ext = v.data  # UnknownExtData
+        h = _fnv_hash_u64(h, ext.ext_type)
 
     return h
 

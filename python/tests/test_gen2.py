@@ -1322,6 +1322,21 @@ class TestSchemaFingerprint:
         v2 = Value.object({"x": Value.int64(999)})
         assert schema_equals(v1, v2)
 
+    def test_schema_fingerprint_cross_lang_audio_ext(self):
+        """Audio (encoding+channels) and unknown_ext fingerprints match the Go reference.
+
+        Before the parity fix, _type_to_ord stopped at AUDIO (returning 0xff for
+        unknown_ext) and audio omitted channels, so these silently disagreed with Go.
+        """
+        d = bytes([1, 2, 3])
+        a2 = Value.audio(AudioEncoding.PCM_INT16, 44100, 2, d)
+        a1 = Value.audio(AudioEncoding.PCM_INT16, 44100, 1, d)
+        # Ground truth from the Go reference implementation.
+        assert schema_fingerprint32(a2) == 3129750488
+        assert schema_fingerprint32(a1) == 3129751793
+        assert schema_fingerprint32(a1) != schema_fingerprint32(a2)  # channels are schema
+        assert schema_fingerprint32(Value.unknown_ext(99, d)) == 2917281034
+
     def test_schema_fingerprint_scalar_types(self):
         """Different scalar types have different fingerprints."""
         fp_int = schema_fingerprint64(Value.int64(1))

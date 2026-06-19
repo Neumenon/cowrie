@@ -15,6 +15,7 @@ import {
   SJ,
   Value,
   Type,
+  AudioEncoding,
   encode,
   decode,
   encodeWithOpts,
@@ -261,6 +262,20 @@ test("bitmask schema fingerprint matches Go (regression: typeToOrd must not retu
     "12638165210323077776",
     "bitmask fp64 must match Go",
   );
+});
+
+test("audio + unknown_ext schema fingerprints match Go (regression: channels + extType)", () => {
+  // Ground truth from the Go reference. Before this fix, TS omitted Audio channels
+  // (so ch1 == ch2, disagreeing with Go) and returned 0xff for UNKNOWN_EXT.
+  const d = new Uint8Array([1, 2, 3]);
+  const a2 = SJ.audio(AudioEncoding.PCM_INT16, 44100, 2, d);
+  const a1 = SJ.audio(AudioEncoding.PCM_INT16, 44100, 1, d);
+  assertEqual(schemaFingerprint32(a2), 3129750488, "audio ch=2 fp must match Go");
+  assertEqual(schemaFingerprint32(a1), 3129751793, "audio ch=1 fp must match Go");
+  if (schemaFingerprint32(a1) === schemaFingerprint32(a2)) {
+    throw new Error("audio channels must affect the schema fingerprint");
+  }
+  assertEqual(schemaFingerprint32(SJ.unknownExt(99, d)), 2917281034, "unknown_ext fp must match Go");
 });
 
 test("schema1 and schema2 have same fingerprint", () => {

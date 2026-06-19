@@ -38,8 +38,8 @@ pub fn schema_equals(a: &Value, b: &Value) -> bool {
 /// Map Value variant to Go's Type enum for cross-language fingerprint compatibility.
 /// Go's Type enum (iota): Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
 /// String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
-/// Tensor=13, TensorRef=14, Image=15, Audio=16, UnknownExt=17 (was 20),
-/// Node=18, Edge=19, NodeBatch=20, EdgeBatch=21
+/// Tensor=13, TensorRef=14, Image=15, Audio=16,
+/// Node=17, Edge=18, NodeBatch=19, EdgeBatch=20, Bitmask=21, UnknownExt=22
 fn value_type_ord(value: &Value) -> u8 {
     match value {
         Value::Null => 0,
@@ -59,12 +59,12 @@ fn value_type_ord(value: &Value) -> u8 {
         Value::TensorRef(_) => 14,
         Value::Image(_) => 15,
         Value::Audio(_) => 16,
-        Value::Ext(_) => 17,
-        Value::Node(_) => 18,
-        Value::Edge(_) => 19,
-        Value::NodeBatch(_) => 20,
-        Value::EdgeBatch(_) => 21,
-        Value::Bitmask { .. } => 22,
+        Value::Node(_) => 17,
+        Value::Edge(_) => 18,
+        Value::NodeBatch(_) => 19,
+        Value::EdgeBatch(_) => 20,
+        Value::Bitmask { .. } => 21,
+        Value::Ext(_) => 22,
     }
 }
 
@@ -119,37 +119,10 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
             h = fnv_hash_u64(h, ext.type_id);
         }
 
-        // Graph types
-        Value::Node(node) => {
-            h = fnv_hash_u64(h, node.labels.len() as u64);
-            h = fnv_hash_u64(h, node.props.len() as u64);
-            for (key, val) in &node.props {
-                h = fnv_hash_string(h, key);
-                h = hash_schema(val, h);
-            }
-        }
-        Value::Edge(edge) => {
-            h = fnv_hash_u64(h, edge.props.len() as u64);
-            for (key, val) in &edge.props {
-                h = fnv_hash_string(h, key);
-                h = hash_schema(val, h);
-            }
-        }
-        Value::NodeBatch(batch) => {
-            h = fnv_hash_u64(h, batch.nodes.len() as u64);
-            for node in &batch.nodes {
-                h = hash_schema(&Value::Node(node.clone()), h);
-            }
-        }
-        Value::EdgeBatch(batch) => {
-            h = fnv_hash_u64(h, batch.edges.len() as u64);
-            for edge in &batch.edges {
-                h = hash_schema(&Value::Edge(edge.clone()), h);
-            }
-        }
-        Value::Bitmask { count, .. } => {
-            h = fnv_hash_u64(h, *count);
-        }
+        // Graph types and bitmask: the Go reference hashes only the type ordinal
+        // (no structural recursion), so match that for cross-language parity.
+        Value::Node(_) | Value::Edge(_) | Value::NodeBatch(_)
+        | Value::EdgeBatch(_) | Value::Bitmask { .. } => {}
     }
 
     h
@@ -297,5 +270,25 @@ mod tests {
         let fp32 = schema_fingerprint32(&obj);
 
         assert_eq!(fp32, fp64 as u32);
+    }
+
+    #[test]
+    fn test_fingerprint_cross_lang_audio_ext() {
+        // Ground truth from the Go reference. Audio must hash encoding AND channels
+        // (so ch=1 and ch=2 differ); Ext uses ordinal 22 + type_id. Before the
+        // parity fix, Rust placed Ext at ordinal 17 and recursed into graph/bitmask.
+        use crate::gen2::types::{AudioData, AudioEncoding, ExtData};
+        let d = vec![1u8, 2, 3];
+        let a2 = Value::Audio(AudioData {
+            encoding: AudioEncoding::PcmInt16, sample_rate: 44100, channels: 2, data: d.clone(),
+        });
+        let a1 = Value::Audio(AudioData {
+            encoding: AudioEncoding::PcmInt16, sample_rate: 44100, channels: 1, data: d.clone(),
+        });
+        let ext = Value::Ext(ExtData { type_id: 99, payload: d.clone() });
+        assert_eq!(schema_fingerprint32(&a2), 3129750488, "audio ch=2 must match Go");
+        assert_eq!(schema_fingerprint32(&a1), 3129751793, "audio ch=1 must match Go");
+        assert_ne!(schema_fingerprint32(&a1), schema_fingerprint32(&a2));
+        assert_eq!(schema_fingerprint32(&ext), 2917281034, "ext must match Go");
     }
 }

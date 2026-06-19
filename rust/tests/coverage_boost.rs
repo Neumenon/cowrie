@@ -1003,9 +1003,11 @@ fn schema_ext_includes_type_id() {
 
 #[test]
 fn schema_bitmask() {
+    // Go parity: a bitmask's schema is the type ordinal alone; count/bits are
+    // data, not schema, so two bitmasks of different sizes hash identically.
     let b1 = Value::Bitmask { count: 8, bits: vec![0xFF] };
     let b2 = Value::Bitmask { count: 16, bits: vec![0xFF, 0xFF] };
-    assert_ne!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
+    assert_eq!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
 }
 
 #[test]

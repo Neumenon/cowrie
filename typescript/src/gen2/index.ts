@@ -1799,12 +1799,9 @@ function typeToOrd(type: Type): number {
       return 15;
     case Type.AUDIO:
       return 16;
-    // Graph types and bitmask use Go's byte(Type) iota ordinals. Go's hashSchema
-    // does not structurally recurse for any of these (only the type byte is
-    // hashed), and neither does hashSchema below, so the ordinal alone aligns the
-    // fingerprint with the Go reference. (UNKNOWN_EXT is deliberately NOT mapped
-    // here: Go additionally hashes its ExtType, which hashSchema below does not
-    // yet mirror — see the cross-language fingerprint parity task.)
+    // Graph types, bitmask, and unknown-ext use Go's byte(Type) iota ordinals so
+    // fingerprints match the Go reference. hashSchema below mirrors Go's per-type
+    // recursion (graph types add nothing; UNKNOWN_EXT additionally hashes extType).
     case Type.NODE:
       return 17;
     case Type.EDGE:
@@ -1815,6 +1812,8 @@ function typeToOrd(type: Type): number {
       return 20;
     case Type.BITMASK:
       return 21;
+    case Type.UNKNOWN_EXT:
+      return 22;
     default:
       return 0xff;
   }
@@ -1875,9 +1874,10 @@ function hashSchema(v: Value, h: bigint): bigint {
     }
 
     case Type.AUDIO: {
-      // Include encoding in schema (sample_rate, channels are data)
+      // Include encoding AND channels in schema (sample_rate is data) — matches Go.
       const aud = v.data as AudioData;
       h = fnvHashByte(h, aud.encoding);
+      h = fnvHashByte(h, aud.channels);
       break;
     }
 
@@ -1885,6 +1885,13 @@ function hashSchema(v: Value, h: bigint): bigint {
       // Include store_id in schema (key is data)
       const ref = v.data as TensorRefData;
       h = fnvHashByte(h, ref.storeId);
+      break;
+    }
+
+    case Type.UNKNOWN_EXT: {
+      // Include ext type in schema (payload is data) — matches Go.
+      const ext = v.data as UnknownExtData;
+      h = fnvHashU64(h, ext.extType);
       break;
     }
   }
