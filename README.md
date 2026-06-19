@@ -109,22 +109,6 @@ val = gen2.from_any({"name": "Alice"})
 data = gen2.encode(val)
 ```
 
-### C
-
-```c
-#include "cowrie_gen1.h"
-
-cowrie_g1_value_t *obj = cowrie_g1_object(2);
-cowrie_g1_object_set(obj, "name", cowrie_g1_string("Alice", 5));
-cowrie_g1_object_set(obj, "count", cowrie_g1_int64(42));
-
-cowrie_g1_buf_t buf;
-cowrie_g1_encode(obj, &buf);
-
-cowrie_g1_value_t *decoded;
-cowrie_g1_decode(buf.data, buf.len, &decoded);
-```
-
 ### TypeScript
 
 ```typescript
@@ -297,6 +281,13 @@ frame, _ = read_master_frame(payload)
 ## Wire Format
 
 See [SPEC.md](SPEC.md) for the complete wire format specification.
+
+## Glyph (text format)
+
+Cowrie ships with **Glyph**, a sibling *text* serialization that encodes the same
+values as token-efficient, human-readable text (a JSON bridge for LLM payloads).
+It is maintained in Go under [`go/glyph/`](go/glyph/); see
+[`docs/glyph/`](docs/glyph/) for the guide, quickstart, and specs.
 
 ## Benchmarks
 

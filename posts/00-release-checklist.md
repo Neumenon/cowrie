@@ -2,14 +2,13 @@
 
 ## Current Package Names & Versions
 
-### Cowrie (`cowrie-final/`)
+### Cowrie (`cowrie/`)
 | Registry | Package | Version | File |
 |----------|---------|---------|------|
 | npm | `cowrie-codec` | 2.0.0 | `typescript/package.json` |
 | PyPI | `cowrie-py` | 2.0.0 | `python/pyproject.toml` |
 | crates.io | `cowrie-rs` | 2.0.0 | `rust/Cargo.toml` |
-| Go | `github.com/Neumenon/cowrie` | untagged | `go/go.mod` |
-| C | (source-only) | 2.0.0 | `c/CMakeLists.txt` |
+| Go | `github.com/Neumenon/cowrie/go/v2` | untagged | `go/go.mod` |
 
 ### Glyph (`glyph/`)
 | Registry | Package | Version | File |
@@ -43,12 +42,11 @@ Bump version in ALL files for the target package:
 
 **Cowrie:**
 ```bash
-cd cowrie-final
+cd cowrie
 cd go && go test ./... && cd ..
 cd python && pip install -e ".[dev]" && pytest tests/ && cd ..
 cd typescript && npm ci && npm test && cd ..
 cd rust && cargo test && cd ..
-cd c && mkdir -p build && cd build && cmake .. && make && ctest --output-on-failure && cd ../..
 ```
 
 **Glyph:**
@@ -118,10 +116,8 @@ Create release on GitHub with changelog notes.
 
 ## Known Issues
 
-1. **Stale glyph copies in cowrie-final**: `cowrie-final/typescript/glyph/` (`glyph-codec`) and `cowrie-final/python/glyph/` (`glyph-serial`) are dead code — never published. Canonical packages publish from `glyph/` repo. Consider deleting these stale dirs.
+1. **Glyph go.mod replace directive**: `glyph/go/go.mod` has a `replace` pointing to cowrie within the cogs workspace (for `bridge.go` build tag). Must remove before tagging for Go proxy.
 
-2. **Glyph go.mod replace directive**: `glyph/go/go.mod` has a `replace` pointing to cowrie within the cogs workspace (for `bridge.go` build tag). Must remove before tagging for Go proxy.
+2. **Shard Python/C not implemented**: Only npm and crates.io packages exist.
 
-3. **Shard Python/C not implemented**: Only npm and crates.io packages exist.
-
-4. **Existing release script**: `cowrie-final/release.sh` exists — check if it's up to date before using.
+3. **Existing release script**: `cowrie/release.sh` exists — check if it's up to date before using.
