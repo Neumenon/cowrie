@@ -173,18 +173,22 @@ These affect shipped artifacts **now** and are independent of every drop decisio
 The adversarial pass **refuted** these as "already-decided." They are defensible
 proposals but are *product/spec decisions you have not recorded*:
 
-### D1 — Drop Gen1 entirely (~9,500 LOC across 5 langs)
-- **For:** live spec violation (every Gen1 encoder emits `0x30`/`0x39` that SPEC
-  says "MUST NOT emit"); `Float32Array` (0x18) missing in 4 of 5 impls; zero
-  fixture coverage; no-header design conflicts with the Gen2 fingerprint/routing
-  direction.
-- **Against / reality:** SPEC documents Gen1 as active (lines 7, 10-131); all 5
-  impls ship it; **no CHANGELOG/planning record of a drop**; unknown external
-  consumers; Go/Rust/C retain a real 2–2.4× structured-decode advantage.
-- **Decision needed:** retire Gen1 (then delete `go/gen1/`, `rust/src/gen1/`,
-  `python/cowrie/gen1.py`, `typescript/src/gen1/`, `c/src/gen1.c`, the SPEC Gen1
-  sections, and the post Gen1 content) **or** keep it and *fix* the spec
-  violation instead.
+### D1 — ✅ RESOLVED 2026-06-19: **PRESERVE Gen1 for now.**
+Gen1 stays. No Gen1 code, SPEC Gen1 sections, or post Gen1 content is removed.
+The original drop case is kept below for the record.
+- **For (drop):** `0x30`/`0x39` emission vs the reserved-tag note; `Float32Array`
+  (0x18) missing in some impls; zero Gen1 fixture coverage; no-header design.
+- **Against (keep):** SPEC documents Gen1 as active; all impls ship it; no recorded
+  drop; unknown external consumers; Go/Rust retain a 2–2.4× structured-decode win.
+- **Now-open sub-question (doc-vs-code conflict, verified in code):** Gen1
+  *legitimately* emits `0x30` (AdjList) and `0x39` (GraphShard) — full types, live
+  encode arms (`go/gen1/gen1.go:764-776, 1012, 1136`), and a passing `TestAdjList`
+  that asserts emission. But the SPEC tag table and CHANGELOG say these are
+  reserved / "Encoders MUST NOT emit them." That reservation was really about the
+  *Gen2* graph app-layer (`go/graph`, `go/gnn` → attic) and overreached onto Gen1.
+  **Resolve by either:** (a) scope the `0x30`/`0x39` reservation to **Gen2** in
+  SPEC + CHANGELOG so Gen1 keeps AdjList/GraphShard (the natural fit for "preserve
+  Gen1"); or (b) also remove AdjList/GraphShard from Gen1 (a partial Gen1 cut).
 
 ### D2 — Reserve graph wire tags `0x35-0x38` (Node/Edge/NodeBatch/EdgeBatch)
 - **For:** the app layer (`go/graph`, `go/gnn`, 8,875 LOC) is already attic'd;
