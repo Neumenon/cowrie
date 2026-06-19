@@ -465,6 +465,56 @@ function zigzagDecode(n: bigint): bigint {
 // Reusable TextEncoder instance (created once, shared by all encoders)
 const sharedTextEncoder = new TextEncoder();
 
+// ============================================================
+// Tensor validation helpers
+// ============================================================
+
+/**
+ * Returns the element size in bytes for byte-aligned dtypes.
+ * Returns null for sub-byte packed types (BOOL, QINT4, QINT2, QINT3, TERNARY, BINARY)
+ * whose packing formula is non-trivial and is not validated here.
+ */
+function dtypeElemSize(dtype: number): number | null {
+  switch (dtype) {
+    case 0x01: return 4;  // FLOAT32
+    case 0x02: return 2;  // FLOAT16
+    case 0x03: return 2;  // BFLOAT16
+    case 0x04: return 1;  // INT8
+    case 0x05: return 2;  // INT16
+    case 0x06: return 4;  // INT32
+    case 0x07: return 8;  // INT64
+    case 0x08: return 1;  // UINT8
+    case 0x09: return 2;  // UINT16
+    case 0x0a: return 4;  // UINT32
+    case 0x0b: return 8;  // UINT64
+    case 0x0c: return 8;  // FLOAT64
+    default:              // Sub-byte packed types: skip validation
+      return null;
+  }
+}
+
+/**
+ * Computes the expected byte length for a tensor with the given shape and dtype.
+ * Returns null when the dtype uses sub-byte packing or when the product overflows
+ * Number.MAX_SAFE_INTEGER (skip the check rather than accept corrupt data silently).
+ * Rank-0 tensors and tensors with any zero dimension produce 0 bytes.
+ */
+function tensorExpectedBytes(dtype: number, shape: number[]): number | null {
+  const elemSize = dtypeElemSize(dtype);
+  if (elemSize === null) return null;
+  if (shape.length === 0) return 0;
+  let product = 1;
+  for (const dim of shape) {
+    if (dim === 0) return 0;
+    product *= dim;
+    // If product exceeds safe integer range, skip the check to avoid silent overflow.
+    if (product > Number.MAX_SAFE_INTEGER) return null;
+  }
+  const total = product * elemSize;
+  if (total > Number.MAX_SAFE_INTEGER) return null;
+  return total;
+}
+
 // Encoder
 class Encoder {
   private buf: number[] = [];
@@ -967,6 +1017,12 @@ class Decoder {
         const dataLen = this.readUvarintAsNumber();
         if (dataLen > this.limits.maxBytesLen) {
           throw new SecurityLimitExceeded(`Tensor data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
+        }
+        // Validate dataLen == product(dims) * elemSize for byte-aligned dtypes.
+        // Sub-byte packed types (BOOL, QINT4, etc.) are skipped (tensorExpectedBytes returns null).
+        const expected = tensorExpectedBytes(dtype, shape);
+        if (expected !== null && dataLen !== expected) {
+          throw new Error(`cowrie: tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
         }
         const data = this.read(dataLen);
         return SJ.tensor(dtype, shape, data);
@@ -1989,9 +2045,98 @@ export function schemaFingerprint32(v: Value): number {
 }
 
 /**
- * Check if two values have the same schema.
+ * Check if two values have structurally identical schemas.
+ * Recursively compares types, object field names, array element schemas,
+ * tensor dtype/rank, image format, audio encoding/channels, tensor_ref storeId,
+ * and unknown-ext type — mirroring exactly what schemaFingerprint64 hashes.
+ * Actual values (ints, strings, tensor data, etc.) are not compared.
+ *
+ * Use schemaFingerprintEqual for a faster probabilistic check.
  */
 export function schemaEquals(a: Value, b: Value): boolean {
+  if (a.type !== b.type) return false;
+
+  switch (a.type) {
+    case Type.NULL:
+    case Type.BOOL:
+    case Type.INT64:
+    case Type.UINT64:
+    case Type.FLOAT64:
+    case Type.DECIMAL128:
+    case Type.STRING:
+    case Type.BYTES:
+    case Type.DATETIME64:
+    case Type.UUID128:
+    case Type.BIGINT:
+      // Scalar types: type tag is sufficient
+      return true;
+
+    case Type.ARRAY: {
+      const aArr = a.data as Value[];
+      const bArr = b.data as Value[];
+      if (aArr.length !== bArr.length) return false;
+      for (let i = 0; i < aArr.length; i++) {
+        if (!schemaEquals(aArr[i], bArr[i])) return false;
+      }
+      return true;
+    }
+
+    case Type.OBJECT: {
+      const aObj = a.data as Record<string, Value>;
+      const bObj = b.data as Record<string, Value>;
+      const aEntries = Object.entries(aObj).sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0);
+      const bEntries = Object.entries(bObj).sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0);
+      if (aEntries.length !== bEntries.length) return false;
+      for (let i = 0; i < aEntries.length; i++) {
+        if (aEntries[i][0] !== bEntries[i][0]) return false;
+        if (!schemaEquals(aEntries[i][1], bEntries[i][1])) return false;
+      }
+      return true;
+    }
+
+    case Type.TENSOR: {
+      const aT = a.data as TensorData;
+      const bT = b.data as TensorData;
+      return aT.dtype === bT.dtype && aT.shape.length === bT.shape.length;
+    }
+
+    case Type.TENSOR_REF: {
+      const aR = a.data as TensorRefData;
+      const bR = b.data as TensorRefData;
+      return aR.storeId === bR.storeId;
+    }
+
+    case Type.IMAGE: {
+      const aI = a.data as ImageData;
+      const bI = b.data as ImageData;
+      return aI.format === bI.format;
+    }
+
+    case Type.AUDIO: {
+      const aA = a.data as AudioData;
+      const bA = b.data as AudioData;
+      return aA.encoding === bA.encoding && aA.channels === bA.channels;
+    }
+
+    case Type.UNKNOWN_EXT: {
+      const aE = a.data as UnknownExtData;
+      const bE = b.data as UnknownExtData;
+      return aE.extType === bE.extType;
+    }
+
+    default:
+      // Graph types, bitmask, etc.: type tag equality (checked above) is sufficient.
+      return true;
+  }
+}
+
+/**
+ * Returns true if the two values share the same 64-bit FNV-1a schema fingerprint.
+ * This is the original (probabilistic) implementation: fast for large schemas,
+ * but carries a 1-in-2^64 collision risk.
+ * Prefer schemaEquals for correctness-critical comparisons.
+ */
+export function schemaFingerprintEqual(a: Value, b: Value): boolean {
   return schemaFingerprint64(a) === schemaFingerprint64(b);
 }
 

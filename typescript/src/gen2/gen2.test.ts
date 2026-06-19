@@ -15,7 +15,9 @@ import {
   SJ,
   Value,
   Type,
+  DType,
   AudioEncoding,
+  ImageFormat,
   NodeData,
   EdgeData,
   encode,
@@ -24,6 +26,7 @@ import {
   schemaFingerprint32,
   schemaFingerprint64,
   schemaEquals,
+  schemaFingerprintEqual,
   writeMasterFrame,
   readMasterFrame,
   isMasterStream,
@@ -574,5 +577,245 @@ test("graph EDGE_BATCH deterministic encoding matches Go hex", () => {
   if (got !== GO_EDGE_BATCH_HEX) {
     throw new Error(`EDGE_BATCH hex mismatch:\n  got: ${got}\n want: ${GO_EDGE_BATCH_HEX}`);
   }
+});
+
+// ============================================================
+// FIX 1 — BigInt two's-complement (already correct, regression tests)
+// ============================================================
+
+console.log("\n--- BigInt Two's-Complement Tests ---");
+
+test("bigint zero encodes to single 0x00 byte", () => {
+  const v = SJ.bigint(0n);
+  const b = v.data as Uint8Array;
+  if (b.length !== 1 || b[0] !== 0x00) {
+    throw new Error(`Expected [0x00], got [${Array.from(b).map(x => x.toString(16)).join(',')}]`);
+  }
+});
+
+test("bigint -1 encodes as 0xff (two's complement)", () => {
+  const v = SJ.bigint(-1n);
+  const b = v.data as Uint8Array;
+  if (b.length !== 1 || b[0] !== 0xff) {
+    throw new Error(`Expected [0xff], got [${Array.from(b).map(x => x.toString(16)).join(',')}]`);
+  }
+});
+
+test("bigint -128 encodes as 0x80 (minimal, no extra 0xff prefix)", () => {
+  const v = SJ.bigint(-128n);
+  const b = v.data as Uint8Array;
+  if (b.length !== 1 || b[0] !== 0x80) {
+    throw new Error(`Expected [0x80], got [${Array.from(b).map(x => x.toString(16)).join(',')}]`);
+  }
+});
+
+test("bigint -256 encodes as [0xff, 0x00]", () => {
+  const v = SJ.bigint(-256n);
+  const b = v.data as Uint8Array;
+  if (b.length !== 2 || b[0] !== 0xff || b[1] !== 0x00) {
+    throw new Error(`Expected [0xff, 0x00], got [${Array.from(b).map(x => x.toString(16)).join(',')}]`);
+  }
+});
+
+test("bigint 255 encodes as [0x00, 0xff] (top bit guard)", () => {
+  const v = SJ.bigint(255n);
+  const b = v.data as Uint8Array;
+  if (b.length !== 2 || b[0] !== 0x00 || b[1] !== 0xff) {
+    throw new Error(`Expected [0x00, 0xff], got [${Array.from(b).map(x => x.toString(16)).join(',')}]`);
+  }
+});
+
+test("bigint large negative roundtrip", () => {
+  const n = -123456789012345678901234567890n;
+  const encoded = encode(SJ.bigint(n));
+  const decoded = decode(encoded);
+  // Re-derive bigint from stored bytes using bytesToBigint logic
+  const bytes = decoded.data as Uint8Array;
+  const neg = (bytes[0] & 0x80) !== 0;
+  let result: bigint;
+  if (neg) {
+    const inv = new Uint8Array(bytes.length);
+    let carry = 1;
+    for (let i = bytes.length - 1; i >= 0; i--) {
+      inv[i] = (~bytes[i]) & 0xff;
+      inv[i] += carry;
+      carry = inv[i] > 0xff ? 1 : 0;
+      inv[i] &= 0xff;
+    }
+    let mag = 0n;
+    for (const b of inv) mag = (mag << 8n) | BigInt(b);
+    result = -mag;
+  } else {
+    result = 0n;
+    for (const b of bytes) result = (result << 8n) | BigInt(b);
+  }
+  if (result !== n) {
+    throw new Error(`Large negative bigint roundtrip failed: expected ${n}, got ${result}`);
+  }
+});
+
+// ============================================================
+// FIX 3 — Tensor decode validation (dataLen must match shape/dtype)
+// ============================================================
+
+console.log("\n--- Tensor Decode Validation Tests ---");
+
+/** Build a raw Cowrie tensor payload with the given bytes at the end (bypassing SJ.tensor constructor) */
+function buildTensorPayload(dtype: number, shape: number[], dataBytes: Uint8Array): Uint8Array {
+  // Header: SJ magic + version + flags + dict(0)
+  const header = new Uint8Array([0x53, 0x4a, 0x02, 0x00, 0x00]);
+  // TENSOR tag
+  const tag = new Uint8Array([0x20]);
+  // dtype byte
+  const dtypeByte = new Uint8Array([dtype]);
+  // rank byte
+  const rankByte = new Uint8Array([shape.length]);
+  // dims as uvarints
+  const encodeUv = (n: number): number[] => {
+    const out: number[] = [];
+    while (n >= 0x80) { out.push((n & 0x7f) | 0x80); n >>>= 7; }
+    out.push(n);
+    return out;
+  };
+  const dims: number[] = [];
+  for (const d of shape) dims.push(...encodeUv(d));
+  // data length + data
+  const dataLen = encodeUv(dataBytes.length);
+  const total = header.length + tag.length + dtypeByte.length + rankByte.length + dims.length + dataLen.length + dataBytes.length;
+  const buf = new Uint8Array(total);
+  let pos = 0;
+  const write = (arr: Uint8Array | number[]) => { for (const b of arr) buf[pos++] = b; };
+  write(header); write(tag); write(dtypeByte); write(rankByte);
+  write(dims); write(dataLen); write(dataBytes);
+  return buf;
+}
+
+test("tensor decode: valid float32 [2,3] = 24 bytes passes", () => {
+  // 2 * 3 * 4 = 24 bytes
+  const data = new Uint8Array(24);
+  const payload = buildTensorPayload(0x01 /* FLOAT32 */, [2, 3], data);
+  const v = decode(payload);
+  if (v.type !== Type.TENSOR) throw new Error("expected TENSOR");
+});
+
+test("tensor decode: malformed float32 [2,3] with wrong byte count throws", () => {
+  // shape says 24 bytes but we give 16
+  const data = new Uint8Array(16);
+  const payload = buildTensorPayload(0x01 /* FLOAT32 */, [2, 3], data);
+  let threw = false;
+  try {
+    decode(payload);
+  } catch (e: any) {
+    threw = true;
+    if (!e.message.includes("does not match shape/dtype")) {
+      throw new Error(`Expected shape/dtype error, got: ${e.message}`);
+    }
+  }
+  if (!threw) throw new Error("Expected tensor validation to throw");
+});
+
+test("tensor decode: malformed float64 [3] with 16 bytes (expected 24) throws", () => {
+  const data = new Uint8Array(16);
+  const payload = buildTensorPayload(0x0c /* FLOAT64 */, [3], data);
+  let threw = false;
+  try {
+    decode(payload);
+  } catch (e: any) {
+    threw = true;
+    if (!e.message.includes("does not match shape/dtype")) {
+      throw new Error(`Expected shape/dtype error, got: ${e.message}`);
+    }
+  }
+  if (!threw) throw new Error("Expected tensor validation to throw for float64 mismatch");
+});
+
+test("tensor decode: sub-byte dtype (BOOL=0x0d) skips validation", () => {
+  // BOOL is sub-byte packed; we accept any length without checking
+  const data = new Uint8Array(3); // arbitrary size
+  const payload = buildTensorPayload(0x0d /* BOOL */, [10], data);
+  // Should not throw (validation skipped for sub-byte types)
+  decode(payload);
+});
+
+test("tensor decode: rank-0 tensor with 0 bytes passes", () => {
+  const data = new Uint8Array(0);
+  const payload = buildTensorPayload(0x01 /* FLOAT32 */, [], data);
+  const v = decode(payload);
+  if (v.type !== Type.TENSOR) throw new Error("expected TENSOR");
+});
+
+// ============================================================
+// FIX 4 — schemaEquals structural (not fingerprint-based)
+// ============================================================
+
+console.log("\n--- schemaEquals Structural Tests ---");
+
+test("schemaEquals: same object schema returns true", () => {
+  const a = SJ.object({ name: SJ.string("alice"), age: SJ.int64(30n) });
+  const b = SJ.object({ name: SJ.string("bob"), age: SJ.int64(99n) });
+  if (!schemaEquals(a, b)) throw new Error("same schema should return true");
+});
+
+test("schemaEquals: different field names returns false", () => {
+  const a = SJ.object({ name: SJ.string("alice") });
+  const b = SJ.object({ id: SJ.string("alice") });
+  if (schemaEquals(a, b)) throw new Error("different field names should return false");
+});
+
+test("schemaEquals: different field types returns false", () => {
+  const a = SJ.object({ x: SJ.string("hi") });
+  const b = SJ.object({ x: SJ.int64(1n) });
+  if (schemaEquals(a, b)) throw new Error("different field types should return false");
+});
+
+test("schemaEquals: structurally different nested objects", () => {
+  const a = SJ.object({ inner: SJ.object({ x: SJ.int64(1n) }) });
+  const b = SJ.object({ inner: SJ.object({ y: SJ.int64(1n) }) });
+  if (schemaEquals(a, b)) throw new Error("structurally different nested objects should return false");
+});
+
+test("schemaEquals: different array lengths returns false", () => {
+  const a = SJ.array([SJ.int64(1n), SJ.int64(2n)]);
+  const b = SJ.array([SJ.int64(1n)]);
+  if (schemaEquals(a, b)) throw new Error("arrays with different lengths should return false");
+});
+
+test("schemaEquals: different tensor dtypes returns false", () => {
+  const data = new Uint8Array(4);
+  const a = SJ.tensor(DType.FLOAT32, [1], data);
+  const b = SJ.tensor(DType.FLOAT64, [1], new Uint8Array(8));
+  if (schemaEquals(a, b)) throw new Error("different tensor dtypes should return false");
+});
+
+test("schemaEquals: different tensor ranks returns false", () => {
+  const a = SJ.tensor(DType.FLOAT32, [2, 3], new Uint8Array(24));
+  const b = SJ.tensor(DType.FLOAT32, [6], new Uint8Array(24));
+  if (schemaEquals(a, b)) throw new Error("different tensor ranks should return false");
+});
+
+test("schemaEquals: same tensor dtype+rank with different values is true", () => {
+  const a = SJ.tensor(DType.FLOAT32, [2, 3], new Uint8Array(24));
+  const b = SJ.tensor(DType.FLOAT32, [4, 5], new Uint8Array(80));
+  // Same dtype + same rank (2) → same schema
+  if (!schemaEquals(a, b)) throw new Error("same dtype+rank should return true regardless of dim values");
+});
+
+test("schemaEquals: image format difference returns false", () => {
+  const a = SJ.image(ImageFormat.JPEG, 100, 100, new Uint8Array(100));
+  const b = SJ.image(ImageFormat.PNG, 100, 100, new Uint8Array(100));
+  if (schemaEquals(a, b)) throw new Error("different image formats should return false");
+});
+
+test("schemaFingerprintEqual is exported and agrees with schemaEquals for same schema", () => {
+  const a = SJ.object({ x: SJ.int64(1n) });
+  const b = SJ.object({ x: SJ.int64(999n) });
+  if (!schemaEquals(a, b)) throw new Error("schemaEquals should be true");
+  if (!schemaFingerprintEqual(a, b)) throw new Error("schemaFingerprintEqual should also be true");
+});
+
+test("schemaEquals: scalars of same type match", () => {
+  if (!schemaEquals(SJ.int64(1n), SJ.int64(99n))) throw new Error("int64 schema should match");
+  if (!schemaEquals(SJ.string("a"), SJ.string("b"))) throw new Error("string schema should match");
+  if (schemaEquals(SJ.int64(1n), SJ.string("a"))) throw new Error("int64 vs string should not match");
 });
 

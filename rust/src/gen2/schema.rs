@@ -30,8 +30,75 @@ pub fn schema_fingerprint32(value: &Value) -> u32 {
     schema_fingerprint64(value) as u32
 }
 
-/// Check if two values have the same schema.
+/// Check if two values have structurally identical schemas.
+///
+/// Recursively compares types, object field names, array element schemas,
+/// tensor dtype/rank, image format, audio encoding/channels, tensor_ref store ID,
+/// and unknown-ext type_id — mirroring exactly what `schema_fingerprint64` hashes.
+/// Actual values (ints, strings, tensor data, etc.) are not compared.
+///
+/// Use `schema_fingerprint_equal` for a faster probabilistic check.
 pub fn schema_equals(a: &Value, b: &Value) -> bool {
+    // Must be the same variant first
+    match (a, b) {
+        // Scalar types: variant equality is sufficient
+        (Value::Null, Value::Null)
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Uint(_), Value::Uint(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::String(_), Value::String(_))
+        | (Value::Bytes(_), Value::Bytes(_))
+        | (Value::Decimal(_), Value::Decimal(_))
+        | (Value::DateTime(_), Value::DateTime(_))
+        | (Value::Uuid(_), Value::Uuid(_))
+        | (Value::BigInt(_), Value::BigInt(_)) => true,
+
+        (Value::Array(av), Value::Array(bv)) => {
+            av.len() == bv.len()
+                && av.iter().zip(bv.iter()).all(|(ai, bi)| schema_equals(ai, bi))
+        }
+
+        (Value::Object(ao), Value::Object(bo)) => {
+            // BTreeMap iterates in sorted key order — same canonical order as hash_schema
+            ao.len() == bo.len()
+                && ao.iter().zip(bo.iter()).all(|((ak, av), (bk, bv))| {
+                    ak == bk && schema_equals(av, bv)
+                })
+        }
+
+        (Value::Tensor(at), Value::Tensor(bt)) => {
+            at.dtype == bt.dtype && at.shape.len() == bt.shape.len()
+        }
+
+        (Value::TensorRef(ar), Value::TensorRef(br)) => ar.store_id == br.store_id,
+
+        (Value::Image(ai), Value::Image(bi)) => ai.format == bi.format,
+
+        (Value::Audio(aa), Value::Audio(ba)) => {
+            aa.encoding == ba.encoding && aa.channels == ba.channels
+        }
+
+        (Value::Ext(ae), Value::Ext(be)) => ae.type_id == be.type_id,
+
+        // Graph types and bitmask: type tag equality (ensured by same variant) is sufficient.
+        (Value::Node(_), Value::Node(_))
+        | (Value::Edge(_), Value::Edge(_))
+        | (Value::NodeBatch(_), Value::NodeBatch(_))
+        | (Value::EdgeBatch(_), Value::EdgeBatch(_))
+        | (Value::Bitmask { .. }, Value::Bitmask { .. }) => true,
+
+        // Different variants
+        _ => false,
+    }
+}
+
+/// Check if two values have the same schema using a probabilistic 64-bit fingerprint.
+///
+/// This is the fast path: O(1) for flat values, and shares cost with any fingerprint
+/// already computed. Carries a 1-in-2^64 collision risk — prefer `schema_equals`
+/// for correctness-critical comparisons.
+pub fn schema_fingerprint_equal(a: &Value, b: &Value) -> bool {
     schema_fingerprint64(a) == schema_fingerprint64(b)
 }
 
@@ -261,6 +328,79 @@ mod tests {
         ]);
 
         assert!(schema_equals(&obj1, &obj2));
+    }
+
+    // ============================================================
+    // FIX 4 — schema_equals is structural, not fingerprint-based
+    // ============================================================
+
+    #[test]
+    fn test_schema_equals_structural_same_fields_different_values() {
+        // Same field names + types, different values → must be equal
+        let a = Value::object(vec![
+            ("name", Value::String("Alice".into())),
+            ("age", Value::Int(30)),
+        ]);
+        let b = Value::object(vec![
+            ("name", Value::String("Bob".into())),
+            ("age", Value::Int(99)),
+        ]);
+        assert!(schema_equals(&a, &b), "same fields+types but different values should be schema-equal");
+    }
+
+    #[test]
+    fn test_schema_equals_structural_renamed_field() {
+        // Field renamed → schemas must differ
+        let a = Value::object(vec![
+            ("name", Value::String("Alice".into())),
+        ]);
+        let b = Value::object(vec![
+            ("alias", Value::String("Alice".into())),
+        ]);
+        assert!(!schema_equals(&a, &b), "renamed field should make schemas unequal");
+    }
+
+    #[test]
+    fn test_schema_equals_structural_type_change() {
+        // Field type changed → schemas must differ
+        let a = Value::object(vec![
+            ("count", Value::Int(1)),
+        ]);
+        let b = Value::object(vec![
+            ("count", Value::Float(1.0)),
+        ]);
+        assert!(!schema_equals(&a, &b), "type change on field should make schemas unequal");
+    }
+
+    #[test]
+    fn test_schema_fingerprint_equal_agrees_with_schema_equals() {
+        // On matching schemas, both functions agree
+        let a = Value::object(vec![
+            ("x", Value::Int(1)),
+            ("y", Value::Int(2)),
+        ]);
+        let b = Value::object(vec![
+            ("x", Value::Int(99)),
+            ("y", Value::Int(0)),
+        ]);
+        assert!(schema_equals(&a, &b));
+        assert!(schema_fingerprint_equal(&a, &b));
+    }
+
+    #[test]
+    fn test_schema_equals_structural_nested() {
+        // Nested objects: structural equality must recurse
+        let a = Value::object(vec![
+            ("inner", Value::object(vec![("val", Value::Bool(true))])),
+        ]);
+        let b = Value::object(vec![
+            ("inner", Value::object(vec![("val", Value::Bool(false))])),
+        ]);
+        let c = Value::object(vec![
+            ("inner", Value::object(vec![("other", Value::Bool(true))])),
+        ]);
+        assert!(schema_equals(&a, &b), "same nested field names should be equal");
+        assert!(!schema_equals(&a, &c), "different nested field names should be unequal");
     }
 
     #[test]

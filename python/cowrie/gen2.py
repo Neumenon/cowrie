@@ -1103,6 +1103,63 @@ def encode(v: Value) -> bytes:
 
 
 # ============================================================
+# Tensor validation helper
+# ============================================================
+
+def _dtype_elem_size(dtype: DType) -> tuple[int, bool]:
+    """Return (element_size_in_bytes, checkable).
+
+    Returns (0, False) for sub-byte quantized types where the packing
+    is not simply elem_size*numel — caller should skip the size check.
+    """
+    sizes = {
+        DType.FLOAT32: 4,
+        DType.FLOAT64: 8,
+        DType.INT8: 1,
+        DType.INT16: 2,
+        DType.INT32: 4,
+        DType.INT64: 8,
+        DType.UINT8: 1,
+        DType.UINT16: 2,
+        DType.UINT32: 4,
+        DType.UINT64: 8,
+        DType.BOOL: 1,
+        DType.BFLOAT16: 2,
+        DType.FLOAT16: 2,
+    }
+    size = sizes.get(dtype)
+    if size is None:
+        return 0, False  # sub-byte or unknown: skip check
+    return size, True
+
+
+def _tensor_expected_bytes(dtype: DType, shape: list[int]) -> tuple[int, bool]:
+    """Compute expected byte length for a tensor (overflow-safe).
+
+    Returns (expected_bytes, checkable). When checkable is False the caller
+    must skip the length check (sub-byte dtype or overflow in dim product).
+    Matches Go's tensorExpectedBytes behaviour exactly.
+    """
+    elem_size, ok = _dtype_elem_size(dtype)
+    if not ok:
+        return 0, False
+    # Rank-0 or any zero dimension → 0 bytes
+    if not shape:
+        return 0, True
+    product = 1
+    MAX_U64 = (1 << 64) - 1
+    for d in shape:
+        if d == 0:
+            return 0, True
+        if product > MAX_U64 // d:
+            return 0, False  # overflow
+        product *= d
+    if elem_size > 0 and product > MAX_U64 // elem_size:
+        return 0, False  # overflow
+    return product * elem_size, True
+
+
+# ============================================================
 # Decoder
 # ============================================================
 
@@ -1226,6 +1283,12 @@ class Decoder:
             data_len = self._read_uvarint()
             if data_len > self.opts.max_bytes_len:
                 raise SecurityLimitExceeded(f"Tensor data too large: {data_len} > {self.opts.max_bytes_len}")
+            # Validate dataLen == product(dims) * elemSize (skip sub-byte dtypes)
+            expected, checkable = _tensor_expected_bytes(dtype, shape)
+            if checkable and data_len != expected:
+                raise ValueError(
+                    f"cowrie: tensor dataLen {data_len} does not match shape/dtype (expected {expected} bytes)"
+                )
             data = self._read(data_len)
             return Value.tensor(dtype, shape, data)
         elif tag == Tag.IMAGE:
@@ -2116,7 +2179,67 @@ def schema_fingerprint32(v: Value) -> int:
 
 
 def schema_equals(a: Value, b: Value) -> bool:
-    """Check if two values have the same schema."""
+    """Check if two values have structurally identical schemas.
+
+    Performs a recursive structural comparison of types, object field names,
+    array element schemas, tensor dtype/rank, image format, audio
+    encoding/channels, tensor_ref store ID, and unknown-ext type.
+    Actual values (ints, strings, tensor data, etc.) are not compared.
+
+    Use schema_fingerprint_equal for a faster probabilistic check.
+    """
+    return _schema_equals_recursive(a, b)
+
+
+def _schema_equals_recursive(a: Value, b: Value) -> bool:
+    """Recursive structural schema comparison (mirrors Go SchemaEquals)."""
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    if a.type != b.type:
+        return False
+
+    t = a.type
+    if t in (Type.NULL, Type.BOOL, Type.INT64, Type.UINT64, Type.FLOAT64,
+             Type.DECIMAL128, Type.STRING, Type.BYTES, Type.DATETIME64,
+             Type.UUID128, Type.BIGINT):
+        # Scalar: type tag is sufficient
+        return True
+    elif t == Type.ARRAY:
+        if len(a.data) != len(b.data):
+            return False
+        return all(_schema_equals_recursive(ai, bi) for ai, bi in zip(a.data, b.data))
+    elif t == Type.OBJECT:
+        if len(a.data) != len(b.data):
+            return False
+        a_keys = sorted(a.data.keys())
+        b_keys = sorted(b.data.keys())
+        if a_keys != b_keys:
+            return False
+        return all(_schema_equals_recursive(a.data[k], b.data[k]) for k in a_keys)
+    elif t == Type.TENSOR:
+        at, bt = a.data, b.data  # TensorData
+        return at.dtype == bt.dtype and len(at.shape) == len(bt.shape)
+    elif t == Type.TENSOR_REF:
+        return a.data.store_id == b.data.store_id
+    elif t == Type.IMAGE:
+        return a.data.format == b.data.format
+    elif t == Type.AUDIO:
+        return a.data.encoding == b.data.encoding and a.data.channels == b.data.channels
+    elif t == Type.UNKNOWN_EXT:
+        return a.data.ext_type == b.data.ext_type
+    else:
+        # NODE, EDGE, NODE_BATCH, EDGE_BATCH, BITMASK: type tag is sufficient
+        return True
+
+
+def schema_fingerprint_equal(a: Value, b: Value) -> bool:
+    """Fast probabilistic schema equality check using 64-bit fingerprint.
+
+    Carries a 1-in-2^64 collision risk. Prefer schema_equals for
+    correctness-critical comparisons.
+    """
     return schema_fingerprint64(a) == schema_fingerprint64(b)
 
 

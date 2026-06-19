@@ -286,19 +286,41 @@ fn roundtrip_tensor_int32() {
 
 #[test]
 fn roundtrip_tensor_all_dtypes() {
-    let dtypes = [
-        DType::Float32, DType::Float16, DType::BFloat16,
-        DType::Int8, DType::Int16, DType::Int32, DType::Int64,
-        DType::Uint8, DType::Uint16, DType::Uint32, DType::Uint64,
-        DType::Float64, DType::Bool,
-        DType::QINT4, DType::QINT2, DType::QINT3,
-        DType::Ternary, DType::Binary,
+    // Each (dtype, elem_size_bytes) pair. Sub-byte packed dtypes use 0 to indicate
+    // "no byte-level validation" — we store 1 byte for shape [1] to keep it simple.
+    let dtype_sizes: &[(DType, usize)] = &[
+        (DType::Float32,  4),
+        (DType::Float16,  2),
+        (DType::BFloat16, 2),
+        (DType::Int8,     1),
+        (DType::Int16,    2),
+        (DType::Int32,    4),
+        (DType::Int64,    8),
+        (DType::Uint8,    1),
+        (DType::Uint16,   2),
+        (DType::Uint32,   4),
+        (DType::Uint64,   8),
+        (DType::Float64,  8),
+        // Sub-byte: validation skipped; use shape [1] and 1 byte
+        (DType::Bool,     0),
+        (DType::QINT4,    0),
+        (DType::QINT2,    0),
+        (DType::QINT3,    0),
+        (DType::Ternary,  0),
+        (DType::Binary,   0),
     ];
-    for dtype in dtypes {
+    for &(dtype, elem_size) in dtype_sizes {
+        let (shape, data) = if elem_size == 0 {
+            // Sub-byte packed: any data length is accepted (no shape validation)
+            (vec![1u64], vec![0u8; 1])
+        } else {
+            // 2 elements, exact byte count
+            (vec![2u64], vec![0u8; 2 * elem_size])
+        };
         let v = Value::Tensor(TensorData {
             dtype,
-            shape: vec![2],
-            data: vec![0u8; 8],
+            shape,
+            data,
         });
         let enc = encode(&v).unwrap();
         let dec = decode(&enc).unwrap();
