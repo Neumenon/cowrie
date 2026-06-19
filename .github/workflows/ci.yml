@@ -44,8 +44,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           cd go
-          # Exclude cmd/ packages (CLI entry points, not core codec)
-          grep -v "^github.com/Neumenon/cowrie/go/cmd/" coverage.out > coverage-core.out || cp coverage.out coverage-core.out
+          # Exclude cmd/ packages (CLI entry points, not core codec).
+          # Path is /go/v2/cmd/ since the module is github.com/Neumenon/cowrie/go/v2;
+          # the old /go/cmd/ pattern matched nothing, wrongly counting 0%-covered
+          # cmd/ packages and dragging the gate to ~76.6% (a false CI failure).
+          grep -v "^github.com/Neumenon/cowrie/go/v2/cmd/" coverage.out > coverage-core.out || cp coverage.out coverage-core.out
           COVERAGE=$(go tool cover -func=coverage-core.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage (excluding cmd/): ${COVERAGE}%"
           if (( $(echo "$COVERAGE < 80" | bc -l) )); then
