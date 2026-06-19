@@ -278,8 +278,8 @@ for {
 ```go
 // Go - Master stream with metadata
 import (
-    cowrie "github.com/Neumenon/cowrie"
-    "github.com/Neumenon/cowrie/codec"
+    cowrie "github.com/Neumenon/cowrie/go/v2"
+    "github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 mw := codec.NewMasterWriter(writer, codec.DefaultMasterWriterOptions())

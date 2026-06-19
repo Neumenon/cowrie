@@ -45,7 +45,7 @@ data, _ = gen2.Encode(val)
 **Trade-offs:**
 
 - Gen2 has header overhead on small objects (93% of JSON for a single 3-field object). Dictionary coding pays off with repeated schemas, not single messages.
-- New project — well-tested (23 cross-language test fixtures, 16 security regression tests) but not production-proven at scale.
+- New project — well-tested (34 cross-language test fixtures, 16 security regression tests) but not production-proven at scale.
 - 5 language implementations vs MessagePack's dozens.
 
 **Install:**
@@ -123,7 +123,7 @@ let decoded = gen2::decode(&encoded)?;
 **Trade-offs to be aware of:**
 
 - Gen2 header overhead: a single small object is 93% of JSON size (Gen1 is 76%). Dictionary coding pays off at scale, not for individual messages.
-- New crate, not battle-tested. 23 cross-language test fixtures and 16 security regression tests, but no large-scale production use yet.
+- New crate, not battle-tested. 34 cross-language test fixtures and 16 security regression tests, but no large-scale production use yet.
 - 9 configurable decode limits for security (max depth, max array length, max string length, etc.), all with safe defaults.
 
 **Install:**

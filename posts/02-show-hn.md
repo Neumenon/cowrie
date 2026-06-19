@@ -31,7 +31,7 @@ Hi HN, I built Cowrie to solve a specific problem: moving tensors and structured
 **Caveats I want to be upfront about:**
 - Gen2 has header overhead. A single small object is 93% of JSON size (worse than Gen1's 76%). Dictionary coding only pays off with repeated schemas.
 - The Python implementation is pure Python, no C extension. It's correct but not fast.
-- This is a new project. Well-tested (23 cross-language fixtures, 16 security regression tests), but not battle-tested in production.
+- This is a new project. Well-tested (34 cross-language fixtures, 16 security regression tests), but not battle-tested in production.
 - Language support is 5 implementations. MsgPack and Protobuf support dozens.
 
 **Try it:**

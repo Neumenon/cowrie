@@ -58,7 +58,7 @@ A single Cowrie message can contain a JSON-like object with nested tensors, imag
 
 ### Unlock 5: No-Codegen Polyglot Interop
 
-The 23 cross-language fixtures mean all 5 implementations produce and consume identical bytes. Adding a new field to your data structure requires zero changes to any build pipeline — no `.proto` file, no `protoc`, no generated code, no version conflicts.
+The 34 cross-language fixtures mean all 5 implementations produce and consume identical bytes. Adding a new field to your data structure requires zero changes to any build pipeline — no `.proto` file, no `protoc`, no generated code, no version conflicts.
 
 **What this eliminates**: Schema management overhead, codegen build steps, schema version conflicts between services, the "regenerate and redeploy all clients" problem.
 

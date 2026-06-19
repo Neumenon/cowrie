@@ -11,7 +11,7 @@ Initial public release of Cowrie — a multi-language binary codec for structure
 
 ### 5 Language Implementations
 
-All implementations are feature-complete and pass the same 23 cross-language test fixtures.
+All implementations are feature-complete and pass the same 34 cross-language test fixtures.
 
 | Language | Package | Version |
 |----------|---------|---------|
