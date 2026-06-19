@@ -9,10 +9,11 @@ Cowrie's lead value is **deterministic encoding with native bytes (0x08), tensor
 (0x20), tensor refs (0x21), and a stable schema fingerprint** — useful where
 JSON's text shape and lack of binary primitives are the bottleneck.
 
-> **Reserved tags.** Tags `0x30` (AdjList), `0x31` (RichText), `0x32` (Delta),
-> and `0x39` (GraphShard) are deprecated. Decoders MUST skip their
-> length-prefixed payloads silently. Encoders MUST NOT emit them. The original
-> graph / rich-text / delta implementations live under `attic/`.
+> **Reserved tags (Gen2).** In Gen2, tags `0x30` (AdjList), `0x31` (RichText),
+> `0x32` (Delta), and `0x39` (GraphShard) are deprecated. Decoders MUST skip
+> their length-prefixed payloads silently. Encoders MUST NOT emit them. The
+> original Gen2 graph / rich-text / delta implementations live under `attic/`.
+> (Gen1 retains AdjList and GraphShard as active graph types.)
 
 ## Features
 
@@ -223,8 +224,9 @@ edge := cowrie.Edge("person_42", "company_1", "WORKS_AT", map[string]any{
 batch := cowrie.NodeBatch([]cowrie.NodeData{node.Node()})
 ```
 
-> **Note:** Tag 0x39 (GraphShard) is reserved and no longer emitted. Use
-> NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data in Gen2.
+> **Note:** In Gen2, tag 0x39 (GraphShard) is reserved and no longer emitted —
+> use NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data. (Gen1 still
+> supports GraphShard and AdjList directly.)
 
 ## Streaming Support
 

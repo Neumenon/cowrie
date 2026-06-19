@@ -17,11 +17,13 @@ publishing). The stale `benchmarks/` tree and `docs/glyph/archive/` are removed.
 
 ### Scope cut — graph types, RichText, Delta, ColumnHints parked
 
-Wire-format tags `0x30` (Adjlist), `0x31` (RichText), `0x32` (Delta), and
-`0x39` (GraphShard) are now reserved (deprecated). Encoders no longer emit
-them; decoders skip the length-prefixed payload silently. The dedicated
-packages (`go/graph/`, `go/gnn/`, `go/ld/`, `go/delta/`, hints/column
-helpers) moved to `attic/` — revivable but not built or tested by default.
+In **Gen2**, wire-format tags `0x30` (AdjList), `0x31` (RichText), `0x32`
+(Delta), and `0x39` (GraphShard) are now reserved (deprecated). Gen2 encoders no
+longer emit them; decoders skip the length-prefixed payload silently. The
+dedicated Gen2 packages (`go/graph/`, `go/gnn/`, `go/ld/`, `go/delta/`,
+hints/column helpers) moved to `attic/` — revivable but not built or tested by
+default. **Gen1 retains AdjList (0x30) and GraphShard (0x39)** as active graph
+types (implemented in `go/gen1`).
 
 The `FlagHasColumnHints = 0x08` header bit remains listed but is reserved;
 decoders MUST skip it.

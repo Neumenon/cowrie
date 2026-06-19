@@ -60,9 +60,14 @@ Tag(0x35) | id:zigzag-varint | labelLen:varint | labelBytes | propCount:varint |
 Tag(0x36) | src:zigzag-varint | dst:zigzag-varint | labelLen:varint | labelBytes | propCount:varint | (keyLen:varint | keyBytes | value)*
 ```
 
-#### Reserved (0x30-0x32)
-> Tags 0x30 (AdjList), 0x31 (RichText), and 0x32 (Delta) are reserved (deprecated).
-> Decoders MUST skip the length-prefixed payload silently. Encoders MUST NOT emit them.
+#### AdjList (0x30) — Gen1 only
+AdjList (adjacency list: nodeID + neighbors as an int64 array) is an active Gen1
+graph type, implemented in `go/gen1`. It is **not** part of Gen2, where 0x30 is
+reserved.
+
+#### Reserved (0x31-0x32)
+> Tags 0x31 (RichText) and 0x32 (Delta) are reserved (deprecated). Decoders MUST
+> skip the length-prefixed payload silently. Encoders MUST NOT emit them.
 
 #### NodeBatch (0x37)
 ```
@@ -74,9 +79,10 @@ Tag(0x37) | count:varint | Node*
 Tag(0x38) | count:varint | Edge*
 ```
 
-#### Reserved (0x39)
-> Tag 0x39 (GraphShard) is reserved (deprecated). Decoders MUST skip the
-> length-prefixed payload silently. Encoders MUST NOT emit it.
+#### GraphShard (0x39) — Gen1 only
+GraphShard (a graph container: nodes + edges + adjacency + features for GNN
+workloads) is an active Gen1 graph type, implemented in `go/gen1`. It is **not**
+part of Gen2, where 0x39 is reserved.
 
 ### Varint Encoding
 
@@ -122,9 +128,9 @@ The formats differ only in header presence and which tag ranges they use:
 | 0x00-0x0F | Core types (unified) | Core types (unified) |
 | 0x16-0x19 | Proto-tensor arrays | — (use Tensor 0x20 instead) |
 | 0x20-0x24 | — | ML extensions (Tensor, Image, Audio, Bitmask) |
-| 0x30-0x32 | Reserved (AdjList/RichText/Delta — decoders skip) | Reserved (AdjList/RichText/Delta — decoders skip) |
+| 0x30-0x32 | AdjList (0x30) active; RichText/Delta reserved | Reserved (AdjList/RichText/Delta — decoders skip) |
 | 0x35-0x38 | Graph types (Node/Edge/NodeBatch/EdgeBatch) | Graph types (Node/Edge/NodeBatch/EdgeBatch) |
-| 0x39 | Reserved (GraphShard — decoders skip) | Reserved (GraphShard — decoders skip) |
+| 0x39 | GraphShard (active) | Reserved (GraphShard — decoders skip) |
 | 0x40-0xEF | FIXINT/FIXARRAY/FIXMAP/FIXNEG | FIXINT/FIXARRAY/FIXMAP/FIXNEG |
 
 Gen2 adds dictionary coding (header contains string dictionary, Object/Graph keys use dictionary indices)
@@ -202,9 +208,10 @@ A 2048-element mask encodes in 259 bytes vs ~4000+ bytes as an int array.
 
 ### Reserved Tags (0x30-0x32)
 
-Tags 0x30 (AdjList), 0x31 (RichText), and 0x32 (Delta) are reserved (deprecated).
-Decoders MUST skip the length-prefixed payload silently. Encoders MUST NOT emit
-these tags. The historical implementation lives in `attic/`.
+In **Gen2**, tags 0x30 (AdjList), 0x31 (RichText), and 0x32 (Delta) are reserved
+(deprecated). Decoders MUST skip the length-prefixed payload silently. Encoders
+MUST NOT emit these tags. The historical Gen2 implementation lives in `attic/`.
+(Gen1 retains AdjList at 0x30 — see "Graph Type Layouts (Gen1)".)
 
 ### Graph Extension Tags (0x35-0x39)
 
