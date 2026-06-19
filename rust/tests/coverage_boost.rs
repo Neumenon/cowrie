@@ -809,7 +809,10 @@ fn json_audio_all_encodings() {
 fn json_ext() {
     let v = Value::Ext(ExtData { type_id: 99, payload: vec![1, 2, 3] });
     let json_str = to_json(&v).unwrap();
-    assert!(json_str.contains("\"_type\":\"ext\""));
+    // Canonical schema: _type is "unknown_ext", fields are "ext_type" and "payload"
+    assert!(json_str.contains("\"_type\":\"unknown_ext\""));
+    assert!(json_str.contains("\"ext_type\":99"));
+    assert!(json_str.contains("\"payload\":"));
 }
 
 #[test]

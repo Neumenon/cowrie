@@ -720,7 +720,7 @@ describe('gen2 JSON bridge', () => {
     const result = toAny(SJ.tensor(DType.FLOAT32, [2], tensorData)) as Record<string, unknown>;
     assert.strictEqual(result._type, 'tensor');
     assert.strictEqual(result.dtype, 'float32');
-    assert.deepStrictEqual(result.shape, [2]);
+    assert.deepStrictEqual(result.dims, [2]);
   });
 
   it('toAny image', () => {
@@ -735,14 +735,14 @@ describe('gen2 JSON bridge', () => {
     const result = toAny(SJ.audio(AudioEncoding.PCM_INT16, 44100, 2, new Uint8Array(4))) as Record<string, unknown>;
     assert.strictEqual(result._type, 'audio');
     assert.strictEqual(result.encoding, 'pcm_int16');
-    assert.strictEqual(result.sampleRate, 44100);
+    assert.strictEqual(result.rate, 44100);
     assert.strictEqual(result.channels, 2);
   });
 
   it('toAny tensor_ref', () => {
     const result = toAny(SJ.tensorRef(1, new Uint8Array([0x01, 0x02]))) as Record<string, unknown>;
     assert.strictEqual(result._type, 'tensor_ref');
-    assert.strictEqual(result.storeId, 1);
+    assert.strictEqual(result.store, 1);
   });
 
   it('toAny node', () => {
@@ -755,8 +755,8 @@ describe('gen2 JSON bridge', () => {
   it('toAny edge', () => {
     const result = toAny(SJ.edge('a', 'b', 'KNOWS', { w: SJ.int64(1) })) as Record<string, unknown>;
     assert.strictEqual(result._type, 'edge');
-    assert.strictEqual(result.from, 'a');
-    assert.strictEqual(result.to, 'b');
+    assert.strictEqual(result.fromId, 'a');
+    assert.strictEqual(result.toId, 'b');
     assert.strictEqual(result.type, 'KNOWS');
   });
 
@@ -782,12 +782,12 @@ describe('gen2 JSON bridge', () => {
     const result = toAny(SJ.bitmask(8, new Uint8Array([0b10110101]))) as Record<string, unknown>;
     assert.strictEqual(result._type, 'bitmask');
     assert.strictEqual(result.count, 8);
-    assert.deepStrictEqual(result.bits, [true, false, true, false, true, true, false, true]);
+    assert.strictEqual(result.bits, 'tQ=='); // base64 of [0b10110101]
   });
 
   it('toAny unknown_ext', () => {
     const result = toAny(SJ.unknownExt(42, new Uint8Array([1, 2]))) as Record<string, unknown>;
-    assert.strictEqual(result._type, 'ext');
+    assert.strictEqual(result._type, 'unknown_ext');
     assert.strictEqual(result.ext_type, 42);
   });
 

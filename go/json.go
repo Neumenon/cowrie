@@ -27,12 +27,15 @@ var (
 // FromJSON parses JSON bytes into an Cowrie value without type inference.
 // Strings remain strings, preserving exact JSON round-trip fidelity.
 // Use FromJSONEnriched if you want automatic type inference (dates, UUIDs, etc.).
+// Large integers are preserved exactly via json.Number (no float64 precision loss).
 func FromJSON(data []byte) (*Value, error) {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.UseNumber()
 	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	return FromAny(v), nil
+	return fromAnyStrictTyped(v), nil
 }
 
 // FromJSONEnriched parses JSON bytes with automatic type inference.
@@ -43,12 +46,15 @@ func FromJSON(data []byte) (*Value, error) {
 //
 // Use this when ingesting external data into the Cowrie ecosystem.
 // For strict JSON round-trip fidelity, use FromJSON instead.
+// Large integers are preserved exactly via json.Number (no float64 precision loss).
 func FromJSONEnriched(data []byte) (*Value, error) {
+	dec := json.NewDecoder(strings.NewReader(string(data)))
+	dec.UseNumber()
 	var v any
-	if err := json.Unmarshal(data, &v); err != nil {
+	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	return FromAnyEnriched(v), nil
+	return fromAnyEnrichedTyped(v, nil), nil
 }
 
 // FromAny converts a Go value to an Cowrie value without type inference.
@@ -62,6 +68,317 @@ func FromAny(v any) *Value {
 // Detects and converts datetime strings, UUIDs, base64, etc.
 func FromAnyEnriched(v any) *Value {
 	return fromAnyEnriched(v, nil)
+}
+
+// fromAnyStrictTyped is like fromAnyStrict but also reconstructs typed values
+// from _type-tagged objects produced by ToAny.
+func fromAnyStrictTyped(v any) *Value {
+	if m, ok := v.(map[string]any); ok {
+		if typed := tryReconstructTyped(m, false); typed != nil {
+			return typed
+		}
+	}
+	return fromAnyStrict(v)
+}
+
+// fromAnyEnrichedTyped is like fromAnyEnriched but also reconstructs typed values
+// from _type-tagged objects produced by ToAny.
+func fromAnyEnrichedTyped(v any, hints map[string]Type) *Value {
+	if m, ok := v.(map[string]any); ok {
+		if typed := tryReconstructTyped(m, true); typed != nil {
+			return typed
+		}
+	}
+	return fromAnyEnriched(v, hints)
+}
+
+// tryReconstructTyped inspects a map[string]any for a "_type" key and, if the
+// value matches a known ToAny projection, reconstructs the original typed Value.
+// Returns nil if the map is not a typed projection (plain object path).
+func tryReconstructTyped(m map[string]any, enriched bool) *Value {
+	typeStr, ok := m["_type"].(string)
+	if !ok {
+		return nil
+	}
+
+	// Helper to get a string field
+	strField := func(key string) (string, bool) {
+		v, ok := m[key].(string)
+		return v, ok
+	}
+	// Helper to decode a base64 string field
+	b64Field := func(key string) ([]byte, bool) {
+		s, ok := strField(key)
+		if !ok {
+			return nil, false
+		}
+		b, err := base64.StdEncoding.DecodeString(s)
+		if err != nil {
+			return nil, false
+		}
+		return b, true
+	}
+	// Helper to get an int from a json.Number or float64 field
+	intField := func(key string) (int64, bool) {
+		switch n := m[key].(type) {
+		case json.Number:
+			i, err := n.Int64()
+			return i, err == nil
+		case float64:
+			return int64(n), true
+		case int:
+			return int64(n), true
+		case int64:
+			return n, true
+		}
+		return 0, false
+	}
+
+	switch typeStr {
+	case "tensor":
+		dtypeStr, ok1 := strField("dtype")
+		dataBytes, ok2 := b64Field("data")
+		dimsRaw, ok3 := m["dims"]
+		if !ok1 || !ok2 || !ok3 {
+			return nil
+		}
+		dtype, ok := stringToDtype(dtypeStr)
+		if !ok {
+			return nil
+		}
+		dimsSlice, ok := dimsRaw.([]any)
+		if !ok {
+			return nil
+		}
+		dims := make([]uint64, len(dimsSlice))
+		for i, d := range dimsSlice {
+			switch v := d.(type) {
+			case json.Number:
+				i64, err := v.Int64()
+				if err != nil {
+					return nil
+				}
+				dims[i] = uint64(i64)
+			case float64:
+				dims[i] = uint64(v)
+			default:
+				return nil
+			}
+		}
+		return Tensor(dtype, dims, dataBytes)
+
+	case "tensor_ref":
+		storeRaw, ok1 := intField("store")
+		keyBytes, ok2 := b64Field("key")
+		if !ok1 || !ok2 {
+			return nil
+		}
+		return TensorRef(uint8(storeRaw), keyBytes)
+
+	case "image":
+		fmtStr, ok1 := strField("format")
+		w, ok2 := intField("width")
+		h, ok3 := intField("height")
+		dataBytes, ok4 := b64Field("data")
+		if !ok1 || !ok2 || !ok3 || !ok4 {
+			return nil
+		}
+		format, ok := stringToImageFormat(fmtStr)
+		if !ok {
+			return nil
+		}
+		return Image(format, uint16(w), uint16(h), dataBytes)
+
+	case "audio":
+		encStr, ok1 := strField("encoding")
+		rate, ok2 := intField("rate")
+		ch, ok3 := intField("channels")
+		dataBytes, ok4 := b64Field("data")
+		if !ok1 || !ok2 || !ok3 || !ok4 {
+			return nil
+		}
+		enc, ok := stringToAudioEncoding(encStr)
+		if !ok {
+			return nil
+		}
+		return Audio(enc, uint32(rate), uint8(ch), dataBytes)
+
+	case "unknown_ext":
+		extTypeRaw, ok1 := intField("ext_type")
+		payload, ok2 := b64Field("payload")
+		if !ok1 || !ok2 {
+			return nil
+		}
+		return UnknownExtension(uint64(extTypeRaw), payload)
+
+	case "node":
+		id, ok1 := strField("id")
+		labelsRaw, ok2 := m["labels"]
+		propsRaw := m["props"]
+		if !ok1 || !ok2 {
+			return nil
+		}
+		labelsSlice, ok := labelsRaw.([]any)
+		if !ok {
+			return nil
+		}
+		labels := make([]string, len(labelsSlice))
+		for i, l := range labelsSlice {
+			s, ok := l.(string)
+			if !ok {
+				return nil
+			}
+			labels[i] = s
+		}
+		var props map[string]any
+		if propsRaw != nil {
+			pm, ok := propsRaw.(map[string]any)
+			if !ok {
+				return nil
+			}
+			props = pm
+		}
+		return Node(id, labels, props)
+
+	case "edge":
+		fromID, ok1 := strField("fromId")
+		toID, ok2 := strField("toId")
+		edgeType, ok3 := strField("type")
+		if !ok1 || !ok2 || !ok3 {
+			return nil
+		}
+		var props map[string]any
+		if propsRaw := m["props"]; propsRaw != nil {
+			pm, ok := propsRaw.(map[string]any)
+			if !ok {
+				return nil
+			}
+			props = pm
+		}
+		return Edge(fromID, toID, edgeType, props)
+
+	case "node_batch":
+		nodesRaw, ok := m["nodes"]
+		if !ok {
+			return nil
+		}
+		nodesSlice, ok := nodesRaw.([]any)
+		if !ok {
+			return nil
+		}
+		nodes := make([]NodeData, 0, len(nodesSlice))
+		for _, nr := range nodesSlice {
+			nm, ok := nr.(map[string]any)
+			if !ok {
+				return nil
+			}
+			nv := tryReconstructTyped(nm, enriched)
+			if nv == nil || nv.typ != TypeNode {
+				return nil
+			}
+			nodes = append(nodes, nv.nodeVal)
+		}
+		return NodeBatch(nodes)
+
+	case "edge_batch":
+		edgesRaw, ok := m["edges"]
+		if !ok {
+			return nil
+		}
+		edgesSlice, ok := edgesRaw.([]any)
+		if !ok {
+			return nil
+		}
+		edges := make([]EdgeData, 0, len(edgesSlice))
+		for _, er := range edgesSlice {
+			em, ok := er.(map[string]any)
+			if !ok {
+				return nil
+			}
+			ev := tryReconstructTyped(em, enriched)
+			if ev == nil || ev.typ != TypeEdge {
+				return nil
+			}
+			edges = append(edges, ev.edgeVal)
+		}
+		return EdgeBatch(edges)
+
+	case "bitmask":
+		count, ok1 := intField("count")
+		bits, ok2 := b64Field("bits")
+		if !ok1 || !ok2 {
+			return nil
+		}
+		return Bitmask(uint64(count), bits)
+	}
+
+	return nil
+}
+
+// stringToDtype converts a dtype string (as produced by dtypeToString) back to DType.
+func stringToDtype(s string) (DType, bool) {
+	switch s {
+	case "float32":
+		return DTypeFloat32, true
+	case "float16":
+		return DTypeFloat16, true
+	case "bfloat16":
+		return DTypeBFloat16, true
+	case "float64":
+		return DTypeFloat64, true
+	case "int8":
+		return DTypeInt8, true
+	case "int16":
+		return DTypeInt16, true
+	case "int32":
+		return DTypeInt32, true
+	case "int64":
+		return DTypeInt64, true
+	case "uint8":
+		return DTypeUint8, true
+	case "uint16":
+		return DTypeUint16, true
+	case "uint32":
+		return DTypeUint32, true
+	case "uint64":
+		return DTypeUint64, true
+	default:
+		return 0, false
+	}
+}
+
+// stringToImageFormat converts an image format string back to ImageFormat.
+func stringToImageFormat(s string) (ImageFormat, bool) {
+	switch s {
+	case "jpeg":
+		return ImageFormatJPEG, true
+	case "png":
+		return ImageFormatPNG, true
+	case "webp":
+		return ImageFormatWEBP, true
+	case "avif":
+		return ImageFormatAVIF, true
+	case "bmp":
+		return ImageFormatBMP, true
+	default:
+		return 0, false
+	}
+}
+
+// stringToAudioEncoding converts an audio encoding string back to AudioEncoding.
+func stringToAudioEncoding(s string) (AudioEncoding, bool) {
+	switch s {
+	case "pcm_int16":
+		return AudioEncodingPCMInt16, true
+	case "pcm_float32":
+		return AudioEncodingPCMFloat32, true
+	case "opus":
+		return AudioEncodingOPUS, true
+	case "aac":
+		return AudioEncodingAAC, true
+	default:
+		return 0, false
+	}
 }
 
 // fromAnyStrict converts without any type inference - strings stay strings.

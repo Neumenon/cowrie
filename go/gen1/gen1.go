@@ -508,6 +508,9 @@ func NewStreamDecoder(r io.Reader) *StreamDecoder {
 // NewStreamDecoderWithOptions creates a StreamDecoder with custom security limits.
 func NewStreamDecoderWithOptions(r io.Reader, opts DecodeOptions) *StreamDecoder {
 	d := NewStreamDecoder(r)
+	if opts.MaxDepth <= 0 {
+		opts.MaxDepth = DefaultMaxDepth
+	}
 	d.opts = opts
 	return d
 }
@@ -1372,6 +1375,11 @@ func readValue(data []byte, off int, opts DecodeOptions) (any, int, error) {
 	if off >= len(data) {
 		return nil, 0, ErrUnexpectedEOF
 	}
+	// Enforce the nesting-depth limit (decremented by readObject/readArrayGeneric
+	// on each recursion). Guards against deeply-nested input causing a stack overflow.
+	if opts.MaxDepth <= 0 {
+		return nil, 0, ErrMaxDepthExceeded
+	}
 	tag := data[off]
 	off++
 
@@ -1573,8 +1581,10 @@ func readObject(data []byte, off int, opts DecodeOptions) (map[string]any, int, 
 		key := string(data[off:end])
 		off = end
 
-		// Read value
-		val, newOff, err := readValue(data, off, opts)
+		// Read value (one level deeper)
+		childOpts := opts
+		childOpts.MaxDepth--
+		val, newOff, err := readValue(data, off, childOpts)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1597,8 +1607,10 @@ func readArrayGeneric(data []byte, off int, opts DecodeOptions) (any, int, error
 	}
 
 	out := make([]any, int(count))
+	childOpts := opts
+	childOpts.MaxDepth--
 	for i := 0; i < int(count); i++ {
-		v, newOff, err := readValue(data, off, opts)
+		v, newOff, err := readValue(data, off, childOpts)
 		if err != nil {
 			return nil, 0, err
 		}

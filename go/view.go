@@ -6,75 +6,129 @@ import (
 	"unsafe"
 )
 
+// nativeLittleEndian is true when the host CPU stores multi-byte integers
+// in little-endian order (the overwhelmingly common case: x86, ARM LE, etc.).
+// It is computed once at package init via a uint16 byte-order probe.
+var nativeLittleEndian = func() bool {
+	var v uint16 = 0x0102
+	b := (*[2]byte)(unsafe.Pointer(&v))
+	return b[0] == 0x02
+}()
+
 // viewFloat32 returns a zero-copy view of byte slice as []float32.
-// Returns (nil, false) if alignment or size is invalid.
+// On little-endian hosts the wire bytes are reinterpreted in place (fast path).
+// On big-endian hosts the function falls back to a byte-swapped copy so that
+// the caller always sees correctly decoded values.
+// Returns (nil, false) if size is not a multiple of 4.
+// Returns (nil, true) for empty input.
 func viewFloat32(data []byte) ([]float32, bool) {
 	if len(data) == 0 {
 		return nil, true
 	}
-	// Check size divisibility
 	if len(data)%4 != 0 {
 		return nil, false
 	}
-	// Check alignment
+	count := len(data) / 4
+
+	if !nativeLittleEndian {
+		// Big-endian fallback: decode each element via binary.LittleEndian.
+		out := make([]float32, count)
+		for i := 0; i < count; i++ {
+			bits := binary.LittleEndian.Uint32(data[i*4:])
+			out[i] = math.Float32frombits(bits)
+		}
+		return out, true
+	}
+
+	// Little-endian fast path: check alignment before reinterpreting.
 	if uintptr(unsafe.Pointer(&data[0]))%4 != 0 {
 		return nil, false
 	}
-	count := len(data) / 4
 	return unsafe.Slice((*float32)(unsafe.Pointer(&data[0])), count), true
 }
 
 // viewFloat64 returns a zero-copy view of byte slice as []float64.
-// Returns (nil, false) if alignment or size is invalid.
+// On little-endian hosts the wire bytes are reinterpreted in place (fast path).
+// On big-endian hosts the function falls back to a byte-swapped copy.
+// Returns (nil, false) if size is not a multiple of 8.
+// Returns (nil, true) for empty input.
 func viewFloat64(data []byte) ([]float64, bool) {
 	if len(data) == 0 {
 		return nil, true
 	}
-	// Check size divisibility
 	if len(data)%8 != 0 {
 		return nil, false
 	}
-	// Check alignment
+	count := len(data) / 8
+
+	if !nativeLittleEndian {
+		out := make([]float64, count)
+		for i := 0; i < count; i++ {
+			bits := binary.LittleEndian.Uint64(data[i*8:])
+			out[i] = math.Float64frombits(bits)
+		}
+		return out, true
+	}
+
 	if uintptr(unsafe.Pointer(&data[0]))%8 != 0 {
 		return nil, false
 	}
-	count := len(data) / 8
 	return unsafe.Slice((*float64)(unsafe.Pointer(&data[0])), count), true
 }
 
 // viewInt32 returns a zero-copy view of byte slice as []int32.
-// Returns (nil, false) if alignment or size is invalid.
+// On little-endian hosts the wire bytes are reinterpreted in place (fast path).
+// On big-endian hosts the function falls back to a byte-swapped copy.
+// Returns (nil, false) if size is not a multiple of 4.
+// Returns (nil, true) for empty input.
 func viewInt32(data []byte) ([]int32, bool) {
 	if len(data) == 0 {
 		return nil, true
 	}
-	// Check size divisibility
 	if len(data)%4 != 0 {
 		return nil, false
 	}
-	// Check alignment
+	count := len(data) / 4
+
+	if !nativeLittleEndian {
+		out := make([]int32, count)
+		for i := 0; i < count; i++ {
+			out[i] = int32(binary.LittleEndian.Uint32(data[i*4:]))
+		}
+		return out, true
+	}
+
 	if uintptr(unsafe.Pointer(&data[0]))%4 != 0 {
 		return nil, false
 	}
-	count := len(data) / 4
 	return unsafe.Slice((*int32)(unsafe.Pointer(&data[0])), count), true
 }
 
 // viewInt64 returns a zero-copy view of byte slice as []int64.
-// Returns (nil, false) if alignment or size is invalid.
+// On little-endian hosts the wire bytes are reinterpreted in place (fast path).
+// On big-endian hosts the function falls back to a byte-swapped copy.
+// Returns (nil, false) if size is not a multiple of 8.
+// Returns (nil, true) for empty input.
 func viewInt64(data []byte) ([]int64, bool) {
 	if len(data) == 0 {
 		return nil, true
 	}
-	// Check size divisibility
 	if len(data)%8 != 0 {
 		return nil, false
 	}
-	// Check alignment
+	count := len(data) / 8
+
+	if !nativeLittleEndian {
+		out := make([]int64, count)
+		for i := 0; i < count; i++ {
+			out[i] = int64(binary.LittleEndian.Uint64(data[i*8:]))
+		}
+		return out, true
+	}
+
 	if uintptr(unsafe.Pointer(&data[0]))%8 != 0 {
 		return nil, false
 	}
-	count := len(data) / 8
 	return unsafe.Slice((*int64)(unsafe.Pointer(&data[0])), count), true
 }
 

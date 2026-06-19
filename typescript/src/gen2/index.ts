@@ -1269,20 +1269,8 @@ export function fromAny(v: unknown, fieldName = ""): Value {
   }
   if (typeof v === "object") {
     const obj = v as Record<string, unknown>;
-    if ((obj._type === "unknown_ext" || obj._type === "ext") && obj.ext_type !== undefined && obj.payload !== undefined) {
-      const extType = typeof obj.ext_type === "string" ? BigInt(obj.ext_type) : BigInt(obj.ext_type as number);
-      const payloadStr = String(obj.payload);
-      let payload: Uint8Array;
-      if (typeof Buffer !== "undefined") {
-        payload = new Uint8Array(Buffer.from(payloadStr, "base64"));
-      } else {
-        const bin = atob(payloadStr);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        payload = arr;
-      }
-      return SJ.unknownExt(extType, payload);
-    }
+    const typed = tryReconstructTyped(obj);
+    if (typed !== null) return typed;
     const members: Record<string, Value> = {};
     for (const [key, val] of Object.entries(v)) {
       members[key] = fromAny(val, key);
@@ -1290,6 +1278,216 @@ export function fromAny(v: unknown, fieldName = ""): Value {
     return SJ.object(members);
   }
   return SJ.string(String(v));
+}
+
+/** Helper: decode a base64 string field from a plain-object map. */
+function b64FieldFromObj(obj: Record<string, unknown>, key: string): Uint8Array | null {
+  const s = obj[key];
+  if (typeof s !== "string") return null;
+  try {
+    if (typeof Buffer !== "undefined") {
+      return new Uint8Array(Buffer.from(s, "base64"));
+    }
+    const bin = atob(s);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  } catch {
+    return null;
+  }
+}
+
+/** Helper: get an integer from a number or string field. */
+function intFieldFromObj(obj: Record<string, unknown>, key: string): number | null {
+  const v = obj[key];
+  if (typeof v === "number") return Math.trunc(v);
+  if (typeof v === "bigint") return Number(v);
+  return null;
+}
+
+/**
+ * Inspect a plain-object for a "_type" key and reconstruct the original typed Value.
+ * Mirrors Go's tryReconstructTyped.  Returns null if not a typed projection.
+ */
+function tryReconstructTyped(obj: Record<string, unknown>): Value | null {
+  const typeStr = obj["_type"];
+  if (typeof typeStr !== "string") return null;
+
+  switch (typeStr) {
+    case "tensor": {
+      const dtypeStr = obj["dtype"];
+      if (typeof dtypeStr !== "string") return null;
+      const dtype = stringToDtype(dtypeStr);
+      if (dtype === null) return null;
+      const dimsRaw = obj["dims"];
+      if (!Array.isArray(dimsRaw)) return null;
+      const shape: number[] = [];
+      for (const d of dimsRaw) {
+        if (typeof d !== "number") return null;
+        shape.push(Math.trunc(d));
+      }
+      const data = b64FieldFromObj(obj, "data");
+      if (data === null) return null;
+      return SJ.tensor(dtype, shape, data);
+    }
+
+    case "tensor_ref": {
+      const store = intFieldFromObj(obj, "store");
+      if (store === null) return null;
+      const key = b64FieldFromObj(obj, "key");
+      if (key === null) return null;
+      return SJ.tensorRef(store, key);
+    }
+
+    case "image": {
+      const fmtStr = obj["format"];
+      if (typeof fmtStr !== "string") return null;
+      const format = stringToImageFormat(fmtStr);
+      if (format === null) return null;
+      const width = intFieldFromObj(obj, "width");
+      const height = intFieldFromObj(obj, "height");
+      if (width === null || height === null) return null;
+      const data = b64FieldFromObj(obj, "data");
+      if (data === null) return null;
+      return SJ.image(format, width, height, data);
+    }
+
+    case "audio": {
+      const encStr = obj["encoding"];
+      if (typeof encStr !== "string") return null;
+      const encoding = stringToAudioEncoding(encStr);
+      if (encoding === null) return null;
+      const rate = intFieldFromObj(obj, "rate");
+      const channels = intFieldFromObj(obj, "channels");
+      if (rate === null || channels === null) return null;
+      const data = b64FieldFromObj(obj, "data");
+      if (data === null) return null;
+      return SJ.audio(encoding, rate, channels, data);
+    }
+
+    case "unknown_ext":
+    case "ext": {
+      const extTypeRaw = obj["ext_type"];
+      if (extTypeRaw === undefined) return null;
+      const extType = typeof extTypeRaw === "string" ? BigInt(extTypeRaw) : BigInt(extTypeRaw as number);
+      const payload = b64FieldFromObj(obj, "payload");
+      if (payload === null) return null;
+      return SJ.unknownExt(extType, payload);
+    }
+
+    case "node": {
+      const id = obj["id"];
+      if (typeof id !== "string") return null;
+      const labelsRaw = obj["labels"];
+      if (!Array.isArray(labelsRaw)) return null;
+      const labels: string[] = [];
+      for (const l of labelsRaw) {
+        if (typeof l !== "string") return null;
+        labels.push(l);
+      }
+      const propsRaw = obj["props"];
+      const props: Record<string, Value> = {};
+      if (propsRaw !== null && propsRaw !== undefined && typeof propsRaw === "object") {
+        for (const [k, pv] of Object.entries(propsRaw as Record<string, unknown>)) {
+          props[k] = fromAny(pv, k);
+        }
+      }
+      return SJ.node(id, labels, props);
+    }
+
+    case "edge": {
+      const fromId = obj["fromId"];
+      const toId = obj["toId"];
+      const edgeType = obj["type"];
+      if (typeof fromId !== "string" || typeof toId !== "string" || typeof edgeType !== "string") return null;
+      const propsRaw = obj["props"];
+      const props: Record<string, Value> = {};
+      if (propsRaw !== null && propsRaw !== undefined && typeof propsRaw === "object") {
+        for (const [k, pv] of Object.entries(propsRaw as Record<string, unknown>)) {
+          props[k] = fromAny(pv, k);
+        }
+      }
+      return SJ.edge(fromId, toId, edgeType, props);
+    }
+
+    case "node_batch": {
+      const nodesRaw = obj["nodes"];
+      if (!Array.isArray(nodesRaw)) return null;
+      const nodes: NodeData[] = [];
+      for (const nr of nodesRaw) {
+        if (typeof nr !== "object" || nr === null) return null;
+        const nv = tryReconstructTyped(nr as Record<string, unknown>);
+        if (nv === null || nv.type !== Type.NODE) return null;
+        nodes.push(nv.data as NodeData);
+      }
+      return SJ.nodeBatch(nodes);
+    }
+
+    case "edge_batch": {
+      const edgesRaw = obj["edges"];
+      if (!Array.isArray(edgesRaw)) return null;
+      const edges: EdgeData[] = [];
+      for (const er of edgesRaw) {
+        if (typeof er !== "object" || er === null) return null;
+        const ev = tryReconstructTyped(er as Record<string, unknown>);
+        if (ev === null || ev.type !== Type.EDGE) return null;
+        edges.push(ev.data as EdgeData);
+      }
+      return SJ.edgeBatch(edges);
+    }
+
+    case "bitmask": {
+      const count = intFieldFromObj(obj, "count");
+      if (count === null) return null;
+      const bits = b64FieldFromObj(obj, "bits");
+      if (bits === null) return null;
+      return SJ.bitmask(count, bits);
+    }
+  }
+
+  return null;
+}
+
+/** Map dtype string (as produced by Go) to DType enum. */
+function stringToDtype(s: string): DType | null {
+  switch (s) {
+    case "float32":  return DType.FLOAT32;
+    case "float16":  return DType.FLOAT16;
+    case "bfloat16": return DType.BFLOAT16;
+    case "float64":  return DType.FLOAT64;
+    case "int8":     return DType.INT8;
+    case "int16":    return DType.INT16;
+    case "int32":    return DType.INT32;
+    case "int64":    return DType.INT64;
+    case "uint8":    return DType.UINT8;
+    case "uint16":   return DType.UINT16;
+    case "uint32":   return DType.UINT32;
+    case "uint64":   return DType.UINT64;
+    default:         return null;
+  }
+}
+
+/** Map image format string (as produced by Go) to ImageFormat enum. */
+function stringToImageFormat(s: string): ImageFormat | null {
+  switch (s) {
+    case "jpeg": return ImageFormat.JPEG;
+    case "png":  return ImageFormat.PNG;
+    case "webp": return ImageFormat.WEBP;
+    case "avif": return ImageFormat.AVIF;
+    case "bmp":  return ImageFormat.BMP;
+    default:     return null;
+  }
+}
+
+/** Map audio encoding string (as produced by Go) to AudioEncoding enum. */
+function stringToAudioEncoding(s: string): AudioEncoding | null {
+  switch (s) {
+    case "pcm_int16":   return AudioEncoding.PCM_INT16;
+    case "pcm_float32": return AudioEncoding.PCM_FLOAT32;
+    case "opus":        return AudioEncoding.OPUS;
+    case "aac":         return AudioEncoding.AAC;
+    default:            return null;
+  }
 }
 
 function inferStringType(s: string, fieldName: string): Value {
@@ -1392,7 +1590,7 @@ export function toAny(v: Value): unknown {
       return {
         _type: "tensor",
         dtype: DType[t.dtype]?.toLowerCase() ?? t.dtype,
-        shape: t.shape,
+        dims: t.shape,
         data: btoa(binary),
       };
     }
@@ -1415,7 +1613,7 @@ export function toAny(v: Value): unknown {
       return {
         _type: "audio",
         encoding: AudioEncoding[aud.encoding]?.toLowerCase() ?? aud.encoding,
-        sampleRate: aud.sampleRate,
+        rate: aud.sampleRate,
         channels: aud.channels,
         data: btoa(binary),
       };
@@ -1426,7 +1624,7 @@ export function toAny(v: Value): unknown {
       for (const b of ref.key) binary += String.fromCharCode(b);
       return {
         _type: "tensor_ref",
-        storeId: ref.storeId,
+        store: ref.storeId,
         key: btoa(binary),
       };
     }
@@ -1452,8 +1650,8 @@ export function toAny(v: Value): unknown {
       }
       return {
         _type: "edge",
-        from: edge.fromId,
-        to: edge.toId,
+        fromId: edge.fromId,
+        toId: edge.toId,
         type: edge.edgeType,
         props: propsJson,
       };
@@ -1463,6 +1661,7 @@ export function toAny(v: Value): unknown {
       return {
         _type: "node_batch",
         nodes: batch.nodes.map((n) => ({
+          _type: "node",
           id: n.id,
           labels: n.labels,
           props: Object.fromEntries(
@@ -1476,8 +1675,9 @@ export function toAny(v: Value): unknown {
       return {
         _type: "edge_batch",
         edges: batch.edges.map((e) => ({
-          from: e.fromId,
-          to: e.toId,
+          _type: "edge",
+          fromId: e.fromId,
+          toId: e.toId,
           type: e.edgeType,
           props: Object.fromEntries(
             Object.entries(e.props).map(([k, val]) => [k, toAny(val)])
@@ -1487,15 +1687,13 @@ export function toAny(v: Value): unknown {
     }
     case Type.BITMASK: {
       const bm = v.data as BitmaskData;
-      // Return as array of booleans for JSON interop
-      const bools: boolean[] = [];
-      for (let i = 0; i < bm.count; i++) {
-        bools.push((bm.bits[Math.floor(i / 8)] & (1 << (i % 8))) !== 0);
-      }
+      // Base64-encode the packed bits (matches Go's base64.StdEncoding)
+      let binary = "";
+      for (const b of bm.bits) binary += String.fromCharCode(b);
       return {
         _type: "bitmask",
         count: bm.count,
-        bits: bools,
+        bits: btoa(binary),
       };
     }
     case Type.UNKNOWN_EXT: {
@@ -1504,7 +1702,7 @@ export function toAny(v: Value): unknown {
       for (const b of ext.payload) binary += String.fromCharCode(b);
       const extVal = ext.extType <= MAX_SAFE_INT ? Number(ext.extType) : ext.extType.toString();
       return {
-        _type: "ext",
+        _type: "unknown_ext",
         ext_type: extVal,
         payload: btoa(binary),
       };

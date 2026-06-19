@@ -816,8 +816,8 @@ class TestJSON:
         edge = Value.edge("a", "b", "REL", {"w": Value.float64(0.5)})
         result = to_any(edge)
         assert result["_type"] == "edge"
-        assert result["from"] == "a"
-        assert result["to"] == "b"
+        assert result["fromId"] == "a"
+        assert result["toId"] == "b"
         assert result["type"] == "REL"
 
     def test_to_any_node_batch(self):
@@ -838,7 +838,7 @@ class TestJSON:
         result = to_any(v)
         assert result["_type"] == "tensor"
         assert result["dtype"] == "float32"
-        assert result["shape"] == [2]
+        assert result["dims"] == [2]
 
     def test_to_any_image(self):
         v = Value.image(ImageFormat.PNG, 100, 200, b"png_data")
@@ -852,19 +852,22 @@ class TestJSON:
         result = to_any(v)
         assert result["_type"] == "audio"
         assert result["encoding"] == "opus"
-        assert result["sample_rate"] == 48000
+        assert result["rate"] == 48000
 
     def test_to_any_tensor_ref(self):
         v = Value.tensor_ref(1, b"key123")
         result = to_any(v)
         assert result["_type"] == "tensor_ref"
-        assert result["store_id"] == 1
+        assert result["store"] == 1
 
     def test_to_any_bitmask(self):
+        import base64
         v = Value.bitmask_from_bools([True, False, True])
         result = to_any(v)
         assert result["_type"] == "bitmask"
-        assert result["bits"] == [True, False, True]
+        assert result["count"] == 3
+        assert isinstance(result["bits"], str), "bits must be base64 string (Go canonical)"
+        assert base64.b64decode(result["bits"]) == bytes([0x05])  # 0b00000101
 
     def test_to_any_unknown_ext(self):
         v = Value.unknown_ext(42, b"data")
@@ -999,9 +1002,9 @@ class TestFromJson:
         assert v.type == Type.UUID128
 
     def test_from_any_ext_dict(self):
-        """Dict with _type=ext round-trips as unknown_ext."""
+        """Dict with _type=unknown_ext round-trips as unknown_ext (canonical Go schema)."""
         import base64
-        v = from_any({"_type": "ext", "ext_type": 42, "payload": base64.b64encode(b"data").decode()})
+        v = from_any({"_type": "unknown_ext", "ext_type": 42, "payload": base64.b64encode(b"data").decode()})
         assert v.type == Type.UNKNOWN_EXT
         assert v.data.ext_type == 42
 

@@ -20,9 +20,17 @@ import {
   ImageFormat,
   NodeData,
   EdgeData,
+  TensorData,
+  ImageData,
+  AudioData,
+  TensorRefData,
+  BitmaskData,
+  UnknownExtData,
   encode,
   decode,
   encodeWithOpts,
+  toJSON,
+  fromJSON,
   schemaFingerprint32,
   schemaFingerprint64,
   schemaEquals,
@@ -817,5 +825,225 @@ test("schemaEquals: scalars of same type match", () => {
   if (!schemaEquals(SJ.int64(1n), SJ.int64(99n))) throw new Error("int64 schema should match");
   if (!schemaEquals(SJ.string("a"), SJ.string("b"))) throw new Error("string schema should match");
   if (schemaEquals(SJ.int64(1n), SJ.string("a"))) throw new Error("int64 vs string should not match");
+});
+
+// ============================================================
+// JSON Bridge Round-Trip Tests
+// ============================================================
+
+console.log("\n--- JSON Bridge Round-Trip Tests ---");
+
+function assertBytesEqual(a: Uint8Array, b: Uint8Array, msg: string): void {
+  if (a.length !== b.length) {
+    throw new Error(`${msg}: length mismatch ${a.length} vs ${b.length}`);
+  }
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      throw new Error(`${msg}: byte mismatch at index ${i}: ${a[i]} vs ${b[i]}`);
+    }
+  }
+}
+
+test("JSON bridge round-trip: tensor", () => {
+  // float32 [2,3] = 24 bytes
+  const data = new Uint8Array(24);
+  for (let i = 0; i < 24; i++) data[i] = i;
+  const orig = SJ.tensor(DType.FLOAT32, [2, 3], data);
+
+  const json = toJSON(orig);
+  // Verify canonical field names in JSON output
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "tensor") throw new Error(`expected _type "tensor", got "${parsed._type}"`);
+  if (!Array.isArray(parsed.dims)) throw new Error("expected 'dims' field (not 'shape')");
+  if (parsed.dims[0] !== 2 || parsed.dims[1] !== 3) throw new Error(`dims mismatch: ${JSON.stringify(parsed.dims)}`);
+  if (typeof parsed.data !== "string") throw new Error("expected base64 data string");
+  if (parsed.dtype !== "float32") throw new Error(`dtype mismatch: ${parsed.dtype}`);
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.TENSOR) throw new Error("round-trip: expected TENSOR type");
+  const t = roundTripped.data as TensorData;
+  if (t.dtype !== DType.FLOAT32) throw new Error(`round-trip dtype mismatch: ${t.dtype}`);
+  if (t.shape[0] !== 2 || t.shape[1] !== 3) throw new Error(`round-trip shape mismatch: ${t.shape}`);
+  assertBytesEqual(t.data, data, "round-trip tensor data");
+});
+
+test("JSON bridge round-trip: image", () => {
+  const data = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x01]);
+  const orig = SJ.image(ImageFormat.JPEG, 640, 480, data);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "image") throw new Error(`expected _type "image"`);
+  if (parsed.format !== "jpeg") throw new Error(`format mismatch: ${parsed.format}`);
+  if (parsed.width !== 640) throw new Error(`width mismatch: ${parsed.width}`);
+  if (parsed.height !== 480) throw new Error(`height mismatch: ${parsed.height}`);
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.IMAGE) throw new Error("round-trip: expected IMAGE type");
+  const img = roundTripped.data as ImageData;
+  if (img.format !== ImageFormat.JPEG) throw new Error(`round-trip format mismatch: ${img.format}`);
+  if (img.width !== 640) throw new Error(`round-trip width mismatch: ${img.width}`);
+  if (img.height !== 480) throw new Error(`round-trip height mismatch: ${img.height}`);
+  assertBytesEqual(img.data, data, "round-trip image data");
+});
+
+test("JSON bridge round-trip: audio", () => {
+  const data = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
+  const orig = SJ.audio(AudioEncoding.PCM_INT16, 44100, 2, data);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "audio") throw new Error(`expected _type "audio"`);
+  if (parsed.encoding !== "pcm_int16") throw new Error(`encoding mismatch: ${parsed.encoding}`);
+  if (parsed.rate !== 44100) throw new Error(`rate mismatch (expected 'rate' not 'sampleRate'): ${JSON.stringify(parsed)}`);
+  if (parsed.channels !== 2) throw new Error(`channels mismatch: ${parsed.channels}`);
+  if (parsed.sampleRate !== undefined) throw new Error("found 'sampleRate' key — should be 'rate'");
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.AUDIO) throw new Error("round-trip: expected AUDIO type");
+  const aud = roundTripped.data as AudioData;
+  if (aud.encoding !== AudioEncoding.PCM_INT16) throw new Error(`round-trip encoding mismatch`);
+  if (aud.sampleRate !== 44100) throw new Error(`round-trip sampleRate mismatch: ${aud.sampleRate}`);
+  if (aud.channels !== 2) throw new Error(`round-trip channels mismatch: ${aud.channels}`);
+  assertBytesEqual(aud.data, data, "round-trip audio data");
+});
+
+test("JSON bridge round-trip: tensor_ref", () => {
+  const key = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02, 0x03,
+                               0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b]);
+  const orig = SJ.tensorRef(7, key);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "tensor_ref") throw new Error(`expected _type "tensor_ref"`);
+  if (parsed.store !== 7) throw new Error(`store mismatch (expected 'store' not 'storeId'): ${JSON.stringify(parsed)}`);
+  if (parsed.storeId !== undefined) throw new Error("found 'storeId' key — should be 'store'");
+  if (typeof parsed.key !== "string") throw new Error("expected base64 key string");
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.TENSOR_REF) throw new Error("round-trip: expected TENSOR_REF type");
+  const ref = roundTripped.data as TensorRefData;
+  if (ref.storeId !== 7) throw new Error(`round-trip storeId mismatch: ${ref.storeId}`);
+  assertBytesEqual(ref.key, key, "round-trip tensor_ref key");
+});
+
+test("JSON bridge round-trip: node", () => {
+  const orig = SJ.node("n42", ["Person", "Employee"], {
+    name: SJ.string("Alice"),
+    score: SJ.int64(99n),
+  });
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "node") throw new Error(`expected _type "node"`);
+  if (parsed.id !== "n42") throw new Error(`id mismatch`);
+  if (!Array.isArray(parsed.labels)) throw new Error("expected labels array");
+  if (parsed.labels[0] !== "Person") throw new Error("labels[0] mismatch");
+  if (typeof parsed.props !== "object") throw new Error("expected props object");
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.NODE) throw new Error("round-trip: expected NODE type");
+  const node = roundTripped.data as NodeData;
+  if (node.id !== "n42") throw new Error(`round-trip id mismatch: ${node.id}`);
+  if (node.labels[0] !== "Person" || node.labels[1] !== "Employee") throw new Error("round-trip labels mismatch");
+  if (node.props["name"]?.data !== "Alice") throw new Error("round-trip props.name mismatch");
+  if (node.props["score"]?.data !== 99n) throw new Error("round-trip props.score mismatch");
+});
+
+test("JSON bridge round-trip: edge (canonical field names fromId/toId)", () => {
+  const orig = SJ.edge("n1", "n2", "KNOWS", { weight: SJ.float64(0.9) });
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "edge") throw new Error(`expected _type "edge"`);
+  if (parsed.fromId !== "n1") throw new Error(`expected 'fromId', got: ${JSON.stringify(parsed)}`);
+  if (parsed.toId !== "n2") throw new Error(`expected 'toId', got: ${JSON.stringify(parsed)}`);
+  if (parsed.type !== "KNOWS") throw new Error(`type mismatch`);
+  if (parsed.from !== undefined) throw new Error("found 'from' key — should be 'fromId'");
+  if (parsed.to !== undefined) throw new Error("found 'to' key — should be 'toId'");
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.EDGE) throw new Error("round-trip: expected EDGE type");
+  const edge = roundTripped.data as EdgeData;
+  if (edge.fromId !== "n1") throw new Error(`round-trip fromId mismatch: ${edge.fromId}`);
+  if (edge.toId !== "n2") throw new Error(`round-trip toId mismatch: ${edge.toId}`);
+  if (edge.edgeType !== "KNOWS") throw new Error(`round-trip edgeType mismatch: ${edge.edgeType}`);
+});
+
+test("JSON bridge round-trip: node_batch", () => {
+  const n1: NodeData = { id: "a", labels: ["X"], props: { val: SJ.int64(1n) } };
+  const n2: NodeData = { id: "b", labels: ["Y"], props: {} };
+  const orig = SJ.nodeBatch([n1, n2]);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "node_batch") throw new Error(`expected _type "node_batch"`);
+  if (!Array.isArray(parsed.nodes)) throw new Error("expected nodes array");
+  if (parsed.nodes[0]._type !== "node") throw new Error("inner node should have _type 'node'");
+  if (parsed.nodes[0].id !== "a") throw new Error(`nodes[0].id mismatch`);
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.NODE_BATCH) throw new Error("round-trip: expected NODE_BATCH type");
+  const batch = roundTripped.data as { nodes: NodeData[] };
+  if (batch.nodes.length !== 2) throw new Error(`round-trip nodes.length mismatch: ${batch.nodes.length}`);
+  if (batch.nodes[0].id !== "a") throw new Error(`round-trip nodes[0].id mismatch`);
+  if (batch.nodes[1].id !== "b") throw new Error(`round-trip nodes[1].id mismatch`);
+});
+
+test("JSON bridge round-trip: edge_batch", () => {
+  const e1: EdgeData = { fromId: "a", toId: "b", edgeType: "REL", props: {} };
+  const orig = SJ.edgeBatch([e1]);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "edge_batch") throw new Error(`expected _type "edge_batch"`);
+  if (!Array.isArray(parsed.edges)) throw new Error("expected edges array");
+  if (parsed.edges[0]._type !== "edge") throw new Error("inner edge should have _type 'edge'");
+  if (parsed.edges[0].fromId !== "a") throw new Error(`edges[0].fromId mismatch`);
+  if (parsed.edges[0].toId !== "b") throw new Error(`edges[0].toId mismatch`);
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.EDGE_BATCH) throw new Error("round-trip: expected EDGE_BATCH type");
+  const batch = roundTripped.data as { edges: EdgeData[] };
+  if (batch.edges[0].fromId !== "a") throw new Error(`round-trip edges[0].fromId mismatch`);
+  if (batch.edges[0].toId !== "b") throw new Error(`round-trip edges[0].toId mismatch`);
+  if (batch.edges[0].edgeType !== "REL") throw new Error(`round-trip edges[0].edgeType mismatch`);
+});
+
+test("JSON bridge round-trip: bitmask (bits as base64, not boolean array)", () => {
+  // 10 bits: [true, false, true, false, true, true, false, false, true, false]
+  // byte 0: 0b00110101 = 0x35, byte 1: 0b00000001 = 0x01
+  const bits = new Uint8Array([0x35, 0x01]);
+  const orig = SJ.bitmask(10, bits);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "bitmask") throw new Error(`expected _type "bitmask"`);
+  if (parsed.count !== 10) throw new Error(`count mismatch: ${parsed.count}`);
+  if (typeof parsed.bits !== "string") throw new Error(`'bits' must be a base64 string, got ${typeof parsed.bits}`);
+  if (Array.isArray(parsed.bits)) throw new Error("'bits' must NOT be a boolean array — must be base64 string");
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.BITMASK) throw new Error("round-trip: expected BITMASK type");
+  const bm = roundTripped.data as BitmaskData;
+  if (bm.count !== 10) throw new Error(`round-trip count mismatch: ${bm.count}`);
+  assertBytesEqual(bm.bits, bits, "round-trip bitmask bits");
+});
+
+test("JSON bridge round-trip: unknown_ext (_type is 'unknown_ext' not 'ext')", () => {
+  const payload = new Uint8Array([0xca, 0xfe, 0xba, 0xbe]);
+  const orig = SJ.unknownExt(99, payload);
+
+  const json = toJSON(orig);
+  const parsed = JSON.parse(json);
+  if (parsed._type !== "unknown_ext") throw new Error(`expected _type "unknown_ext", got "${parsed._type}"`);
+  if (parsed.ext_type !== 99) throw new Error(`ext_type mismatch: ${parsed.ext_type}`);
+  if (typeof parsed.payload !== "string") throw new Error("expected base64 payload string");
+
+  const roundTripped = fromJSON(json);
+  if (roundTripped.type !== Type.UNKNOWN_EXT) throw new Error("round-trip: expected UNKNOWN_EXT type");
+  const ext = roundTripped.data as UnknownExtData;
+  if (ext.extType !== 99n) throw new Error(`round-trip extType mismatch: ${ext.extType}`);
+  assertBytesEqual(ext.payload, payload, "round-trip unknown_ext payload");
 });
 
