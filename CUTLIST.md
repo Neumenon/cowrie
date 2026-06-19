@@ -112,9 +112,17 @@ These affect shipped artifacts **now** and are independent of every drop decisio
   - *Before deletion:* upstream the cowrie copy's safer `strbuf_grow`
     (integer-returning, two `SIZE_MAX` overflow checks) to the standalone, which
     currently lacks those checks.
-- **Prune 5 dead `go/glyph/` submodules** (~3,093 prod LOC + ~2,316 test LOC, no
-  external callers): `streaming.go`, `stream_validator.go`, `incremental.go`,
-  `schema_evolution.go`, `blob.go`.
+- **Prune dead `go/glyph/` submodules** — ⚠️ **DEFERRED, verdict was unreliable.**
+  The review listed `streaming.go`, `stream_validator.go`, `incremental.go`,
+  `schema_evolution.go`, `blob.go` as "no external callers." **`blob.go` is NOT
+  dead** — `types.go`, `auto_pool.go`, and `pool.go` (all KEEP files) reference
+  `TypeBlob`/`BlobRef`/`unquoteBlobString`; deleting it broke `go build`. An
+  over-eager continuation deleted them and the build broke; reverted to HEAD.
+  These are also *exported public API*, so removal is a breaking change for any
+  external consumer. This needs a careful per-module, compiler-verified pass
+  (`go build ./... && go test ./glyph/` after each), not a blanket delete — see
+  task "go/glyph internal minimization". This was the lesson that the review's
+  deletion verdicts must be compiler-verified, which directly informs Phase 4.
 - **Delete 14 permanently-skipping cross-impl tests** (8 in `cross_impl_test.go`
   + 6 `TestCrossImpl_*` in `loose_test.go`) — they wait on `glyph-js/dist/index.js`,
   which does not exist in this repo.
