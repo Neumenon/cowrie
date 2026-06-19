@@ -34,6 +34,22 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 | Python | Yes | Yes | Complete |
 | TypeScript | Yes | Yes | Complete |
 
+## Cross-Language Parity
+
+Every implementation produces **byte-identical** output for the same value — encode
+in Go, decode in Rust, Python, or TypeScript (and back) and the bytes match exactly.
+This is enforced by:
+
+- **40 cross-language fixtures** (`testdata/fixtures/`) run through the reference
+  decoder in CI (`validate_fixtures.py`).
+- **Pinned regression tests** in each language asserting identical *deterministic
+  encodings* and *schema fingerprints* — including ML types and graph
+  (Node/Edge/NodeBatch/EdgeBatch) types, which are byte-for-byte equal across
+  Go/Rust/Python/TypeScript.
+
+Deterministic encoding (keys sorted by byte order, stable tensor/graph layout)
+makes the output suitable for content-addressable storage and cross-service caching.
+
 ## Install
 
 ```bash
@@ -186,14 +202,20 @@ echo '{"name":"Alice","age":30}' | ./cowrie encode --gen2 > data.cowrie
 
 ### Payload Size Comparison
 
-| Payload Type | JSON | Gen1 | Gen2 |
-|--------------|------|------|------|
-| Small object (3 fields) | 46 bytes | 35 bytes (76%) | 43 bytes (93%) |
-| Large array (1000 objects) | 48KB | 34KB (70%) | 23KB (47%) |
-| Float array (10K floats) | 86KB | 80KB (93%) | - |
-| Graph shard (100 nodes) | - | - | 10KB |
+Measured with `cowrie encode` on the described inputs (the embedding row uses the
+typed float32 proto-tensor / `Tensor` type, the ML use case):
 
-**Key insight**: Gen2 dictionary coding provides ~50% size reduction for repeated schemas.
+| Payload | JSON | Gen1 | Gen2 |
+|---------|-----:|-----:|-----:|
+| Small object (3 fields) | 39 B | 35 B | 34 B |
+| Array of 1,000 repeated-schema objects | 45,149 B | 40,003 B | **18,680 B** |
+| 1536-dim float32 embedding (typed) | 29,648 B | 6,185 B | 6,195 B |
+
+**Key insights:** Gen2's dictionary coding roughly halves repeated-schema payloads
+(18.7 KB vs 40 KB Gen1, ~2.4× vs JSON). For float32 tensors/embeddings, both Gen1's
+proto-tensor and Gen2's `Tensor` give ~4.8× over JSON (binary float32 vs float64
+text) — use the typed tensor for ML payloads; an untyped JSON-style float array
+compresses less.
 
 ### When to Use Gen1 vs Gen2
 
@@ -227,6 +249,25 @@ batch := cowrie.NodeBatch([]cowrie.NodeData{node.Node()})
 > **Note:** In Gen2, tag 0x39 (GraphShard) is reserved and no longer emitted —
 > use NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data. (Gen1 still
 > supports GraphShard and AdjList directly.)
+
+## Schema Fingerprint
+
+A stable 64-bit FNV-1a fingerprint of a value's **schema** — its type structure and
+field names, not the data — identical across all implementations. Useful as a
+type ID for stream frames or for detecting schema changes.
+
+```go
+v := cowrie.Object(
+    cowrie.Member{Key: "name", Value: cowrie.String("Alice")},
+    cowrie.Member{Key: "age", Value: cowrie.Int64(30)},
+)
+fp := cowrie.SchemaFingerprint64(v) // same fingerprint in Go/Rust/Python/TS
+// 32-bit variant for compact frame headers:
+id := cowrie.SchemaFingerprint32(v)
+```
+
+Two values with the same field names and types share a fingerprint regardless of
+their actual values; changing a field's name or type changes it.
 
 ## Streaming Support
 
