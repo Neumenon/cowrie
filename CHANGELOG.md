@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Dropped — C implementation; Glyph consolidated to Go-only
+
+The standalone C implementation (`c/`, incl. `c/glyph/`) is removed. It published
+to no registry, used a `SJFR` compression-framing envelope incompatible with the
+wire spec, and gated releases without shipping anything. The Python package is
+unaffected: its Cython `_cext` fast path builds from the self-contained `python/csrc/`
+sources (not `c/`), and pure-Python remains the fallback. The dead ctypes path
+(`_native.py`/`_fast.py`, which loaded a `.so` built from `c/`) is removed.
+
+Glyph is now maintained Go-only: the diverged, unpublished `rust/glyph-codec/`
+copy is removed (use the standalone `glyph` repo for any future Rust/JS glyph
+publishing). The stale `benchmarks/` tree and `docs/glyph/archive/` are removed.
+
 ### Scope cut — graph types, RichText, Delta, ColumnHints parked
 
 Wire-format tags `0x30` (Adjlist), `0x31` (RichText), `0x32` (Delta), and

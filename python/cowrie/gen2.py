@@ -50,11 +50,7 @@ if not _os.environ.get('COWRIE_PUREPYTHON'):
         from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode
         _HAS_NATIVE = True
     except (ImportError, OSError):
-        try:
-            from ._fast import fast_encode as _fast_encode
-            _HAS_NATIVE = True
-        except (ImportError, OSError):
-            pass
+        pass
 
 # Wire format constants
 MAGIC = b'SJ'

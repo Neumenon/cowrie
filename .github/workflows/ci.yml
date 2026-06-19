@@ -157,38 +157,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cd rust && cargo bench 2>/dev/null || echo "No benchmarks configured"
 
-  # ─── C ─────────────────────────────────────────────────────────────
-  c:
-    name: C
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build and test
-        run: |
-          cd c
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_C_FLAGS="-Wall -Wextra -Werror=implicit-function-declaration"
-          make
-          ctest --output-on-failure
-
-      - name: Coverage
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd c
-          rm -rf build && mkdir build && cd build
-          cmake .. -DCOVERAGE=ON
-          make
-          ctest --output-on-failure
-          echo "=== C Coverage Report ==="
-          for gcda in $(find . -name "*.gcda" -not -path "*/CompilerIdC/*"); do
-            gcov -n "$gcda" 2>/dev/null
-          done | grep -E "^(File|Lines)" | grep -v tests/ | grep -v include/
-
   # ─── Cross-Language Fixture Validation ─────────────────────────────
   fixtures:
     name: Cross-Language Fixtures
@@ -256,18 +224,10 @@ jobs:
       - name: Rust robustness tests
         run: cd rust && cargo test --test truth_table --test mutation --test perf_cliff -- --nocapture
 
-      - name: C robustness tests
-        run: |
-          cd c && mkdir -p build && cd build
-          cmake .. && make
-          # Run truth table and mutation tests if built
-          if [ -f test_truth_table ]; then ./test_truth_table; fi
-          if [ -f test_mutation ]; then ./test_mutation; fi
-
   # ─── Publish Gate v2 ───────────────────────────────────────────────
   publish-gate:
     name: Publish Gate
-    needs: [go, python, typescript, rust, c, fixtures]
+    needs: [go, python, typescript, rust, fixtures]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -295,7 +255,6 @@ jobs:
           check_job "Python"     "${{ needs.python.result }}"
           check_job "TypeScript" "${{ needs.typescript.result }}"
           check_job "Rust"       "${{ needs.rust.result }}"
-          check_job "C"          "${{ needs.c.result }}"
           echo ""
           echo "Integration:"
           check_job "Fixtures"   "${{ needs.fixtures.result }}"

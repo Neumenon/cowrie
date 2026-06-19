@@ -31,7 +31,6 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 | Go | Yes | Yes | Complete |
 | Rust | Yes | Yes | Complete |
 | Python | Yes | Yes | Complete |
-| C | Yes | Yes | Complete |
 | TypeScript | Yes | Yes | Complete |
 
 ## Install
@@ -48,10 +47,6 @@ npm install cowrie-codec
 
 # Rust
 cargo add cowrie-rs
-
-# C (source-only)
-git clone https://github.com/Neumenon/cowrie.git
-cd cowrie/c && mkdir -p build && cd build && cmake .. && make
 ```
 
 ## Benchmarks
@@ -170,14 +165,6 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
-### C
-
-```bash
-cd c
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build
-```
 
 Requirements:
 - `zlib` development headers (required)
