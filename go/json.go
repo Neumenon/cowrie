@@ -95,7 +95,7 @@ func fromAnyStrict(v any) *Value {
 		// Try as big int
 		bi := new(big.Int)
 		bi.SetString(x.String(), 10)
-		return BigInt(bi.Bytes())
+		return BigInt(bigIntToTwosComplement(bi))
 
 	case string:
 		return String(x) // No inference - string stays string
@@ -109,10 +109,12 @@ func fromAnyStrict(v any) *Value {
 
 	case map[string]any:
 		members := make([]Member, 0, len(x))
-		for key, val := range x {
+		// Sort keys by UTF-8 byte order so EncodeAny is deterministic
+		// (Go map iteration order is randomized).
+		for _, key := range sortedMapKeys(x) {
 			members = append(members, Member{
 				Key:   key,
-				Value: fromAnyStrict(val),
+				Value: fromAnyStrict(x[key]),
 			})
 		}
 		return Object(members...)
@@ -180,7 +182,7 @@ func fromAnyEnriched(v any, hints map[string]Type) *Value {
 		// Try as big int
 		bi := new(big.Int)
 		bi.SetString(x.String(), 10)
-		return BigInt(bi.Bytes())
+		return BigInt(bigIntToTwosComplement(bi))
 
 	case string:
 		return inferStringType(x, hints, "")
@@ -194,7 +196,9 @@ func fromAnyEnriched(v any, hints map[string]Type) *Value {
 
 	case map[string]any:
 		members := make([]Member, 0, len(x))
-		for key, val := range x {
+		// Sort keys by UTF-8 byte order for deterministic encoding.
+		for _, key := range sortedMapKeys(x) {
+			val := x[key]
 			// Check hints for this field
 			if hints != nil {
 				if hint, ok := hints[key]; ok {
@@ -403,8 +407,7 @@ func ToAny(v *Value) any {
 		return formatUUID(v.uuid128)
 
 	case TypeBigInt:
-		bi := new(big.Int)
-		bi.SetBytes(v.bigintVal)
+		bi := bigIntFromTwosComplement(v.bigintVal)
 		return bi.String()
 
 	case TypeArray:
@@ -465,6 +468,90 @@ func ToAny(v *Value) any {
 			"_type":    "unknown_ext",
 			"ext_type": ext.ExtType,
 			"payload":  base64.StdEncoding.EncodeToString(ext.Payload),
+		}
+
+	case TypeNode:
+		nd := v.nodeVal
+		labels := make([]any, len(nd.Labels))
+		for i, l := range nd.Labels {
+			labels[i] = l
+		}
+		props := make(map[string]any, len(nd.Props))
+		for k, pv := range nd.Props {
+			props[k] = pv
+		}
+		return map[string]any{
+			"_type":  "node",
+			"id":     nd.ID,
+			"labels": labels,
+			"props":  props,
+		}
+
+	case TypeEdge:
+		ed := v.edgeVal
+		props := make(map[string]any, len(ed.Props))
+		for k, pv := range ed.Props {
+			props[k] = pv
+		}
+		return map[string]any{
+			"_type":  "edge",
+			"fromId": ed.From,
+			"toId":   ed.To,
+			"type":   ed.Type,
+			"props":  props,
+		}
+
+	case TypeNodeBatch:
+		nodes := v.nodeBatchVal.Nodes
+		arr := make([]any, len(nodes))
+		for i, nd := range nodes {
+			labels := make([]any, len(nd.Labels))
+			for j, l := range nd.Labels {
+				labels[j] = l
+			}
+			props := make(map[string]any, len(nd.Props))
+			for k, pv := range nd.Props {
+				props[k] = pv
+			}
+			arr[i] = map[string]any{
+				"_type":  "node",
+				"id":     nd.ID,
+				"labels": labels,
+				"props":  props,
+			}
+		}
+		return map[string]any{
+			"_type": "node_batch",
+			"nodes": arr,
+		}
+
+	case TypeEdgeBatch:
+		edges := v.edgeBatchVal.Edges
+		arr := make([]any, len(edges))
+		for i, ed := range edges {
+			props := make(map[string]any, len(ed.Props))
+			for k, pv := range ed.Props {
+				props[k] = pv
+			}
+			arr[i] = map[string]any{
+				"_type":  "edge",
+				"fromId": ed.From,
+				"toId":   ed.To,
+				"type":   ed.Type,
+				"props":  props,
+			}
+		}
+		return map[string]any{
+			"_type": "edge_batch",
+			"edges": arr,
+		}
+
+	case TypeBitmask:
+		bm := v.bitmaskVal
+		return map[string]any{
+			"_type": "bitmask",
+			"count": bm.Count,
+			"bits":  base64.StdEncoding.EncodeToString(bm.Bits),
 		}
 
 	default:
@@ -583,4 +670,103 @@ func formatDecimal128(d Decimal128) string {
 func formatUUID(uuid [16]byte) string {
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:16])
+}
+
+// bigIntToTwosComplement encodes a *big.Int as minimal-length two's-complement
+// big-endian bytes, matching the SPEC wire format stored in bigintVal.
+//
+// Rules:
+//   - Zero → []byte{0x00}
+//   - Positive: big.Int.Bytes() gives the unsigned magnitude; if the top bit is
+//     set we prepend 0x00 so the sign bit is clear.
+//   - Negative: compute the two's-complement representation by taking the
+//     absolute value, inverting all bits, and adding one. If the resulting top
+//     bit is not set (would be misread as positive) we prepend 0xFF.
+func bigIntToTwosComplement(n *big.Int) []byte {
+	switch n.Sign() {
+	case 0:
+		return []byte{0x00}
+	case 1:
+		b := n.Bytes() // unsigned magnitude, big-endian
+		if b[0]&0x80 != 0 {
+			// Top bit set — prepend 0x00 to keep sign positive
+			return append([]byte{0x00}, b...)
+		}
+		return b
+	default: // negative
+		// Work with the absolute value
+		abs := new(big.Int).Neg(n) // abs = -n (positive)
+		b := abs.Bytes()           // unsigned big-endian magnitude
+
+		// Two's complement: invert bits and add one.
+		// We do this byte-by-byte with carry.
+		result := make([]byte, len(b))
+		for i, v := range b {
+			result[i] = ^v
+		}
+		// Add 1 (carry from the right)
+		carry := 1
+		for i := len(result) - 1; i >= 0 && carry != 0; i-- {
+			sum := int(result[i]) + carry
+			result[i] = byte(sum)
+			carry = sum >> 8
+		}
+		if carry != 0 {
+			// Overflow: value was exactly -2^(8*len) — prepend 0x01 then zeros
+			// This happens for e.g. -128 → {0x80} which is already correct,
+			// but for exact powers of two we need an extra byte.
+			result = append([]byte{0x01}, result...)
+		}
+
+		// If top bit is not set, the result would be misread as positive.
+		// Prepend 0xFF to extend the sign.
+		if result[0]&0x80 == 0 {
+			result = append([]byte{0xFF}, result...)
+		}
+		return result
+	}
+}
+
+// bigIntFromTwosComplement interprets b as a minimal-length two's-complement
+// big-endian byte slice and returns the corresponding *big.Int.
+//
+// The high bit of b[0] is the sign bit: 0 = non-negative, 1 = negative.
+// An empty slice is treated as zero.
+func bigIntFromTwosComplement(b []byte) *big.Int {
+	if len(b) == 0 {
+		return new(big.Int)
+	}
+
+	if b[0]&0x80 == 0 {
+		// Non-negative: treat as unsigned magnitude
+		result := new(big.Int).SetBytes(b)
+		return result
+	}
+
+	// Negative: reverse the two's-complement to recover the magnitude.
+	// Subtract one, then invert bits.
+	tmp := make([]byte, len(b))
+	copy(tmp, b)
+
+	// Subtract 1 (borrow from right)
+	borrow := 1
+	for i := len(tmp) - 1; i >= 0 && borrow != 0; i-- {
+		val := int(tmp[i]) - borrow
+		if val < 0 {
+			val += 256
+			borrow = 1
+		} else {
+			borrow = 0
+		}
+		tmp[i] = byte(val)
+	}
+
+	// Invert all bits
+	for i := range tmp {
+		tmp[i] = ^tmp[i]
+	}
+
+	// The result is the positive magnitude; negate it
+	magnitude := new(big.Int).SetBytes(tmp)
+	return magnitude.Neg(magnitude)
 }

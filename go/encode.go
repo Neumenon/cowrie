@@ -547,7 +547,8 @@ func encodeAny(buf *buffer, v any, d *dict) error {
 			buf.writeByte(TagObject)
 			buf.writeUvarint(uint64(len(val)))
 		}
-		for k, v := range val {
+		for _, k := range sortedMapKeys(val) {
+			v := val[k]
 			buf.writeUvarint(uint64(d.get(k)))
 			if err := encodeAny(buf, v, d); err != nil {
 				return err

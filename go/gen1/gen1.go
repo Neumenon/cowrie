@@ -64,11 +64,11 @@ const NumericArrayMin = 4
 
 // Default security limits (tightened based on msgpack-go best practices)
 const (
-	DefaultMaxDepth     = 1000      // Maximum nesting depth
-	DefaultMaxArrayLen  = 1000000   // 1M elements (was 100M)
-	DefaultMaxObjectLen = 1000000   // 1M fields (was 10M)
-	DefaultMaxStringLen = 10000000  // 10MB (was 500MB)
-	DefaultMaxBytesLen  = 50000000  // 50MB (was 1GB)
+	DefaultMaxDepth     = 1000     // Maximum nesting depth
+	DefaultMaxArrayLen  = 1000000  // 1M elements (was 100M)
+	DefaultMaxObjectLen = 1000000  // 1M fields (was 10M)
+	DefaultMaxStringLen = 10000000 // 10MB (was 500MB)
+	DefaultMaxBytesLen  = 50000000 // 50MB (was 1GB)
 )
 
 // DecodeOptions configures security limits for decoding.
@@ -125,6 +125,8 @@ var (
 	ErrShortDecimal128   = errors.New("short decimal128")
 	ErrShortDatetime64   = errors.New("short datetime64")
 	ErrShortUUID128      = errors.New("short uuid128")
+	ErrTrailingData      = errors.New("cowrie: trailing bytes after decoded value")
+	ErrUint64Overflow    = errors.New("cowrie: uint64 value exceeds math.MaxInt64; use tagUint64 path or reject")
 )
 
 // Buffer pool for encoding - reduces allocations in hot paths
@@ -425,8 +427,14 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (any, error) {
 		opts.MaxBytesLen = DefaultMaxBytesLen
 	}
 
-	v, _, err := readValue(data, 0, opts)
-	return v, err
+	v, consumed, err := readValue(data, 0, opts)
+	if err != nil {
+		return nil, err
+	}
+	if consumed < len(data) {
+		return nil, ErrTrailingData
+	}
+	return v, nil
 }
 
 // EncodeJSON encodes raw JSON bytes into GEN-1 Cowrie.
@@ -683,8 +691,15 @@ func appendValueWithOpts(buf []byte, v any, opts EncodeOptions) ([]byte, error) 
 		buf = append(buf, tagInt64)
 		return appendVarint(buf, int64(x)), nil
 	case uint64:
-		buf = append(buf, tagInt64)
-		return appendVarint(buf, int64(x)), nil
+		// Values within signed int64 range encode as tagInt64 (varint) for
+		// compatibility with all decoders. Values above math.MaxInt64 use tagUint64
+		// (uvarint, tag 0x09) which the decoder already handles — never truncate.
+		if x <= math.MaxInt64 {
+			buf = append(buf, tagInt64)
+			return appendVarint(buf, int64(x)), nil
+		}
+		buf = append(buf, tagUint64)
+		return appendUvarint(buf, x), nil
 
 	case string:
 		b := []byte(x)

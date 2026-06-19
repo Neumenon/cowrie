@@ -15,11 +15,31 @@ import (
 //
 // DecodeAny returns Go-friendly values (e.g. `[]byte`, `time.Time`), whereas
 // `ToAny` is a JSON projection (e.g. base64 strings, RFC3339 timestamps).
-
+//
+// # Default precision for []float64
+//
+// By default, []float64 tensors are encoded as DTypeFloat64 (no precision loss).
+// Set Float32Tensors=true to opt in to float32 downcasting, which halves storage
+// at the cost of ~7 decimal digits of precision — useful for ML embeddings where
+// float32 is the native precision and wire size matters.
+//
+// HighPrecision is retained for backward compatibility; it is equivalent to the
+// default (Float32Tensors=false) and has no additional effect beyond that.
 type AnyOptions struct {
-	HighPrecision   bool
+	// HighPrecision is retained for backward compatibility. It originally forced
+	// []float64 to encode as DTypeFloat64 rather than being silently downcast to
+	// float32. That is now the default, so this field is a no-op but safe to set.
+	HighPrecision bool
+
 	Enriched        bool
 	TensorizeSlices bool
+
+	// Float32Tensors opts in to lossy float32 downcasting for []float64 tensors.
+	// When true, []float64 is encoded as DTypeFloat32 (half the wire bytes, ~7
+	// digits of decimal precision). Use for ML/embedding payloads where the source
+	// data is already float32-precision or wire size is critical.
+	// Default (false) preserves full float64 precision.
+	Float32Tensors bool
 }
 
 // DefaultAnyOptions returns recommended defaults for EncodeAny.
@@ -186,10 +206,12 @@ func fromGoAny(v any, opts AnyOptions) *Value {
 		case []float32:
 			return Tensor(DTypeFloat32, []uint64{uint64(len(x))}, encodeFloat32LE(x))
 		case []float64:
-			if opts.HighPrecision {
-				return Tensor(DTypeFloat64, []uint64{uint64(len(x))}, encodeFloat64LE(x))
+			// Default: preserve full float64 precision (no silent precision loss).
+			// Set Float32Tensors=true to opt in to lossy float32 downcasting.
+			if opts.Float32Tensors {
+				return Tensor(DTypeFloat32, []uint64{uint64(len(x))}, encodeFloat64AsFloat32LE(x))
 			}
-			return Tensor(DTypeFloat32, []uint64{uint64(len(x))}, encodeFloat64AsFloat32LE(x))
+			return Tensor(DTypeFloat64, []uint64{uint64(len(x))}, encodeFloat64LE(x))
 		case []int32:
 			return Tensor(DTypeInt32, []uint64{uint64(len(x))}, encodeInt32LE(x))
 		case []int64:
@@ -199,7 +221,7 @@ func fromGoAny(v any, opts AnyOptions) *Value {
 				return t
 			}
 		case [][]float64:
-			if t := encodeFloat64MatrixTensor(x, opts.HighPrecision); t != nil {
+			if t := encodeFloat64MatrixTensor(x, opts.Float32Tensors); t != nil {
 				return t
 			}
 		case []any:
@@ -243,10 +265,11 @@ func tryTensorizeAnySlice(arr []any, opts AnyOptions) *Value {
 		}
 	}
 
-	if opts.HighPrecision {
-		return Tensor(DTypeFloat64, []uint64{uint64(len(floats))}, encodeFloat64LE(floats))
+	// Default: preserve full float64 precision. Float32Tensors opts in to lossy downcast.
+	if opts.Float32Tensors {
+		return Tensor(DTypeFloat32, []uint64{uint64(len(floats))}, encodeFloat64AsFloat32LE(floats))
 	}
-	return Tensor(DTypeFloat32, []uint64{uint64(len(floats))}, encodeFloat64AsFloat32LE(floats))
+	return Tensor(DTypeFloat64, []uint64{uint64(len(floats))}, encodeFloat64LE(floats))
 }
 
 func encodeFloat32LE(values []float32) []byte {
@@ -309,7 +332,7 @@ func encodeFloat32MatrixTensor(rows [][]float32) *Value {
 	return Tensor(DTypeFloat32, []uint64{uint64(len(rows)), uint64(cols)}, encodeFloat32LE(flat))
 }
 
-func encodeFloat64MatrixTensor(rows [][]float64, highPrecision bool) *Value {
+func encodeFloat64MatrixTensor(rows [][]float64, float32Tensors bool) *Value {
 	if len(rows) == 0 {
 		return nil
 	}
@@ -328,10 +351,11 @@ func encodeFloat64MatrixTensor(rows [][]float64, highPrecision bool) *Value {
 		flat = append(flat, r...)
 	}
 
-	if highPrecision {
-		return Tensor(DTypeFloat64, []uint64{uint64(len(rows)), uint64(cols)}, encodeFloat64LE(flat))
+	// Default: preserve full float64 precision. float32Tensors opts in to lossy downcast.
+	if float32Tensors {
+		return Tensor(DTypeFloat32, []uint64{uint64(len(rows)), uint64(cols)}, encodeFloat64AsFloat32LE(flat))
 	}
-	return Tensor(DTypeFloat32, []uint64{uint64(len(rows)), uint64(cols)}, encodeFloat64AsFloat32LE(flat))
+	return Tensor(DTypeFloat64, []uint64{uint64(len(rows)), uint64(cols)}, encodeFloat64LE(flat))
 }
 
 // Fallback helper used for "unknown" types when the caller asked for enriched

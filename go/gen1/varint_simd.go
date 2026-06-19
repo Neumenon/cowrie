@@ -4,17 +4,31 @@
 // reducing branch mispredictions and enabling SIMD-friendly decoding.
 //
 // Wire format:
-//   [CTRL: 1 byte] [INT0: 1-4B] [INT1: 1-4B] [INT2: 1-4B] [INT3: 1-4B]
+//
+//	[CTRL: 1 byte] [INT0: 1-4B] [INT1: 1-4B] [INT2: 1-4B] [INT3: 1-4B]
 //
 // Control byte encodes byte counts: 2 bits per integer
-//   00 = 1 byte, 01 = 2 bytes, 10 = 3 bytes, 11 = 4 bytes
+//
+//	00 = 1 byte, 01 = 2 bytes, 10 = 3 bytes, 11 = 4 bytes
 package gen1
 
 import (
 	"encoding/binary"
 )
 
-// New tag for Group VByte encoded int32 arrays
+// tagArrayInt32GroupVB is the tag byte used by the standalone GroupVByte helpers
+// (EncodeInt32ArrayGroupVB / EncodeUint32ArrayGroupVB / Decode* counterparts).
+//
+// TAG COLLISION WARNING: 0x0F is also tagFloat32 in gen1.go's unified tag table
+// (scalar float32, 4 bytes).  This is safe TODAY only because the GroupVByte
+// functions are NOT wired into the main Encode/Decode paths: appendValueWithOpts
+// never emits 0x0F as an array tag, and the readValue switch handles 0x0F as
+// tagFloat32.  Any attempt to route tagArrayInt32GroupVB through Encode/Decode
+// would silently produce corrupt output.
+//
+// Resolution: if this code is promoted to a live codec path, assign it a tag
+// from the reserved range (0x10–0x15 or above 0x39) and update all decoders
+// before shipping — do NOT reuse 0x0F.
 const tagArrayInt32GroupVB byte = 0x0F
 
 // byteCountTable maps control byte to total data bytes (precomputed)
