@@ -72,6 +72,17 @@ These affect shipped artifacts **now** and are independent of every drop decisio
 > Bitmask (0x24) is **active**, so B2 is a real shipped bug irrespective of the
 > graph-tag decision in §6.
 
+### Phase-2 outcome (2026-06-19)
+
+| # | Status | Detail |
+|---|--------|--------|
+| B1 | ✅ fixed | Removed the duplicate `publish-pypi` job from `ci.yml` (commit f62a9a0). |
+| B2 | ✅ fixed | `typeToOrd` now returns Go-canonical ordinals for bitmask + 4 graph types; regression test pinned to Go's computed fingerprint (`fp32=2248264336`). Verified 27/27 TS tests. **Scope correction:** `UNKNOWN_EXT` is *not* fixed — Go also hashes its `ExtType`, which TS `hashSchema` doesn't mirror; that and the Audio `channels` divergence (Go hashes `encoding+channels`, TS only `encoding`) are part of the deferred B4 audit. |
+| B3 | ✅ fixed | Rewrote the no-op fixtures CI job to actually decode every fixture with the Go reference decoder and diff against expected JSON / assert negative cases reject. Committed `testdata/fixtures/validate_fixtures.py`; verified 34/34 locally. *Follow-up:* extend the harness to also run the Python + TS decoders for true cross-language coverage. |
+| B4 | ⏸ deferred | **Deeper than reported** — multiple `hashSchema` body divergences (UNKNOWN_EXT recursion, Audio channels), not just `typeToOrd`. Needs a dedicated cross-language fingerprint-parity audit + the first fingerprint fixtures in `manifest.json` (currently zero). Entangled with §6 D2. |
+| B5 | ⏸ → Phase 4 | The `csrc/` regressions are in the C fork that Phase 4 restructures; the wheel-regression test is best designed alongside the native-build change. |
+| B6 | ⏸ deferred | **Cited mypy "bytes/str bug" at `gen2.py:1257-1258` DISPROVEN** — `TensorRefData.key` is typed `bytes` consistently across type/constructor/encoder/decoder; the round-trip is correct. Remaining lints are clippy pedantry + tsc errors in `src/gen1` (deleted under D1); un-silencing now would turn CI red on soon-to-change code. Do after D1. |
+
 ---
 
 ## 3. Safe cleanups (low controversy, verified — execute on branch)

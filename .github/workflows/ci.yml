@@ -212,61 +212,13 @@ jobs:
       - name: Install TS package
         run: cd typescript && npm ci
 
-      - name: Validate manifest fixtures across languages
-        run: |
-          echo "=== Cross-language fixture validation ==="
-          FAIL=0
-          PASS=0
-          SKIP=0
+      - name: Build Go reference decoder
+        run: cd go && go build -o "$RUNNER_TEMP/cowrie-cli" ./cmd/cowrie
 
-          # Parse manifest.json and validate each case
-          python3 -c "
-          import json, subprocess, sys, os
-
-          with open('testdata/fixtures/manifest.json') as f:
-              manifest = json.load(f)
-
-          fail = 0
-          passed = 0
-          skipped = 0
-
-          for case in manifest['cases']:
-              cid = case['id']
-              input_path = os.path.join('testdata/fixtures', case['input'])
-              expect = case['expect']
-
-              if not os.path.exists(input_path):
-                  print(f'  SKIP {cid}: input file missing')
-                  skipped += 1
-                  continue
-
-              # For decode cases with expected JSON, verify Go can decode
-              if case['kind'] == 'decode' and expect.get('ok') and 'json' in expect:
-                  json_path = os.path.join('testdata/fixtures', expect['json'])
-                  if os.path.exists(json_path):
-                      with open(json_path) as jf:
-                          expected_json = json.load(jf)
-                      print(f'  OK   {cid} (json verified)')
-                      passed += 1
-                  else:
-                      print(f'  SKIP {cid}: json file missing')
-                      skipped += 1
-              elif case['kind'] == 'decode' and not expect.get('ok'):
-                  # Negative test — just verify the fixture file exists
-                  print(f'  OK   {cid} (negative case)')
-                  passed += 1
-              else:
-                  print(f'  OK   {cid}')
-                  passed += 1
-
-          print(f'')
-          print(f'Results: {passed} passed, {skipped} skipped, {fail} failed')
-          if fail > 0:
-              sys.exit(1)
-          "
-
-          echo ""
-          echo "Fixture validation complete."
+      - name: Validate fixtures by decoding with the Go reference decoder
+        env:
+          GO_CLI: ${{ runner.temp }}/cowrie-cli
+        run: python3 testdata/fixtures/validate_fixtures.py
 
   # ─── Robustness Tests ─────────────────────────────────────────────
   robustness:
