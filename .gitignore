@@ -41,3 +41,9 @@ benchmarks/notebooks/
 # Cython build artifacts (keep _cext.c — ships in sdist)
 python/build/
 python/cowrie/*.so
+
+# Removed C implementation — only build leftovers remain on disk
+c/
+
+# Generated LLM context bundles (regenerate from source; not source of truth)
+cowrie-go-*context*.md

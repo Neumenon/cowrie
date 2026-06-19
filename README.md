@@ -166,10 +166,9 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
-
-Requirements:
-- `zlib` development headers (required)
-- `libzstd` + `pkg-config` (optional, for zstd support)
+The optional Cython fast-path extension needs `zlib` development headers (and
+`libzstd` + `pkg-config` for zstd support); without them, the pure-Python path is
+used automatically.
 
 ### TypeScript
 
