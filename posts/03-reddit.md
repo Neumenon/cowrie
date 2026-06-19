@@ -8,7 +8,7 @@
 
 **Body:**
 
-I've been working on Cowrie, a binary codec for JSON-like data. There are implementations in 5 languages, but I wanted to share the Go specifics here since it's the most complete implementation and where the CLI tool lives.
+I've been working on Cowrie, a binary codec for JSON-like data. There are implementations in 4 languages, but I wanted to share the Go specifics here since it's the most complete implementation and where the CLI tool lives.
 
 **What it does:**
 
@@ -46,7 +46,7 @@ data, _ = gen2.Encode(val)
 
 - Gen2 has header overhead on small objects (93% of JSON for a single 3-field object). Dictionary coding pays off with repeated schemas, not single messages.
 - New project — well-tested (34 cross-language test fixtures, 16 security regression tests) but not production-proven at scale.
-- 5 language implementations vs MessagePack's dozens.
+- 4 language implementations vs MessagePack's dozens.
 
 **Install:**
 
@@ -68,7 +68,7 @@ Interested in feedback on the Go API, especially around the Gen2 value construct
 
 **Body:**
 
-I'm releasing `cowrie-rs`, a Rust implementation of the Cowrie binary codec. It's part of a multi-language project (Go, Rust, Python, C, TypeScript), but I wanted to get Rust-specific feedback.
+I'm releasing `cowrie-rs`, a Rust implementation of the Cowrie binary codec. It's part of a multi-language project (Go, Rust, Python, TypeScript), but I wanted to get Rust-specific feedback.
 
 **What Cowrie is:**
 
@@ -140,11 +140,11 @@ Wire format spec: https://github.com/Neumenon/cowrie/blob/main/SPEC.md
 
 ## r/programming
 
-**Title:** Cowrie: a binary JSON codec in 5 languages (Go, Rust, Python, C, TypeScript) with dictionary coding and ML types
+**Title:** Cowrie: a binary JSON codec in 4 languages (Go, Rust, Python, TypeScript) with dictionary coding and ML types
 
 **Body:**
 
-I built a binary codec for JSON-like data that works identically across Go, Rust, Python, C, and TypeScript. No code generation, no schema files — you pass a data structure and get bytes.
+I built a binary codec for JSON-like data that works identically across Go, Rust, Python, and TypeScript. No code generation, no schema files — you pass a data structure and get bytes.
 
 **Why another binary format?**
 
@@ -162,7 +162,7 @@ Cowrie has two variants:
 
 **Cross-language parity:**
 
-All 5 implementations pass the same cross-language test fixtures (core types, ML types, graph node/edge types, and negative cases). The fixture suite covers encode/decode round-trips, ML type handling, and error cases (invalid magic, bad version, truncated input, invalid tags).
+All 4 implementations pass the same cross-language test fixtures (core types, ML types, graph node/edge types, and negative cases). The fixture suite covers encode/decode round-trips, ML type handling, and error cases (invalid magic, bad version, truncated input, invalid tags).
 
 **Comparison with alternatives:**
 

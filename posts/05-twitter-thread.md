@@ -6,9 +6,9 @@ Post as a thread (reply to each previous tweet). Include the image/code screensh
 
 **Tweet 1 (Hook)**
 
-Shipped Cowrie — a binary JSON codec that works in Go, Rust, Python, C, and TypeScript.
+Shipped Cowrie — a binary JSON codec that works in Go, Rust, Python, and TypeScript.
 
-No schema files. No code generation. Encode a map, get bytes, decode in any of the 5 languages.
+No schema files. No code generation. Encode a map, get bytes, decode in any of the 4 languages.
 
 github.com/Neumenon/cowrie
 
@@ -94,11 +94,11 @@ Designed for GNN mini-batch transfer and bulk graph streaming. Dictionary-coded 
 
 **Tweet 8 (Cross-language parity)**
 
-Cross-language parity: shared test fixtures across all 5 languages.
+Cross-language parity: shared test fixtures across all 4 languages.
 
 Core types, ML types (tensor/image/audio), graph node/edge types, negative cases.
 
-All 5 implementations must produce and consume identical bytes. If Go encodes it, Rust, Python, C, and TypeScript decode it the same way.
+All 4 implementations must produce and consume identical bytes. If Go encodes it, Rust, Python, and TypeScript decode it the same way.
 
 ---
 

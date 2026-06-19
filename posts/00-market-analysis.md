@@ -58,7 +58,7 @@ A single Cowrie message can contain a JSON-like object with nested tensors, imag
 
 ### Unlock 5: No-Codegen Polyglot Interop
 
-The 34 cross-language fixtures mean all 5 implementations produce and consume identical bytes. Adding a new field to your data structure requires zero changes to any build pipeline — no `.proto` file, no `protoc`, no generated code, no version conflicts.
+The 34 cross-language fixtures mean all 4 implementations produce and consume identical bytes. Adding a new field to your data structure requires zero changes to any build pipeline — no `.proto` file, no `protoc`, no generated code, no version conflicts.
 
 **What this eliminates**: Schema management overhead, codegen build steps, schema version conflicts between services, the "regenerate and redeploy all clients" problem.
 
@@ -240,7 +240,7 @@ Note: These are addressable markets for the *value delivered*, not for software 
 
 1. **Dictionary coding + schemaless + binary + ML types in one format.** No existing format combines all four. This is not a "10% better MessagePack" — it's a genuinely different design point.
 
-2. **Zero-copy tensor views across 5 languages.** Most tensor transfer solutions are language-specific (pickle, NumPy memmap, PyTorch's serialization). Cowrie makes this work across Go, Rust, Python, C, and TypeScript with a shared wire format.
+2. **Zero-copy tensor views across 4 languages.** Most tensor transfer solutions are language-specific (pickle, NumPy memmap, PyTorch's serialization). Cowrie makes this work across Go, Rust, Python, and TypeScript with a shared wire format.
 
 3. **Graph node/edge types as wire primitives.** Native Node, Edge, NodeBatch, and EdgeBatch types avoid the JSON-array flattening step. AdjList (CSR) is parked for now but remains a planned extension.
 

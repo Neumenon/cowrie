@@ -2,7 +2,7 @@
 
 ## Cowrie
 
-Cowrie is a binary JSON bridge for structured data, available in two variants: Gen1, a lightweight tag-length-value codec with core types, and Gen2, a full codec with native tensors, images, audio, graph node/edge types, dictionary coding, and optional gzip/zstd compression. Gen2's dictionary coding reduces payload size by roughly 50% for data with repeated schemas (e.g., 1000-object arrays go from 48KB JSON to 23KB Cowrie), while Gen1 provides single-pass encoding with predictable latency for real-time use. Implementations exist in Go, Rust, Python, C, and TypeScript, with cross-language binary compatibility verified through shared test fixtures. Cowrie is for anyone building ML pipelines, GNN systems, or high-throughput APIs who needs a binary format that handles tensors, graph nodes/edges, and ordinary structured data in a single codec.
+Cowrie is a binary JSON bridge for structured data, available in two variants: Gen1, a lightweight tag-length-value codec with core types, and Gen2, a full codec with native tensors, images, audio, graph node/edge types, dictionary coding, and optional gzip/zstd compression. Gen2's dictionary coding reduces payload size by roughly 50% for data with repeated schemas (e.g., 1000-object arrays go from 48KB JSON to 23KB Cowrie), while Gen1 provides single-pass encoding with predictable latency for real-time use. Implementations exist in Go, Rust, Python, and TypeScript, with cross-language binary compatibility verified through shared test fixtures. Cowrie is for anyone building ML pipelines, GNN systems, or high-throughput APIs who needs a binary format that handles tensors, graph nodes/edges, and ordinary structured data in a single codec.
 
 ## Glyph
 
