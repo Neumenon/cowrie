@@ -1064,9 +1064,10 @@ class Encoder:
         self._encode_props(edge.props)
 
     def _encode_props(self, props: dict[str, Value]):
-        """Encode dictionary-coded properties."""
+        """Encode dictionary-coded properties, sorted by UTF-8 byte order."""
         self._write_uvarint(len(props))
-        for key, val in props.items():
+        for key in sorted(props.keys()):
+            val = props[key]
             idx = self.dict_lookup[key]
             self._write_uvarint(idx)
             self._encode_value(val)
@@ -1776,6 +1777,24 @@ class DeterministicEncoder(Encoder):
                     continue
                 self._add_key(key)
                 self._collect_keys_sorted(val)
+        elif v.type == Type.NODE:
+            for key in sorted(v.data.props.keys()):
+                self._add_key(key)
+                self._collect_keys_sorted(v.data.props[key])
+        elif v.type == Type.EDGE:
+            for key in sorted(v.data.props.keys()):
+                self._add_key(key)
+                self._collect_keys_sorted(v.data.props[key])
+        elif v.type == Type.NODE_BATCH:
+            for node in v.data.nodes:
+                for key in sorted(node.props.keys()):
+                    self._add_key(key)
+                    self._collect_keys_sorted(node.props[key])
+        elif v.type == Type.EDGE_BATCH:
+            for edge in v.data.edges:
+                for key in sorted(edge.props.keys()):
+                    self._add_key(key)
+                    self._collect_keys_sorted(edge.props[key])
     def _encode_value_sorted(self, v: Value):
         """Encode value with sorted object keys."""
         if v is None or v.type == Type.NULL:
@@ -1884,6 +1903,52 @@ class DeterministicEncoder(Encoder):
             self._write_byte(ref.store_id)
             self._write_uvarint(len(ref.key))
             self._write(ref.key)
+        # Graph types — props sorted by UTF-8 byte order
+        elif v.type == Type.NODE:
+            node = v.data  # NodeData
+            self._write_byte(Tag.NODE)
+            self._encode_node_sorted(node)
+        elif v.type == Type.EDGE:
+            edge = v.data  # EdgeData
+            self._write_byte(Tag.EDGE)
+            self._encode_edge_sorted(edge)
+        elif v.type == Type.NODE_BATCH:
+            batch = v.data  # NodeBatchData
+            self._write_byte(Tag.NODE_BATCH)
+            self._write_uvarint(len(batch.nodes))
+            for node in batch.nodes:
+                self._encode_node_sorted(node)
+        elif v.type == Type.EDGE_BATCH:
+            batch = v.data  # EdgeBatchData
+            self._write_byte(Tag.EDGE_BATCH)
+            self._write_uvarint(len(batch.edges))
+            for edge in batch.edges:
+                self._encode_edge_sorted(edge)
+
+    def _encode_props_sorted(self, props: dict[str, Value]):
+        """Encode props with keys sorted by UTF-8 byte order."""
+        self._write_uvarint(len(props))
+        for key in sorted(props.keys()):
+            val = props[key]
+            idx = self.dict_lookup[key]
+            self._write_uvarint(idx)
+            self._encode_value_sorted(val)
+
+    def _encode_node_sorted(self, node: NodeData):
+        """Encode a node without tag byte, props sorted."""
+        self._write_string(node.id)
+        self._write_uvarint(len(node.labels))
+        for label in node.labels:
+            self._write_string(label)
+        self._encode_props_sorted(node.props)
+
+    def _encode_edge_sorted(self, edge: EdgeData):
+        """Encode an edge without tag byte, props sorted."""
+        self._write_string(edge.from_id)
+        self._write_string(edge.to_id)
+        self._write_string(edge.edge_type)
+        self._encode_props_sorted(edge.props)
+
     def encode_with_opts(self, v: Value) -> bytes:
         """Encode with options."""
         if not self.opts.deterministic:

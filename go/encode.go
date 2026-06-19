@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"sync"
 )
 
@@ -175,11 +176,12 @@ func collectKeys(v *Value, d *dict) {
 }
 
 // collectKeysFromAnyMap recursively collects keys from a map[string]any.
+// Keys are visited in sorted order so that dictionary indices are deterministic.
 func collectKeysFromAnyMap(m map[string]any, d *dict) {
-	for k, v := range m {
+	for _, k := range sortedMapKeys(m) {
 		d.add(k)
 		// Recursively collect keys from nested maps and arrays
-		collectKeysFromAnyValue(v, d)
+		collectKeysFromAnyValue(m[k], d)
 	}
 }
 
@@ -366,11 +368,11 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		for _, label := range v.nodeVal.Labels {
 			buf.writeString(label)
 		}
-		// Properties (dictionary-coded keys)
+		// Properties (dictionary-coded keys, sorted for determinism)
 		buf.writeUvarint(uint64(len(v.nodeVal.Props)))
-		for k, propVal := range v.nodeVal.Props {
+		for _, k := range sortedMapKeys(v.nodeVal.Props) {
 			buf.writeUvarint(uint64(d.get(k)))
-			if err := encodeAny(buf, propVal, d); err != nil {
+			if err := encodeAny(buf, v.nodeVal.Props[k], d); err != nil {
 				return err
 			}
 		}
@@ -382,11 +384,11 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		buf.writeString(v.edgeVal.To)
 		// Edge type
 		buf.writeString(v.edgeVal.Type)
-		// Properties (dictionary-coded keys)
+		// Properties (dictionary-coded keys, sorted for determinism)
 		buf.writeUvarint(uint64(len(v.edgeVal.Props)))
-		for k, propVal := range v.edgeVal.Props {
+		for _, k := range sortedMapKeys(v.edgeVal.Props) {
 			buf.writeUvarint(uint64(d.get(k)))
-			if err := encodeAny(buf, propVal, d); err != nil {
+			if err := encodeAny(buf, v.edgeVal.Props[k], d); err != nil {
 				return err
 			}
 		}
@@ -446,11 +448,11 @@ func encodeNodeData(buf *buffer, node *NodeData, d *dict) error {
 	for _, label := range node.Labels {
 		buf.writeString(label)
 	}
-	// Properties (dictionary-coded keys)
+	// Properties (dictionary-coded keys, sorted for determinism)
 	buf.writeUvarint(uint64(len(node.Props)))
-	for k, propVal := range node.Props {
+	for _, k := range sortedMapKeys(node.Props) {
 		buf.writeUvarint(uint64(d.get(k)))
-		if err := encodeAny(buf, propVal, d); err != nil {
+		if err := encodeAny(buf, node.Props[k], d); err != nil {
 			return err
 		}
 	}
@@ -464,11 +466,11 @@ func encodeEdgeData(buf *buffer, edge *EdgeData, d *dict) error {
 	buf.writeString(edge.To)
 	// Edge type
 	buf.writeString(edge.Type)
-	// Properties (dictionary-coded keys)
+	// Properties (dictionary-coded keys, sorted for determinism)
 	buf.writeUvarint(uint64(len(edge.Props)))
-	for k, propVal := range edge.Props {
+	for _, k := range sortedMapKeys(edge.Props) {
 		buf.writeUvarint(uint64(d.get(k)))
-		if err := encodeAny(buf, propVal, d); err != nil {
+		if err := encodeAny(buf, edge.Props[k], d); err != nil {
 			return err
 		}
 	}
@@ -676,6 +678,17 @@ func canonicalize(v *Value) *Value {
 		// Scalars and other types don't need canonicalization
 		return v
 	}
+}
+
+// sortedMapKeys returns the keys of a map[string]any sorted by UTF-8 byte order.
+// Used to make graph property encoding deterministic.
+func sortedMapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // sortMembers sorts members by key in lexicographic order.

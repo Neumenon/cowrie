@@ -510,9 +510,10 @@ class Encoder {
   }
 
   private collectPropsKeys(props: Record<string, Value>): void {
-    for (const [key, val] of Object.entries(props)) {
+    const keys = Object.keys(props).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    for (const key of keys) {
       this.addKey(key);
-      this.collectKeys(val);
+      this.collectKeys(props[key]);
     }
   }
 
@@ -758,7 +759,7 @@ class Encoder {
   }
 
   private encodeProps(props: Record<string, Value>): void {
-    const entries = Object.entries(props);
+    const entries = Object.entries(props).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
     this.writeUvarint(entries.length);
     for (const [key, val] of entries) {
       const idx = this.dictLookup.get(key);
@@ -1511,6 +1512,26 @@ class DeterministicEncoder extends Encoder {
         this.addKeySorted(key);
         this.collectKeysSorted(val);
       }
+    } else if (v.type === Type.NODE) {
+      this.collectPropKeysSorted((v.data as NodeData).props);
+    } else if (v.type === Type.EDGE) {
+      this.collectPropKeysSorted((v.data as EdgeData).props);
+    } else if (v.type === Type.NODE_BATCH) {
+      for (const node of (v.data as NodeBatchData).nodes) {
+        this.collectPropKeysSorted(node.props);
+      }
+    } else if (v.type === Type.EDGE_BATCH) {
+      for (const edge of (v.data as EdgeBatchData).edges) {
+        this.collectPropKeysSorted(edge.props);
+      }
+    }
+  }
+
+  private collectPropKeysSorted(props: Record<string, Value>): void {
+    const keys = Object.keys(props).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    for (const key of keys) {
+      this.addKeySorted(key);
+      this.collectKeysSorted(props[key]);
     }
   }
 
@@ -1686,6 +1707,30 @@ class DeterministicEncoder extends Encoder {
         this.writeSorted(ref.key);
         break;
       }
+      case Type.NODE: {
+        this.writeByteSorted(Tag.NODE);
+        this.encodeNodeSorted(v.data as NodeData);
+        break;
+      }
+      case Type.EDGE: {
+        this.writeByteSorted(Tag.EDGE);
+        this.encodeEdgeSorted(v.data as EdgeData);
+        break;
+      }
+      case Type.NODE_BATCH: {
+        const batch = v.data as NodeBatchData;
+        this.writeByteSorted(Tag.NODE_BATCH);
+        this.writeUvarintSorted(batch.nodes.length);
+        for (const node of batch.nodes) this.encodeNodeSorted(node);
+        break;
+      }
+      case Type.EDGE_BATCH: {
+        const batch = v.data as EdgeBatchData;
+        this.writeByteSorted(Tag.EDGE_BATCH);
+        this.writeUvarintSorted(batch.edges.length);
+        for (const edge of batch.edges) this.encodeEdgeSorted(edge);
+        break;
+      }
       case Type.BITMASK: {
         const bm = v.data as BitmaskData;
         this.writeByteSorted(Tag.BITMASK);
@@ -1693,6 +1738,33 @@ class DeterministicEncoder extends Encoder {
         this.writeSorted(bm.bits);
         break;
       }
+    }
+  }
+
+  private encodeNodeSorted(node: NodeData): void {
+    this.writeStringSorted(node.id);
+    this.writeUvarintSorted(node.labels.length);
+    for (const label of node.labels) this.writeStringSorted(label);
+    this.encodePropsSorted(node.props);
+  }
+
+  private encodeEdgeSorted(edge: EdgeData): void {
+    this.writeStringSorted(edge.fromId);
+    this.writeStringSorted(edge.toId);
+    this.writeStringSorted(edge.edgeType);
+    this.encodePropsSorted(edge.props);
+  }
+
+  private encodePropsSorted(props: Record<string, Value>): void {
+    const entries = Object.entries(props).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    this.writeUvarintSorted(entries.length);
+    for (const [key, val] of entries) {
+      const idx = this.sortedDictLookup.get(key);
+      if (idx === undefined) {
+        throw new Error(`Internal: graph prop key "${key}" missing from sorted dictionary`);
+      }
+      this.writeUvarintSorted(idx);
+      this.encodeValueSorted(val);
     }
   }
 

@@ -16,6 +16,8 @@ import {
   Value,
   Type,
   AudioEncoding,
+  NodeData,
+  EdgeData,
   encode,
   decode,
   encodeWithOpts,
@@ -513,6 +515,64 @@ test("varint at exactly 2^53-1 does not throw for safe integer check", () => {
   }
   if (threwSafeInt) {
     throw new Error("Should not throw safe integer error for 2^53-1");
+  }
+});
+
+// ============================================================
+// Test Suite: Graph Determinism (Go byte-parity regression)
+// ============================================================
+
+console.log("\n--- Graph Determinism Tests (Go parity) ---");
+
+// Ground truth from Go canonical deterministic encoding.
+// Props sorted by UTF-8 byte order: "age" < "name", "since" < "weight".
+const GO_NODE_HEX       = "534a02000203616765046e616d6535026e310106506572736f6e02005e010505416c696365";
+const GO_EDGE_HEX       = "534a0200020573696e6365067765696768743601610162054b4e4f5753020003c81f0145";
+const GO_NODE_BATCH_HEX = "534a02000203616765046e616d653701026e310106506572736f6e02005e010505416c696365";
+const GO_EDGE_BATCH_HEX = "534a0200020573696e636506776569676874380101610162054b4e4f5753020003c81f0145";
+
+const testNode = SJ.node("n1", ["Person"], {
+  name: SJ.string("Alice"),
+  age: SJ.int64(30n),
+});
+
+const testEdge = SJ.edge("a", "b", "KNOWS", {
+  weight: SJ.int64(5n),
+  since: SJ.int64(2020n),
+});
+
+const testNodeBatch = SJ.nodeBatch([testNode.data as NodeData]);
+const testEdgeBatch = SJ.edgeBatch([testEdge.data as EdgeData]);
+
+test("graph NODE deterministic encoding matches Go hex", () => {
+  const encoded = encodeWithOpts(testNode, { deterministic: true });
+  const got = Buffer.from(encoded).toString("hex");
+  if (got !== GO_NODE_HEX) {
+    throw new Error(`NODE hex mismatch:\n  got: ${got}\n want: ${GO_NODE_HEX}`);
+  }
+});
+
+test("graph EDGE deterministic encoding matches Go hex", () => {
+  const encoded = encodeWithOpts(testEdge, { deterministic: true });
+  const got = Buffer.from(encoded).toString("hex");
+  if (got !== GO_EDGE_HEX) {
+    throw new Error(`EDGE hex mismatch:\n  got: ${got}\n want: ${GO_EDGE_HEX}`);
+  }
+});
+
+test("graph NODE_BATCH deterministic encoding matches Go hex", () => {
+  const encoded = encodeWithOpts(testNodeBatch, { deterministic: true });
+  const got = Buffer.from(encoded).toString("hex");
+  if (got !== GO_NODE_BATCH_HEX) {
+    throw new Error(`NODE_BATCH hex mismatch:\n  got: ${got}\n want: ${GO_NODE_BATCH_HEX}`);
+  }
+});
+
+test("graph EDGE_BATCH deterministic encoding matches Go hex", () => {
+  const encoded = encodeWithOpts(testEdgeBatch, { deterministic: true });
+  const got = Buffer.from(encoded).toString("hex");
+  if (got !== GO_EDGE_BATCH_HEX) {
+    throw new Error(`EDGE_BATCH hex mismatch:\n  got: ${got}\n want: ${GO_EDGE_BATCH_HEX}`);
   }
 });
 

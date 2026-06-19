@@ -29,11 +29,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 GO_CLI = os.environ.get("GO_CLI")
 
 
-def go_decode(path):
+def go_decode(path, gen=2):
     """Return (ok, parsed_json_or_None, stderr)."""
     with open(path, "rb") as fh:
         data = fh.read()
-    proc = subprocess.run([GO_CLI, "decode"], input=data, capture_output=True)
+    cmd = [GO_CLI, "decode"]
+    if gen == 1:
+        cmd.append("--gen1")
+    proc = subprocess.run(cmd, input=data, capture_output=True)
     if proc.returncode != 0:
         return False, None, proc.stderr.decode("utf-8", "replace")
     try:
@@ -61,7 +64,7 @@ def main():
             skipped += 1
             continue
 
-        ok, got, err = go_decode(inp)
+        ok, got, err = go_decode(inp, gen=case.get("gen", 2))
 
         if expect.get("ok"):
             if not ok:

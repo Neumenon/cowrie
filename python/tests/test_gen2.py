@@ -1679,5 +1679,58 @@ class TestSkipReservedTag:
             assert decoded.data["x"].type == Type.NULL, f"tag 0x{reserved_tag:02x}: expected null for reserved"
 
 
+class TestGraphDeterministicGoCanonical:
+    """Regression: graph types with deterministic=True must produce byte-for-byte
+    identical output to the Go canonical encoder (ground truth pinned below)."""
+
+    # Go canonical hex strings (generated with Deterministic=true)
+    GO_NODE       = "534a02000203616765046e616d6535026e310106506572736f6e02005e010505416c696365"
+    GO_EDGE       = "534a0200020573696e6365067765696768743601610162054b4e4f5753020003c81f0145"
+    GO_NODE_BATCH = "534a02000203616765046e616d653701026e310106506572736f6e02005e010505416c696365"
+    GO_EDGE_BATCH = "534a0200020573696e636506776569676874380101610162054b4e4f5753020003c81f0145"
+
+    def _opts(self):
+        return EncodeOptions(deterministic=True)
+
+    def _node(self):
+        # Props intentionally passed in reverse-sorted order to prove sorting happens.
+        return Value.node("n1", ["Person"], {
+            "name": Value.string("Alice"),
+            "age":  Value.int64(30),
+        })
+
+    def _edge(self):
+        return Value.edge("a", "b", "KNOWS", {
+            "weight": Value.int64(5),
+            "since":  Value.int64(2020),
+        })
+
+    def test_node_deterministic_matches_go(self):
+        result = encode_with_opts(self._node(), self._opts()).hex()
+        assert result == self.GO_NODE, (
+            f"NODE mismatch\n  got: {result}\n  exp: {self.GO_NODE}"
+        )
+
+    def test_edge_deterministic_matches_go(self):
+        result = encode_with_opts(self._edge(), self._opts()).hex()
+        assert result == self.GO_EDGE, (
+            f"EDGE mismatch\n  got: {result}\n  exp: {self.GO_EDGE}"
+        )
+
+    def test_node_batch_deterministic_matches_go(self):
+        batch = Value.node_batch([self._node().data])
+        result = encode_with_opts(batch, self._opts()).hex()
+        assert result == self.GO_NODE_BATCH, (
+            f"NODE_BATCH mismatch\n  got: {result}\n  exp: {self.GO_NODE_BATCH}"
+        )
+
+    def test_edge_batch_deterministic_matches_go(self):
+        batch = Value.edge_batch([self._edge().data])
+        result = encode_with_opts(batch, self._opts()).hex()
+        assert result == self.GO_EDGE_BATCH, (
+            f"EDGE_BATCH mismatch\n  got: {result}\n  exp: {self.GO_EDGE_BATCH}"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
