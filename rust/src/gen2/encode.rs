@@ -131,9 +131,9 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
         }
         Value::Int(i) => {
             let v = *i;
-            if v >= 0 && v <= 127 {
+            if (0..=127).contains(&v) {
                 buf.push(tags::FIXINT_BASE + v as u8);
-            } else if v >= -16 && v <= -1 {
+            } else if (-16..=-1).contains(&v) {
                 buf.push(tags::FIXNEG_BASE + (-1 - v) as u8);
             } else {
                 buf.push(tags::INT64);

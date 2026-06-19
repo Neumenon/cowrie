@@ -187,34 +187,34 @@ function isByteArray(v: unknown): v is number[] {
   return Array.isArray(v) && v.every((x) => typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= 255);
 }
 
-function isNodeObject(v: Record<string, JsonValue>): v is Gen1Node {
+function isNodeObject(v: Record<string, JsonValue>): v is Gen1Node & Record<string, JsonValue> {
   if (!hasExactKeys(v, ['id', 'label', 'properties'])) return false;
   return isIntegerLike(v.id) && typeof v.label === 'string' && isObjectRecord(v.properties);
 }
 
-function isEdgeObject(v: Record<string, JsonValue>): v is Gen1Edge {
+function isEdgeObject(v: Record<string, JsonValue>): v is Gen1Edge & Record<string, JsonValue> {
   if (!hasExactKeys(v, ['src', 'dst', 'label', 'properties'])) return false;
   return isIntegerLike(v.src) && isIntegerLike(v.dst) && typeof v.label === 'string' && isObjectRecord(v.properties);
 }
 
-function isAdjListObject(v: Record<string, JsonValue>): v is Gen1AdjList {
+function isAdjListObject(v: Record<string, JsonValue>): v is Gen1AdjList & Record<string, JsonValue> {
   if (!hasExactKeys(v, ['id_width', 'node_count', 'edge_count', 'row_offsets', 'col_indices'])) return false;
   if (!isIntegerLike(v.id_width) || !isIntegerLike(v.node_count) || !isIntegerLike(v.edge_count)) return false;
   if (!Array.isArray(v.row_offsets) || !v.row_offsets.every(isIntegerLike)) return false;
   return isByteArray(v.col_indices);
 }
 
-function isNodeBatchObject(v: Record<string, JsonValue>): v is Gen1NodeBatch {
+function isNodeBatchObject(v: Record<string, JsonValue>): v is Gen1NodeBatch & Record<string, JsonValue> {
   if (!hasExactKeys(v, ['nodes']) || !Array.isArray(v.nodes)) return false;
   return v.nodes.every((n) => isObjectRecord(n) && isNodeObject(n));
 }
 
-function isEdgeBatchObject(v: Record<string, JsonValue>): v is Gen1EdgeBatch {
+function isEdgeBatchObject(v: Record<string, JsonValue>): v is Gen1EdgeBatch & Record<string, JsonValue> {
   if (!hasExactKeys(v, ['edges']) || !Array.isArray(v.edges)) return false;
   return v.edges.every((e) => isObjectRecord(e) && isEdgeObject(e));
 }
 
-function isGraphShardObject(v: Record<string, JsonValue>): v is Gen1GraphShard {
+function isGraphShardObject(v: Record<string, JsonValue>): v is Gen1GraphShard & Record<string, JsonValue> {
   if (!hasExactKeys(v, ['nodes', 'edges', 'meta'])) return false;
   if (!Array.isArray(v.nodes) || !v.nodes.every((n) => isObjectRecord(n) && isNodeObject(n))) return false;
   if (!Array.isArray(v.edges) || !v.edges.every((e) => isObjectRecord(e) && isEdgeObject(e))) return false;
@@ -501,21 +501,24 @@ function readObjectEntries(r: Reader, depth: number): Record<string, JsonValue> 
   return obj;
 }
 
-function decodeNode(r: Reader, depth: number): Gen1Node {
+// The intersection with Record<string,JsonValue> satisfies the JsonValue object
+// branch (which requires an index signature) without weakening Gen1Node/Gen1Edge
+// access on the returned value.
+function decodeNode(r: Reader, depth: number): Gen1Node & Record<string, JsonValue> {
   return {
     id: readSignedInt(r),
     label: readString(r),
     properties: readObjectEntries(r, depth),
-  };
+  } as Gen1Node & Record<string, JsonValue>;
 }
 
-function decodeEdge(r: Reader, depth: number): Gen1Edge {
+function decodeEdge(r: Reader, depth: number): Gen1Edge & Record<string, JsonValue> {
   return {
     src: readSignedInt(r),
     dst: readSignedInt(r),
     label: readString(r),
     properties: readObjectEntries(r, depth),
-  };
+  } as Gen1Edge & Record<string, JsonValue>;
 }
 
 function decodeValue(r: Reader, depth: number): JsonValue {
@@ -703,7 +706,7 @@ function decodeValue(r: Reader, depth: number): JsonValue {
         }
         nodes.push(n);
       }
-      return { nodes };
+      return { nodes } as unknown as JsonValue;
     }
     case Tags.EDGE_BATCH: {
       const count = readUvarint(r);
@@ -718,7 +721,7 @@ function decodeValue(r: Reader, depth: number): JsonValue {
         }
         edges.push(e);
       }
-      return { edges };
+      return { edges } as unknown as JsonValue;
     }
     case Tags.GRAPH_SHARD: {
       const nodeCount = readUvarint(r);
@@ -746,7 +749,7 @@ function decodeValue(r: Reader, depth: number): JsonValue {
         edges.push(e);
       }
       const meta = readObjectEntries(r, depth);
-      return { nodes, edges, meta };
+      return { nodes, edges, meta } as unknown as JsonValue;
     }
     default:
       throw new Error(`Invalid tag: 0x${tag.toString(16)}`);

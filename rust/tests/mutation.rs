@@ -155,7 +155,7 @@ fn mutation_synthetic_object() {
 
 #[test]
 fn mutation_synthetic_float() {
-    let data = encode(&Value::Float(3.14159)).unwrap();
+    let data = encode(&Value::Float(std::f64::consts::PI)).unwrap();
     mutate_all(&data);
 }
 

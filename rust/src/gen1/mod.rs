@@ -684,7 +684,7 @@ mod tests {
 
     #[test]
     fn test_proto_tensor_float64() {
-        let val = Value::Float64Array(vec![1.0, 2.5, 3.14159, -42.0]);
+        let val = Value::Float64Array(vec![1.0, 2.5, std::f64::consts::PI, -42.0]);
         let encoded = encode(&val).expect("encode");
         let decoded = decode(&encoded).expect("decode");
         assert_eq!(val, decoded);

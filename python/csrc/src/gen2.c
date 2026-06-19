@@ -2787,6 +2787,21 @@ static int decode_value(Reader *r, char **dict, size_t dict_len, COWRIEValue **o
     }
 
     default:
+        /*
+         * Reserved-tag forward-compat: tags in 0x30-0x3F that are NOT
+         * explicitly handled above (currently 0x33, 0x34, 0x3A-0x3F) carry
+         * a uvarint length prefix followed by opaque payload bytes.  Decoders
+         * MUST skip them and return null, matching the pure-Python and Go
+         * reference behaviour.  Encoders MUST NOT emit these tags.
+         */
+        if (tag >= 0x30 && tag <= 0x3F) {
+            uint64_t reserved_len;
+            if (rd_get_uvarint(r, &reserved_len) != 0) return -1;
+            if (reserved_len > rd_remaining(r)) return -1;
+            r->pos += (size_t)reserved_len;
+            *out = cowrie_new_null();
+            return *out ? 0 : -1;
+        }
         /* v3 inline types */
         if (tag >= SJT_FIXINT_BASE && tag <= SJT_FIXINT_MAX) {
             *out = cowrie_new_int64((int64_t)(tag - SJT_FIXINT_BASE));
@@ -3026,6 +3041,53 @@ static uint64_t fnv1a_byte(uint64_t hash, uint8_t b) {
     return hash;
 }
 
+/*
+ * Map C COWRIEType enum values to the canonical Go iota ordinals used in the
+ * cross-language fingerprint.  The C enum has extra types (EXT between BIGINT
+ * and ARRAY, plus ADJLIST/RICH_TEXT/DELTA/GRAPH_SHARD) that shift the values
+ * relative to Go.  This mapping must stay in sync with:
+ *   - Go: type Type int (gen2/types.go) — iota starting at 0
+ *   - Python: _type_to_ord() in cowrie/gen2.py
+ *
+ * Go ordinals: Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
+ *   String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
+ *   Tensor=13, TensorRef=14, Image=15, Audio=16, Node=17, Edge=18,
+ *   NodeBatch=19, EdgeBatch=20, Bitmask=21, UnknownExt=22.
+ */
+static uint8_t type_to_go_ord(COWRIEType t) {
+    switch (t) {
+    case COWRIE_NULL:        return 0;
+    case COWRIE_BOOL:        return 1;
+    case COWRIE_INT64:       return 2;
+    case COWRIE_UINT64:      return 3;
+    case COWRIE_FLOAT64:     return 4;
+    case COWRIE_DECIMAL128:  return 5;
+    case COWRIE_STRING:      return 6;
+    case COWRIE_BYTES:       return 7;
+    case COWRIE_DATETIME64:  return 8;
+    case COWRIE_UUID128:     return 9;
+    case COWRIE_BIGINT:      return 10;
+    case COWRIE_ARRAY:       return 11;
+    case COWRIE_OBJECT:      return 12;
+    case COWRIE_TENSOR:      return 13;
+    case COWRIE_TENSOR_REF:  return 14;
+    case COWRIE_IMAGE:       return 15;
+    case COWRIE_AUDIO:       return 16;
+    case COWRIE_NODE:        return 17;
+    case COWRIE_EDGE:        return 18;
+    case COWRIE_NODE_BATCH:  return 19;
+    case COWRIE_EDGE_BATCH:  return 20;
+    case COWRIE_BITMASK:     return 21;
+    case COWRIE_EXT:         return 22;  /* UnknownExt in Go */
+    /* C-only types with no Go equivalent — use 0xFF as sentinel */
+    case COWRIE_ADJLIST:
+    case COWRIE_RICH_TEXT:
+    case COWRIE_DELTA:
+    case COWRIE_GRAPH_SHARD:
+    default:                 return 0xFF;
+    }
+}
+
 /* Hash a uint64 as 8 little-endian bytes (matches Go's fnvHashUint64) */
 static uint64_t fnv1a_uint64(uint64_t hash, uint64_t v) {
     for (int i = 0; i < 8; i++) {
@@ -3057,11 +3119,11 @@ static int key_compare(const void *a, const void *b) {
 
 static uint64_t schema_fingerprint_impl(const COWRIEValue *v, uint64_t hash) {
     if (!v) {
-        return fnv1a_byte(hash, (uint8_t)COWRIE_NULL);
+        return fnv1a_byte(hash, type_to_go_ord(COWRIE_NULL));
     }
 
-    /* Hash the type ordinal */
-    hash = fnv1a_byte(hash, (uint8_t)v->type);
+    /* Hash the Go-canonical type ordinal (NOT the C enum value, which differs) */
+    hash = fnv1a_byte(hash, type_to_go_ord(v->type));
 
     switch (v->type) {
     case COWRIE_NULL:

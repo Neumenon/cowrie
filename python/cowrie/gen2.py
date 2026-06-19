@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 from enum import IntEnum
 
 try:
@@ -31,10 +31,10 @@ except ImportError:
     HAS_ZSTD = False
 
 try:
-    import numpy as np
+    import numpy as np  # type: ignore[import-untyped]
     HAS_NUMPY = True
 except ImportError:
-    np = None
+    np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
 import gzip
@@ -43,11 +43,11 @@ import os as _os
 # Native C extension (optional — falls back to pure Python)
 # Priority: Cython > descriptor ring > pure Python
 _HAS_NATIVE = False
-_fast_encode = None
-_fast_decode = None
+_fast_encode: Optional[Callable[..., bytes]] = None
+_fast_decode: Optional[Callable[..., Any]] = None
 if not _os.environ.get('COWRIE_PUREPYTHON'):
     try:
-        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode
+        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode  # type: ignore[no-redef]
         _HAS_NATIVE = True
     except (ImportError, OSError):
         pass
@@ -1314,8 +1314,8 @@ class Decoder:
             key_len = self._read_uvarint()
             if key_len > self.opts.max_string_len:
                 raise SecurityLimitExceeded(f"TensorRef key too long: {key_len} > {self.opts.max_string_len}")
-            key = self._read(key_len)
-            return Value.tensor_ref(store_id, key)
+            ref_key: bytes = self._read(key_len)
+            return Value.tensor_ref(store_id, ref_key)
         # Graph types
         elif tag == Tag.NODE:
             node = self._decode_node()

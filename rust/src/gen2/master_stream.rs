@@ -270,7 +270,7 @@ pub fn crc32(data: &[u8]) -> u32 {
     // Build table
     let table: [u32; 256] = {
         let mut t = [0u32; 256];
-        for i in 0..256 {
+        for (i, entry) in t.iter_mut().enumerate() {
             let mut c = i as u32;
             for _ in 0..8 {
                 if c & 1 != 0 {
@@ -279,7 +279,7 @@ pub fn crc32(data: &[u8]) -> u32 {
                     c >>= 1;
                 }
             }
-            t[i] = c;
+            *entry = c;
         }
         t
     };

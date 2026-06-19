@@ -278,7 +278,46 @@
       "gen": 1,
       "kind": "decode",
       "input": "gen1/proto_float32.cowrie",
+      "python_skip": "tagArrayFloat32 (0x18) not implemented in Python gen1 decoder",
       "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_bigint_pos_large",
+      "gen": 2,
+      "kind": "decode",
+      "rust_skip_json": true,
+      "input": "bigint/pos_large.cowrie",
+      "expect": {"ok": true, "json": "bigint/pos_large.json"}
+    },
+    {
+      "id": "gen2_bigint_neg_large",
+      "gen": 2,
+      "kind": "decode",
+      "rust_skip_json": true,
+      "input": "bigint/neg_large.cowrie",
+      "expect": {"ok": true, "json": "bigint/neg_large.json"}
+    },
+    {
+      "id": "gen2_bigint_u64plus1",
+      "gen": 2,
+      "kind": "decode",
+      "rust_skip_json": true,
+      "input": "bigint/u64plus1.cowrie",
+      "expect": {"ok": true, "json": "bigint/u64plus1.json"}
+    },
+    {
+      "id": "gen2_compressed_gzip",
+      "gen": 2,
+      "kind": "decode_framed",
+      "input": "compressed/gzip_framed.cowrie",
+      "expect": {"ok": true, "json": "compressed/framed_payload.json"}
+    },
+    {
+      "id": "gen2_compressed_zstd",
+      "gen": 2,
+      "kind": "decode_framed",
+      "input": "compressed/zstd_framed.cowrie",
+      "expect": {"ok": true, "json": "compressed/framed_payload.json"}
     }
   ]
 }

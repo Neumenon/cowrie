@@ -81,7 +81,7 @@ fn perf_cliff_nesting_scaling() {
 
 #[test]
 fn perf_cliff_wide_array_10k() {
-    let items: Vec<Value> = (0..10_000).map(|i| Value::Int(i)).collect();
+    let items: Vec<Value> = (0..10_000).map(Value::Int).collect();
     let v = Value::Array(items);
 
     let start = Instant::now();
@@ -98,7 +98,7 @@ fn perf_cliff_wide_array_10k() {
 
 #[test]
 fn perf_cliff_wide_array_100k() {
-    let items: Vec<Value> = (0..100_000).map(|i| Value::Int(i)).collect();
+    let items: Vec<Value> = (0..100_000).map(Value::Int).collect();
     let v = Value::Array(items);
 
     let start = Instant::now();

@@ -95,7 +95,7 @@ jobs:
       - name: Typecheck
         run: |
           pip install mypy
-          cd python && mypy cowrie/__init__.py --ignore-missing-imports --no-error-summary || true
+          cd python && mypy cowrie/ --ignore-missing-imports
 
       - name: Test with coverage
         run: cd python && pytest tests/ -v --tb=short --cov=cowrie --cov-report=term-missing --cov-fail-under=80
@@ -118,7 +118,7 @@ jobs:
         run: cd typescript && npm ci
 
       - name: Typecheck
-        run: cd typescript && npx tsc --noEmit 2>/dev/null || true
+        run: cd typescript && npx tsc --noEmit
 
       - name: Test
         run: cd typescript && npm test
@@ -142,7 +142,7 @@ jobs:
           components: clippy
 
       - name: Clippy
-        run: cd rust && cargo clippy -- -D warnings 2>/dev/null || cargo clippy
+        run: cd rust && cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cd rust && cargo build

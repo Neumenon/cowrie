@@ -316,17 +316,17 @@ impl<'a> Reader<'a> {
             }
             tags::BITMASK => {
                 let count = self.read_uvarint()?;
-                let byte_len = ((count + 7) / 8) as usize;
+                let byte_len = count.div_ceil(8) as usize;
                 if byte_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let bits = self.read_bytes(byte_len)?;
                 Value::Bitmask { count, bits }
             }
-            t if t >= tags::FIXINT_BASE && t <= tags::FIXINT_MAX => {
+            t if (tags::FIXINT_BASE..=tags::FIXINT_MAX).contains(&t) => {
                 Value::Int((t - tags::FIXINT_BASE) as i64)
             }
-            t if t >= tags::FIXARRAY_BASE && t <= tags::FIXARRAY_MAX => {
+            t if (tags::FIXARRAY_BASE..=tags::FIXARRAY_MAX).contains(&t) => {
                 let len = (t - tags::FIXARRAY_BASE) as usize;
                 if len > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
@@ -337,7 +337,7 @@ impl<'a> Reader<'a> {
                 }
                 Value::Array(arr)
             }
-            t if t >= tags::FIXMAP_BASE && t <= tags::FIXMAP_MAX => {
+            t if (tags::FIXMAP_BASE..=tags::FIXMAP_MAX).contains(&t) => {
                 let len = (t - tags::FIXMAP_BASE) as usize;
                 if len > self.opts.max_object_len {
                     return Err(CowrieError::TooLarge);
@@ -357,12 +357,12 @@ impl<'a> Reader<'a> {
                 }
                 Value::Object(obj)
             }
-            t if t >= tags::FIXNEG_BASE && t <= tags::FIXNEG_MAX => {
+            t if (tags::FIXNEG_BASE..=tags::FIXNEG_MAX).contains(&t) => {
                 Value::Int(-1 - (t - tags::FIXNEG_BASE) as i64)
             }
             // Reserved / stripped tags in 0x30–0x34 and 0x39: length-prefixed payload.
             // Silently skip payload so that a reader can forward-scan past unknown tags.
-            t if (t >= 0x30 && t <= 0x34) || t == 0x39 => {
+            t if (0x30..=0x34).contains(&t) || t == 0x39 => {
                 let payload_len = self.read_uvarint()? as usize;
                 if payload_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);
@@ -566,7 +566,7 @@ mod tests {
             Value::Int(i64::MAX),
             Value::Int(i64::MIN),
             Value::Uint(u64::MAX),
-            Value::Float(3.14159),
+            Value::Float(std::f64::consts::PI),
             Value::String("hello".into()),
             Value::Bytes(vec![1, 2, 3]),
         ];
@@ -869,9 +869,7 @@ mod tests {
         buf.push(0x01); // dtype = Float32
         buf.push(33);   // rank = 33 (exceeds MAX_RANK=32)
         // Shape: 33 dimensions all = 1
-        for _ in 0..33 {
-            buf.push(1); // uvarint 1
-        }
+        buf.extend(std::iter::repeat_n(1u8, 33)); // uvarint 1 per dimension
         buf.push(0); // data len = 0
 
         let result = decode(&buf);
@@ -891,9 +889,7 @@ mod tests {
         buf.push(0x01); // dtype = Float32
         buf.push(32);   // rank = 32 (exactly MAX_RANK)
         // Shape: 32 dimensions all = 1
-        for _ in 0..32 {
-            buf.push(1); // uvarint 1
-        }
+        buf.extend(std::iter::repeat_n(1u8, 32)); // uvarint 1 per dimension
         // data_len = 4 bytes (1 float32 element = product of all dims * 4)
         buf.push(4); // uvarint 4
         buf.extend_from_slice(&1.0f32.to_le_bytes());
@@ -1016,8 +1012,8 @@ mod tests {
 
         for (label, bytes) in cases {
             let val = Value::BigInt(bytes.clone());
-            let encoded = encode(&val).expect(&format!("encode {}", label));
-            let decoded = decode(&encoded).expect(&format!("decode {}", label));
+            let encoded = encode(&val).unwrap_or_else(|_| panic!("encode {}", label));
+            let decoded = decode(&encoded).unwrap_or_else(|_| panic!("decode {}", label));
             assert_eq!(decoded, Value::BigInt(bytes), "round-trip failed for {}", label);
         }
     }
@@ -1135,9 +1131,7 @@ mod tests {
         buf.push(0x20); // TENSOR tag
         buf.push(0x01); // dtype = Float32
         buf.push(5);    // rank = 5
-        for _ in 0..5 {
-            buf.push(1); // uvarint 1 per dimension
-        }
+        buf.extend(std::iter::repeat_n(1u8, 5)); // uvarint 1 per dimension
         buf.push(4); // data_len = 4
         buf.extend_from_slice(&1.0f32.to_le_bytes());
 
