@@ -197,7 +197,6 @@ Float:   3.14            Struct:  User{name=Alice age=30}
 - [Language-Specific Docs](API_REFERENCE.md) - Go, Python, JS, Rust, C
 
 **Benchmarks**:
-- [Codec Benchmarks](../../benchmarks/README.md)
 - [Top-level Cowrie Benchmarks](../../README.md#benchmarks)
 
 ---
