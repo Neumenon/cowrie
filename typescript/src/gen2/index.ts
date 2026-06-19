@@ -1799,6 +1799,22 @@ function typeToOrd(type: Type): number {
       return 15;
     case Type.AUDIO:
       return 16;
+    // Graph types and bitmask use Go's byte(Type) iota ordinals. Go's hashSchema
+    // does not structurally recurse for any of these (only the type byte is
+    // hashed), and neither does hashSchema below, so the ordinal alone aligns the
+    // fingerprint with the Go reference. (UNKNOWN_EXT is deliberately NOT mapped
+    // here: Go additionally hashes its ExtType, which hashSchema below does not
+    // yet mirror — see the cross-language fingerprint parity task.)
+    case Type.NODE:
+      return 17;
+    case Type.EDGE:
+      return 18;
+    case Type.NODE_BATCH:
+      return 19;
+    case Type.EDGE_BATCH:
+      return 20;
+    case Type.BITMASK:
+      return 21;
     default:
       return 0xff;
   }

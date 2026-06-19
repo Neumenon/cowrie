@@ -250,6 +250,19 @@ test("schema fingerprint matches Go (schema2)", () => {
   assertEqual(actual, expected, `fingerprint mismatch: 0x${actual.toString(16)} vs 0x${expected.toString(16)}`);
 });
 
+test("bitmask schema fingerprint matches Go (regression: typeToOrd must not return 0xff)", () => {
+  // Ground truth computed from the Go reference: SchemaFingerprint{32,64}(Bitmask(8, [0xFF])).
+  // Before the typeToOrd fix, TS returned 0xff for Type.BITMASK, producing a fingerprint
+  // that silently disagreed with every other implementation. Bitmask (wire 0x24) is active.
+  const val = SJ.bitmask(8, new Uint8Array([0xff]));
+  assertEqual(schemaFingerprint32(val), 2248264336, "bitmask fp32 must match Go");
+  assertEqual(
+    schemaFingerprint64(val).toString(),
+    "12638165210323077776",
+    "bitmask fp64 must match Go",
+  );
+});
+
 test("schema1 and schema2 have same fingerprint", () => {
   const val1 = decode(readGolden("schema1"));
   const val2 = decode(readGolden("schema2"));
