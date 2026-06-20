@@ -23,7 +23,7 @@ echo ""
 # Step 2: Confirm version
 echo "--- Pre-publish checklist ---"
 echo "  Version: ${VERSION}"
-echo "  Go:      github.com/Neumenon/cowrie@v${VERSION}"
+echo "  Go:      github.com/Neumenon/cowrie/go/v2@v${VERSION}  (tag: go/v${VERSION})"
 echo "  Rust:    cowrie-rs@${VERSION}"
 echo "  Python:  cowrie-py==${VERSION}"
 echo "  TS:      cowrie-codec@${VERSION}"
@@ -35,25 +35,35 @@ if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
 fi
 
 # Step 3: Publish to registries
+# All publishes must succeed before tagging. Any failure exits immediately.
 echo ""
 echo "--- Publishing to Rust (crates.io) ---"
-(cd rust && cargo publish) || { echo "WARN: Rust publish failed"; }
+(cd rust && cargo publish) || { echo "FAIL: Rust publish failed"; exit 1; }
 
 echo ""
 echo "--- Publishing to Python (PyPI) ---"
-(cd python && python -m build && twine upload dist/*) || { echo "WARN: Python publish failed"; }
+(cd python && python -m build && twine upload dist/*) || { echo "FAIL: Python publish failed"; exit 1; }
 
 echo ""
 echo "--- Publishing to npm ---"
-(cd typescript && npm publish) || { echo "WARN: npm publish failed"; }
+(cd typescript && npm publish) || { echo "FAIL: npm publish failed"; exit 1; }
 
-# Step 4: Tag and push
+# Step 4: Tag and push — only reached if ALL publishes succeeded above.
+#
+# Tagging strategy for nested Go module:
+#   The Go module is github.com/Neumenon/cowrie/go/v2 (subdirectory "go/").
+#   Go's module proxy resolves a tag for a module in subdirectory <dir>/ from
+#   a tag named <dir>/v<version> (e.g. go/v0.1.2), NOT the bare v<version> tag.
+#   We push BOTH tags:
+#     v${VERSION}       — canonical release tag for the repo, Rust, Python, npm
+#     go/v${VERSION}    — required for `go get github.com/Neumenon/cowrie/go/v2@v${VERSION}`
 echo ""
-echo "--- Tagging v${VERSION} ---"
+echo "--- Tagging v${VERSION} and go/v${VERSION} ---"
 git tag "v${VERSION}"
-git push origin main --tags
+git tag "go/v${VERSION}"
+git push origin main "v${VERSION}" "go/v${VERSION}"
 
 echo ""
 echo "=== Release v${VERSION} complete ==="
-echo "Go module will be available after git tag is pushed."
+echo "Go module: go get github.com/Neumenon/cowrie/go/v2@v${VERSION}"
 echo "Create GitHub release: gh release create v${VERSION} --title 'Cowrie v${VERSION}' --notes-file CHANGELOG.md"

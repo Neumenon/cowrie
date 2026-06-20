@@ -287,10 +287,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           registry-url: 'https://registry.npmjs.org'
-      - name: Build and publish
-        run: |
-          cd typescript && npm ci && npm run build 2>/dev/null || true
-          npm publish --access public
+      - name: Install dependencies
+        run: cd typescript && npm ci
+
+      - name: Build
+        run: cd typescript && npm run build
+
+      - name: Publish
+        run: cd typescript && npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

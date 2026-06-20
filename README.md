@@ -36,16 +36,16 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 
 ## Cross-Language Parity
 
-Every implementation produces **byte-identical** output for the same value — encode
-in Go, decode in Rust, Python, or TypeScript (and back) and the bytes match exactly.
-This is enforced by:
+Every implementation produces **byte-identical binary encodings** for the same
+value. This is enforced by:
 
-- **40 cross-language fixtures** (`testdata/fixtures/`) run through the reference
-  decoder in CI (`validate_fixtures.py`).
+- **47 cross-language fixtures** (`testdata/fixtures/`) validated by
+  `validate_fixtures.py`, which runs the Go reference decoder and the Python
+  decoder against every case. Rust and TypeScript parity is gated by pinned
+  per-language invariant/parity tests rather than this harness.
 - **Pinned regression tests** in each language asserting identical *deterministic
   encodings* and *schema fingerprints* — including ML types and graph
-  (Node/Edge/NodeBatch/EdgeBatch) types, which are byte-for-byte equal across
-  Go/Rust/Python/TypeScript.
+  (Node/Edge/NodeBatch/EdgeBatch) types.
 
 Deterministic encoding (keys sorted by byte order, stable tensor/graph layout)
 makes the output suitable for content-addressable storage and cross-service caching.

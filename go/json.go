@@ -236,7 +236,7 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 			if !ok {
 				return nil
 			}
-			props = pm
+			props = normalizePropsMap(pm)
 		}
 		return Node(id, labels, props)
 
@@ -253,7 +253,7 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 			if !ok {
 				return nil
 			}
-			props = pm
+			props = normalizePropsMap(pm)
 		}
 		return Edge(fromID, toID, edgeType, props)
 
@@ -313,6 +313,54 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 	}
 
 	return nil
+}
+
+// normalizePropsMap converts a map[string]any decoded by json.Decoder.UseNumber()
+// into codec-safe Go types: json.Number → int64 or float64, nested maps and
+// slices are normalized recursively. This is needed because tryReconstructTyped
+// receives raw decoded maps where all JSON numbers are json.Number, but the
+// Encode property-type switch only accepts plain Go numerics.
+func normalizePropsMap(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = normalizePropsValue(v)
+	}
+	return out
+}
+
+// normalizePropsValue normalizes a single props value recursively.
+func normalizePropsValue(v any) any {
+	switch x := v.(type) {
+	case json.Number:
+		s := x.String()
+		if strings.Contains(s, ".") || strings.Contains(s, "e") || strings.Contains(s, "E") {
+			f, err := x.Float64()
+			if err == nil {
+				return f
+			}
+			return s
+		}
+		i, err := x.Int64()
+		if err == nil {
+			return i
+		}
+		// Doesn't fit in int64 — return as float64 (best effort)
+		f, err := x.Float64()
+		if err == nil {
+			return f
+		}
+		return s
+	case map[string]any:
+		return normalizePropsMap(x)
+	case []any:
+		out := make([]any, len(x))
+		for i, elem := range x {
+			out[i] = normalizePropsValue(elem)
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // stringToDtype converts a dtype string (as produced by dtypeToString) back to DType.
