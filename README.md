@@ -9,10 +9,11 @@ Cowrie's lead value is **deterministic encoding with native bytes (0x08), tensor
 (0x20), tensor refs (0x21), and a stable schema fingerprint** — useful where
 JSON's text shape and lack of binary primitives are the bottleneck.
 
-> **Reserved tags.** Tags `0x30` (AdjList), `0x31` (RichText), `0x32` (Delta),
-> and `0x39` (GraphShard) are deprecated. Decoders MUST skip their
-> length-prefixed payloads silently. Encoders MUST NOT emit them. The original
-> graph / rich-text / delta implementations live under `attic/`.
+> **Reserved tags (Gen2).** In Gen2, tags `0x30` (AdjList), `0x31` (RichText),
+> `0x32` (Delta), and `0x39` (GraphShard) are deprecated. Decoders MUST skip
+> their length-prefixed payloads silently. Encoders MUST NOT emit them. The
+> original Gen2 graph / rich-text / delta implementations live under `attic/`.
+> (Gen1 retains AdjList and GraphShard as active graph types.)
 
 ## Features
 
@@ -31,14 +32,29 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 | Go | Yes | Yes | Complete |
 | Rust | Yes | Yes | Complete |
 | Python | Yes | Yes | Complete |
-| C | Yes | Yes | Complete |
 | TypeScript | Yes | Yes | Complete |
+
+## Cross-Language Parity
+
+Every implementation produces **byte-identical** output for the same value — encode
+in Go, decode in Rust, Python, or TypeScript (and back) and the bytes match exactly.
+This is enforced by:
+
+- **40 cross-language fixtures** (`testdata/fixtures/`) run through the reference
+  decoder in CI (`validate_fixtures.py`).
+- **Pinned regression tests** in each language asserting identical *deterministic
+  encodings* and *schema fingerprints* — including ML types and graph
+  (Node/Edge/NodeBatch/EdgeBatch) types, which are byte-for-byte equal across
+  Go/Rust/Python/TypeScript.
+
+Deterministic encoding (keys sorted by byte order, stable tensor/graph layout)
+makes the output suitable for content-addressable storage and cross-service caching.
 
 ## Install
 
 ```bash
 # Go
-go get github.com/Neumenon/cowrie/go@v2.0.0
+go get github.com/Neumenon/cowrie/go/v2@v2.0.0
 
 # Python
 pip install cowrie-py
@@ -48,15 +64,11 @@ npm install cowrie-codec
 
 # Rust
 cargo add cowrie-rs
-
-# C (source-only)
-git clone https://github.com/Neumenon/cowrie.git
-cd cowrie/c && mkdir -p build && cd build && cmake .. && make
 ```
 
 ## Benchmarks
 
-- [vLLM serialization comparison](benchmarks/vllm/) — Cowrie vs msgpack/pickle/JSON for inference payloads (5x compression on embeddings, zero-copy tensor decode)
+- [vLLM serialization benchmark](go/vllm_bench_test.go) — Cowrie vs JSON for inference payloads (~4.8x compression on a 1536-dim float32 embedding, zero-copy tensor decode)
 
 ## Quick Start
 
@@ -64,8 +76,8 @@ cd cowrie/c && mkdir -p build && cd build && cmake .. && make
 
 ```go
 import (
-    cowrie "github.com/Neumenon/cowrie"
-    "github.com/Neumenon/cowrie/gen1"
+    cowrie "github.com/Neumenon/cowrie/go/v2"
+    "github.com/Neumenon/cowrie/go/v2/gen1"
 )
 
 // Gen1
@@ -114,22 +126,6 @@ val = gen2.from_any({"name": "Alice"})
 data = gen2.encode(val)
 ```
 
-### C
-
-```c
-#include "cowrie_gen1.h"
-
-cowrie_g1_value_t *obj = cowrie_g1_object(2);
-cowrie_g1_object_set(obj, "name", cowrie_g1_string("Alice", 5));
-cowrie_g1_object_set(obj, "count", cowrie_g1_int64(42));
-
-cowrie_g1_buf_t buf;
-cowrie_g1_encode(obj, &buf);
-
-cowrie_g1_value_t *decoded;
-cowrie_g1_decode(buf.data, buf.len, &decoded);
-```
-
 ### TypeScript
 
 ```typescript
@@ -170,18 +166,9 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
-### C
-
-```bash
-cd c
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build
-```
-
-Requirements:
-- `zlib` development headers (required)
-- `libzstd` + `pkg-config` (optional, for zstd support)
+The optional Cython fast-path extension needs `zlib` development headers (and
+`libzstd` + `pkg-config` for zstd support); without them, the pure-Python path is
+used automatically.
 
 ### TypeScript
 
@@ -214,14 +201,20 @@ echo '{"name":"Alice","age":30}' | ./cowrie encode --gen2 > data.cowrie
 
 ### Payload Size Comparison
 
-| Payload Type | JSON | Gen1 | Gen2 |
-|--------------|------|------|------|
-| Small object (3 fields) | 46 bytes | 35 bytes (76%) | 43 bytes (93%) |
-| Large array (1000 objects) | 48KB | 34KB (70%) | 23KB (47%) |
-| Float array (10K floats) | 86KB | 80KB (93%) | - |
-| Graph shard (100 nodes) | - | - | 10KB |
+Measured with `cowrie encode` on the described inputs (the embedding row uses the
+typed float32 proto-tensor / `Tensor` type, the ML use case):
 
-**Key insight**: Gen2 dictionary coding provides ~50% size reduction for repeated schemas.
+| Payload | JSON | Gen1 | Gen2 |
+|---------|-----:|-----:|-----:|
+| Small object (3 fields) | 39 B | 35 B | 34 B |
+| Array of 1,000 repeated-schema objects | 45,149 B | 40,003 B | **18,680 B** |
+| 1536-dim float32 embedding (typed) | 29,648 B | 6,185 B | 6,195 B |
+
+**Key insights:** Gen2's dictionary coding roughly halves repeated-schema payloads
+(18.7 KB vs 40 KB Gen1, ~2.4× vs JSON). For float32 tensors/embeddings, both Gen1's
+proto-tensor and Gen2's `Tensor` give ~4.8× over JSON (binary float32 vs float64
+text) — use the typed tensor for ML payloads; an untyped JSON-style float array
+compresses less.
 
 ### When to Use Gen1 vs Gen2
 
@@ -240,20 +233,40 @@ Gen2 graph data structures (Node/Edge/NodeBatch/EdgeBatch — 0x35-0x38):
 
 ```go
 // Go - Gen2 Graph Types
-node := cowrie.NewNode("person_42", []string{"Person", "Employee"}, map[string]any{
+node := cowrie.Node("person_42", []string{"Person", "Employee"}, map[string]any{
     "name": "Alice",
     "age":  int64(30),
 })
 
-edge := cowrie.NewEdge("person_42", "company_1", "WORKS_AT", map[string]any{
+edge := cowrie.Edge("person_42", "company_1", "WORKS_AT", map[string]any{
     "since": int64(2020),
 })
 
-batch := cowrie.NewNodeBatch([]cowrie.NodeData{node.Node()})
+batch := cowrie.NodeBatch([]cowrie.NodeData{node.Node()})
 ```
 
-> **Note:** Tag 0x39 (GraphShard) is reserved and no longer emitted. Use
-> NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data in Gen2.
+> **Note:** In Gen2, tag 0x39 (GraphShard) is reserved and no longer emitted —
+> use NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data. (Gen1 still
+> supports GraphShard and AdjList directly.)
+
+## Schema Fingerprint
+
+A stable 64-bit FNV-1a fingerprint of a value's **schema** — its type structure and
+field names, not the data — identical across all implementations. Useful as a
+type ID for stream frames or for detecting schema changes.
+
+```go
+v := cowrie.Object(
+    cowrie.Member{Key: "name", Value: cowrie.String("Alice")},
+    cowrie.Member{Key: "age", Value: cowrie.Int64(30)},
+)
+fp := cowrie.SchemaFingerprint64(v) // same fingerprint in Go/Rust/Python/TS
+// 32-bit variant for compact frame headers:
+id := cowrie.SchemaFingerprint32(v)
+```
+
+Two values with the same field names and types share a fingerprint regardless of
+their actual values; changing a field's name or type changes it.
 
 ## Streaming Support
 
@@ -278,8 +291,8 @@ for {
 ```go
 // Go - Master stream with metadata
 import (
-    cowrie "github.com/Neumenon/cowrie"
-    "github.com/Neumenon/cowrie/codec"
+    cowrie "github.com/Neumenon/cowrie/go/v2"
+    "github.com/Neumenon/cowrie/go/v2/codec"
 )
 
 mw := codec.NewMasterWriter(writer, codec.DefaultMasterWriterOptions())
@@ -311,16 +324,20 @@ frame, _ = read_master_frame(payload)
 
 See [SPEC.md](SPEC.md) for the complete wire format specification.
 
+## Glyph (text format)
+
+Cowrie ships with **Glyph**, a sibling *text* serialization that encodes the same
+values as token-efficient, human-readable text (a JSON bridge for LLM payloads).
+It is maintained in Go under [`go/glyph/`](go/glyph/); see
+[`docs/glyph/`](docs/glyph/) for the guide, quickstart, and specs.
+
 ## Benchmarks
 
 Run benchmarks:
 
 ```bash
-# Go
+# Go (includes the vLLM serialization benchmarks)
 cd go && go test -bench=. -benchmem ./...
-
-# Python
-cd python && python ../benchmarks/bench_python.py
 
 # Rust
 cd rust && cargo bench

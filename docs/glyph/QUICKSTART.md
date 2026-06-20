@@ -193,11 +193,10 @@ Float:   3.14            Struct:  User{name=Alice age=30}
 - [Technical Specs](SPECIFICATIONS.md) - Loose Mode, GS1 streaming protocol
 
 **Examples**:
-- [Cookbook](archive/COOKBOOK.md) - 10 practical recipes
+- [Cookbook](COOKBOOK.md) - 10 practical recipes
 - [Language-Specific Docs](API_REFERENCE.md) - Go, Python, JS, Rust, C
 
 **Benchmarks**:
-- [Codec Benchmarks](../../benchmarks/README.md)
 - [Top-level Cowrie Benchmarks](../../README.md#benchmarks)
 
 ---

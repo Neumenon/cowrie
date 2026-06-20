@@ -1,6 +1,6 @@
 # Cowrie: A Binary JSON Codec for 5 Languages, No Code Generation Required
 
-*TL;DR: Cowrie is a binary JSON bridge — it round-trips JSON data with native ML types (tensors, images, audio), dictionary coding for ~50% size reduction, and graph types for GNN workloads. Implementations in Go, Rust, Python, C, and TypeScript. Apache 2.0 licensed, no code generation, no schema files.*
+*TL;DR: Cowrie is a binary JSON bridge — it round-trips JSON data with native ML types (tensors, images, audio), dictionary coding for ~50% size reduction, and graph types for GNN workloads. Implementations in Go, Rust, Python, and TypeScript. Apache 2.0 licensed, no code generation, no schema files.*
 
 ---
 
@@ -310,7 +310,7 @@ Cowrie is not the right choice in every situation. Here's when you should use so
 
 **Python performance**: The Python implementation is pure Python with no C extensions. It's correct and compatible, but it won't match the throughput of the Go or Rust implementations for large payloads. If you're in a hot path, use the Go or Rust implementation and call it from Python via FFI, or accept the throughput trade-off.
 
-**Not battle-tested**: Cowrie is a new project. It has not been deployed in large-scale production systems. The implementations are well-tested (23 cross-language fixtures, 16 security regression tests), but they haven't seen the variety of real-world edge cases that mature projects have.
+**Not battle-tested**: Cowrie is a new project. It has not been deployed in large-scale production systems. The implementations are well-tested (34 cross-language fixtures, 16 security regression tests), but they haven't seen the variety of real-world edge cases that mature projects have.
 
 ---
 
@@ -348,12 +348,6 @@ pip install cowrie-py==0.1.1
 **TypeScript:**
 ```bash
 npm install cowrie-codec@0.1.1
-```
-
-**C:** Clone the repo and build with CMake:
-```bash
-git clone https://github.com/Neumenon/cowrie.git
-cd cowrie/c && mkdir build && cd build && cmake .. && make
 ```
 
 ### Links

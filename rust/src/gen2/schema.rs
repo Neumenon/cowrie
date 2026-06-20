@@ -30,16 +30,83 @@ pub fn schema_fingerprint32(value: &Value) -> u32 {
     schema_fingerprint64(value) as u32
 }
 
-/// Check if two values have the same schema.
+/// Check if two values have structurally identical schemas.
+///
+/// Recursively compares types, object field names, array element schemas,
+/// tensor dtype/rank, image format, audio encoding/channels, tensor_ref store ID,
+/// and unknown-ext type_id — mirroring exactly what `schema_fingerprint64` hashes.
+/// Actual values (ints, strings, tensor data, etc.) are not compared.
+///
+/// Use `schema_fingerprint_equal` for a faster probabilistic check.
 pub fn schema_equals(a: &Value, b: &Value) -> bool {
+    // Must be the same variant first
+    match (a, b) {
+        // Scalar types: variant equality is sufficient
+        (Value::Null, Value::Null)
+        | (Value::Bool(_), Value::Bool(_))
+        | (Value::Int(_), Value::Int(_))
+        | (Value::Uint(_), Value::Uint(_))
+        | (Value::Float(_), Value::Float(_))
+        | (Value::String(_), Value::String(_))
+        | (Value::Bytes(_), Value::Bytes(_))
+        | (Value::Decimal(_), Value::Decimal(_))
+        | (Value::DateTime(_), Value::DateTime(_))
+        | (Value::Uuid(_), Value::Uuid(_))
+        | (Value::BigInt(_), Value::BigInt(_)) => true,
+
+        (Value::Array(av), Value::Array(bv)) => {
+            av.len() == bv.len()
+                && av.iter().zip(bv.iter()).all(|(ai, bi)| schema_equals(ai, bi))
+        }
+
+        (Value::Object(ao), Value::Object(bo)) => {
+            // BTreeMap iterates in sorted key order — same canonical order as hash_schema
+            ao.len() == bo.len()
+                && ao.iter().zip(bo.iter()).all(|((ak, av), (bk, bv))| {
+                    ak == bk && schema_equals(av, bv)
+                })
+        }
+
+        (Value::Tensor(at), Value::Tensor(bt)) => {
+            at.dtype == bt.dtype && at.shape.len() == bt.shape.len()
+        }
+
+        (Value::TensorRef(ar), Value::TensorRef(br)) => ar.store_id == br.store_id,
+
+        (Value::Image(ai), Value::Image(bi)) => ai.format == bi.format,
+
+        (Value::Audio(aa), Value::Audio(ba)) => {
+            aa.encoding == ba.encoding && aa.channels == ba.channels
+        }
+
+        (Value::Ext(ae), Value::Ext(be)) => ae.type_id == be.type_id,
+
+        // Graph types and bitmask: type tag equality (ensured by same variant) is sufficient.
+        (Value::Node(_), Value::Node(_))
+        | (Value::Edge(_), Value::Edge(_))
+        | (Value::NodeBatch(_), Value::NodeBatch(_))
+        | (Value::EdgeBatch(_), Value::EdgeBatch(_))
+        | (Value::Bitmask { .. }, Value::Bitmask { .. }) => true,
+
+        // Different variants
+        _ => false,
+    }
+}
+
+/// Check if two values have the same schema using a probabilistic 64-bit fingerprint.
+///
+/// This is the fast path: O(1) for flat values, and shares cost with any fingerprint
+/// already computed. Carries a 1-in-2^64 collision risk — prefer `schema_equals`
+/// for correctness-critical comparisons.
+pub fn schema_fingerprint_equal(a: &Value, b: &Value) -> bool {
     schema_fingerprint64(a) == schema_fingerprint64(b)
 }
 
 /// Map Value variant to Go's Type enum for cross-language fingerprint compatibility.
 /// Go's Type enum (iota): Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
 /// String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
-/// Tensor=13, TensorRef=14, Image=15, Audio=16, UnknownExt=17 (was 20),
-/// Node=18, Edge=19, NodeBatch=20, EdgeBatch=21
+/// Tensor=13, TensorRef=14, Image=15, Audio=16,
+/// Node=17, Edge=18, NodeBatch=19, EdgeBatch=20, Bitmask=21, UnknownExt=22
 fn value_type_ord(value: &Value) -> u8 {
     match value {
         Value::Null => 0,
@@ -59,12 +126,12 @@ fn value_type_ord(value: &Value) -> u8 {
         Value::TensorRef(_) => 14,
         Value::Image(_) => 15,
         Value::Audio(_) => 16,
-        Value::Ext(_) => 17,
-        Value::Node(_) => 18,
-        Value::Edge(_) => 19,
-        Value::NodeBatch(_) => 20,
-        Value::EdgeBatch(_) => 21,
-        Value::Bitmask { .. } => 22,
+        Value::Node(_) => 17,
+        Value::Edge(_) => 18,
+        Value::NodeBatch(_) => 19,
+        Value::EdgeBatch(_) => 20,
+        Value::Bitmask { .. } => 21,
+        Value::Ext(_) => 22,
     }
 }
 
@@ -119,37 +186,10 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
             h = fnv_hash_u64(h, ext.type_id);
         }
 
-        // Graph types
-        Value::Node(node) => {
-            h = fnv_hash_u64(h, node.labels.len() as u64);
-            h = fnv_hash_u64(h, node.props.len() as u64);
-            for (key, val) in &node.props {
-                h = fnv_hash_string(h, key);
-                h = hash_schema(val, h);
-            }
-        }
-        Value::Edge(edge) => {
-            h = fnv_hash_u64(h, edge.props.len() as u64);
-            for (key, val) in &edge.props {
-                h = fnv_hash_string(h, key);
-                h = hash_schema(val, h);
-            }
-        }
-        Value::NodeBatch(batch) => {
-            h = fnv_hash_u64(h, batch.nodes.len() as u64);
-            for node in &batch.nodes {
-                h = hash_schema(&Value::Node(node.clone()), h);
-            }
-        }
-        Value::EdgeBatch(batch) => {
-            h = fnv_hash_u64(h, batch.edges.len() as u64);
-            for edge in &batch.edges {
-                h = hash_schema(&Value::Edge(edge.clone()), h);
-            }
-        }
-        Value::Bitmask { count, .. } => {
-            h = fnv_hash_u64(h, *count);
-        }
+        // Graph types and bitmask: the Go reference hashes only the type ordinal
+        // (no structural recursion), so match that for cross-language parity.
+        Value::Node(_) | Value::Edge(_) | Value::NodeBatch(_)
+        | Value::EdgeBatch(_) | Value::Bitmask { .. } => {}
     }
 
     h
@@ -290,6 +330,79 @@ mod tests {
         assert!(schema_equals(&obj1, &obj2));
     }
 
+    // ============================================================
+    // FIX 4 — schema_equals is structural, not fingerprint-based
+    // ============================================================
+
+    #[test]
+    fn test_schema_equals_structural_same_fields_different_values() {
+        // Same field names + types, different values → must be equal
+        let a = Value::object(vec![
+            ("name", Value::String("Alice".into())),
+            ("age", Value::Int(30)),
+        ]);
+        let b = Value::object(vec![
+            ("name", Value::String("Bob".into())),
+            ("age", Value::Int(99)),
+        ]);
+        assert!(schema_equals(&a, &b), "same fields+types but different values should be schema-equal");
+    }
+
+    #[test]
+    fn test_schema_equals_structural_renamed_field() {
+        // Field renamed → schemas must differ
+        let a = Value::object(vec![
+            ("name", Value::String("Alice".into())),
+        ]);
+        let b = Value::object(vec![
+            ("alias", Value::String("Alice".into())),
+        ]);
+        assert!(!schema_equals(&a, &b), "renamed field should make schemas unequal");
+    }
+
+    #[test]
+    fn test_schema_equals_structural_type_change() {
+        // Field type changed → schemas must differ
+        let a = Value::object(vec![
+            ("count", Value::Int(1)),
+        ]);
+        let b = Value::object(vec![
+            ("count", Value::Float(1.0)),
+        ]);
+        assert!(!schema_equals(&a, &b), "type change on field should make schemas unequal");
+    }
+
+    #[test]
+    fn test_schema_fingerprint_equal_agrees_with_schema_equals() {
+        // On matching schemas, both functions agree
+        let a = Value::object(vec![
+            ("x", Value::Int(1)),
+            ("y", Value::Int(2)),
+        ]);
+        let b = Value::object(vec![
+            ("x", Value::Int(99)),
+            ("y", Value::Int(0)),
+        ]);
+        assert!(schema_equals(&a, &b));
+        assert!(schema_fingerprint_equal(&a, &b));
+    }
+
+    #[test]
+    fn test_schema_equals_structural_nested() {
+        // Nested objects: structural equality must recurse
+        let a = Value::object(vec![
+            ("inner", Value::object(vec![("val", Value::Bool(true))])),
+        ]);
+        let b = Value::object(vec![
+            ("inner", Value::object(vec![("val", Value::Bool(false))])),
+        ]);
+        let c = Value::object(vec![
+            ("inner", Value::object(vec![("other", Value::Bool(true))])),
+        ]);
+        assert!(schema_equals(&a, &b), "same nested field names should be equal");
+        assert!(!schema_equals(&a, &c), "different nested field names should be unequal");
+    }
+
     #[test]
     fn test_fingerprint32() {
         let obj = Value::object(vec![("test", Value::Int(1))]);
@@ -297,5 +410,25 @@ mod tests {
         let fp32 = schema_fingerprint32(&obj);
 
         assert_eq!(fp32, fp64 as u32);
+    }
+
+    #[test]
+    fn test_fingerprint_cross_lang_audio_ext() {
+        // Ground truth from the Go reference. Audio must hash encoding AND channels
+        // (so ch=1 and ch=2 differ); Ext uses ordinal 22 + type_id. Before the
+        // parity fix, Rust placed Ext at ordinal 17 and recursed into graph/bitmask.
+        use crate::gen2::types::{AudioData, AudioEncoding, ExtData};
+        let d = vec![1u8, 2, 3];
+        let a2 = Value::Audio(AudioData {
+            encoding: AudioEncoding::PcmInt16, sample_rate: 44100, channels: 2, data: d.clone(),
+        });
+        let a1 = Value::Audio(AudioData {
+            encoding: AudioEncoding::PcmInt16, sample_rate: 44100, channels: 1, data: d.clone(),
+        });
+        let ext = Value::Ext(ExtData { type_id: 99, payload: d.clone() });
+        assert_eq!(schema_fingerprint32(&a2), 3129750488, "audio ch=2 must match Go");
+        assert_eq!(schema_fingerprint32(&a1), 3129751793, "audio ch=1 must match Go");
+        assert_ne!(schema_fingerprint32(&a1), schema_fingerprint32(&a2));
+        assert_eq!(schema_fingerprint32(&ext), 2917281034, "ext must match Go");
     }
 }

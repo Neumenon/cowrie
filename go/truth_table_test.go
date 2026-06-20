@@ -45,7 +45,7 @@ type truthInput struct {
 
 func loadTruthCases(t *testing.T) []truthCase {
 	t.Helper()
-	data, err := os.ReadFile("../../testdata/robustness/truth_cases.json")
+	data, err := os.ReadFile("../testdata/robustness/truth_cases.json")
 	if err != nil {
 		t.Fatalf("failed to read truth_cases.json: %v", err)
 	}

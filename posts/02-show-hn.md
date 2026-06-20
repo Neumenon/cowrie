@@ -2,9 +2,9 @@
 
 ## Title Options
 
-1. **Show HN: Cowrie -- Binary JSON codec with ML types, dictionary coding, 5 languages**
+1. **Show HN: Cowrie -- Binary JSON codec with ML types, dictionary coding, 4 languages**
 2. **Show HN: Cowrie -- Schemaless binary codec for JSON with native tensors and graph types**
-3. **Show HN: Cowrie -- Binary JSON in Go, Rust, Python, C, TypeScript. No codegen.**
+3. **Show HN: Cowrie -- Binary JSON in Go, Rust, Python, TypeScript. No codegen.**
 
 **Recommended:** Option 1 — most informative, hits the key differentiators, under 80 chars.
 
@@ -31,8 +31,8 @@ Hi HN, I built Cowrie to solve a specific problem: moving tensors and structured
 **Caveats I want to be upfront about:**
 - Gen2 has header overhead. A single small object is 93% of JSON size (worse than Gen1's 76%). Dictionary coding only pays off with repeated schemas.
 - The Python implementation is pure Python, no C extension. It's correct but not fast.
-- This is a new project. Well-tested (23 cross-language fixtures, 16 security regression tests), but not battle-tested in production.
-- Language support is 5 implementations. MsgPack and Protobuf support dozens.
+- This is a new project. Well-tested (34 cross-language fixtures, 16 security regression tests), but not battle-tested in production.
+- Language support is 4 implementations. MsgPack and Protobuf support dozens.
 
 **Try it:**
 ```bash

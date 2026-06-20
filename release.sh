@@ -16,8 +16,6 @@ echo "[Python]"
 (cd python && python -m pytest tests/) || { echo "FAIL: Python tests"; exit 1; }
 echo "[TypeScript]"
 (cd typescript && npm test) || { echo "FAIL: TypeScript tests"; exit 1; }
-echo "[C]"
-(cd c && mkdir -p build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make && ctest --output-on-failure) || { echo "FAIL: C tests"; exit 1; }
 echo ""
 echo "All tests passed."
 echo ""

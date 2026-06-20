@@ -338,28 +338,26 @@ func (mr *MasterReader) readMasterFrame() (*MasterFrame, error) {
 		mr.pos += int(hdrLen) - 24
 	}
 
-	// Read metadata
-	var meta *cowrie.Value
+	// Locate metadata bytes (do NOT decode yet — CRC must be verified first).
+	var metaStart int
 	if flags&FlagMasterMeta != 0 && metaLen > 0 {
 		if mr.pos+int(metaLen) > len(mr.data) {
 			return nil, ErrMasterTruncated
 		}
-		var err error
-		meta, err = cowrie.Decode(mr.data[mr.pos : mr.pos+int(metaLen)])
-		if err != nil {
-			return nil, err
-		}
+		metaStart = mr.pos
 		mr.pos += int(metaLen)
 	}
 
-	// Read payload
+	// Locate payload bytes (do NOT decode yet).
 	if mr.pos+int(payloadLen) > len(mr.data) {
 		return nil, ErrMasterTruncated
 	}
 	payloadData := mr.data[mr.pos : mr.pos+int(payloadLen)]
 	mr.pos += int(payloadLen)
 
-	// Verify CRC if present
+	// Verify CRC BEFORE decoding any trusted content (metadata or payload).
+	// The writer computes crc32.ChecksumIEEE over header+meta+payload (everything
+	// before the CRC uint32), which is exactly data[startPos:mr.pos] at this point.
 	if flags&FlagMasterCRC != 0 {
 		if mr.pos+4 > len(mr.data) {
 			return nil, ErrMasterTruncated
@@ -370,6 +368,16 @@ func (mr *MasterReader) readMasterFrame() (*MasterFrame, error) {
 			return nil, ErrMasterCRCMismatch
 		}
 		mr.pos += 4
+	}
+
+	// CRC verified (or not present) — safe to decode metadata now.
+	var meta *cowrie.Value
+	if flags&FlagMasterMeta != 0 && metaLen > 0 {
+		var err error
+		meta, err = cowrie.Decode(mr.data[metaStart : metaStart+int(metaLen)])
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Decompress if needed

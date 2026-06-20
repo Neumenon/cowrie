@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import UUID
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 from enum import IntEnum
 
 try:
@@ -31,10 +31,10 @@ except ImportError:
     HAS_ZSTD = False
 
 try:
-    import numpy as np
+    import numpy as np  # type: ignore[import-untyped]
     HAS_NUMPY = True
 except ImportError:
-    np = None
+    np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
 import gzip
@@ -43,18 +43,14 @@ import os as _os
 # Native C extension (optional — falls back to pure Python)
 # Priority: Cython > descriptor ring > pure Python
 _HAS_NATIVE = False
-_fast_encode = None
-_fast_decode = None
+_fast_encode: Optional[Callable[..., bytes]] = None
+_fast_decode: Optional[Callable[..., Any]] = None
 if not _os.environ.get('COWRIE_PUREPYTHON'):
     try:
-        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode
+        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode  # type: ignore[no-redef]
         _HAS_NATIVE = True
     except (ImportError, OSError):
-        try:
-            from ._fast import fast_encode as _fast_encode
-            _HAS_NATIVE = True
-        except (ImportError, OSError):
-            pass
+        pass
 
 # Wire format constants
 MAGIC = b'SJ'
@@ -1068,9 +1064,10 @@ class Encoder:
         self._encode_props(edge.props)
 
     def _encode_props(self, props: dict[str, Value]):
-        """Encode dictionary-coded properties."""
+        """Encode dictionary-coded properties, sorted by UTF-8 byte order."""
         self._write_uvarint(len(props))
-        for key, val in props.items():
+        for key in sorted(props.keys()):
+            val = props[key]
             idx = self.dict_lookup[key]
             self._write_uvarint(idx)
             self._encode_value(val)
@@ -1103,6 +1100,63 @@ def encode(v: Value) -> bytes:
         except (TypeError, RuntimeError):
             pass  # fall back to pure Python for unsupported types
     return Encoder().encode(v)
+
+
+# ============================================================
+# Tensor validation helper
+# ============================================================
+
+def _dtype_elem_size(dtype: DType) -> tuple[int, bool]:
+    """Return (element_size_in_bytes, checkable).
+
+    Returns (0, False) for sub-byte quantized types where the packing
+    is not simply elem_size*numel — caller should skip the size check.
+    """
+    sizes = {
+        DType.FLOAT32: 4,
+        DType.FLOAT64: 8,
+        DType.INT8: 1,
+        DType.INT16: 2,
+        DType.INT32: 4,
+        DType.INT64: 8,
+        DType.UINT8: 1,
+        DType.UINT16: 2,
+        DType.UINT32: 4,
+        DType.UINT64: 8,
+        DType.BOOL: 1,
+        DType.BFLOAT16: 2,
+        DType.FLOAT16: 2,
+    }
+    size = sizes.get(dtype)
+    if size is None:
+        return 0, False  # sub-byte or unknown: skip check
+    return size, True
+
+
+def _tensor_expected_bytes(dtype: DType, shape: list[int]) -> tuple[int, bool]:
+    """Compute expected byte length for a tensor (overflow-safe).
+
+    Returns (expected_bytes, checkable). When checkable is False the caller
+    must skip the length check (sub-byte dtype or overflow in dim product).
+    Matches Go's tensorExpectedBytes behaviour exactly.
+    """
+    elem_size, ok = _dtype_elem_size(dtype)
+    if not ok:
+        return 0, False
+    # Rank-0 or any zero dimension → 0 bytes
+    if not shape:
+        return 0, True
+    product = 1
+    MAX_U64 = (1 << 64) - 1
+    for d in shape:
+        if d == 0:
+            return 0, True
+        if product > MAX_U64 // d:
+            return 0, False  # overflow
+        product *= d
+    if elem_size > 0 and product > MAX_U64 // elem_size:
+        return 0, False  # overflow
+    return product * elem_size, True
 
 
 # ============================================================
@@ -1229,6 +1283,12 @@ class Decoder:
             data_len = self._read_uvarint()
             if data_len > self.opts.max_bytes_len:
                 raise SecurityLimitExceeded(f"Tensor data too large: {data_len} > {self.opts.max_bytes_len}")
+            # Validate dataLen == product(dims) * elemSize (skip sub-byte dtypes)
+            expected, checkable = _tensor_expected_bytes(dtype, shape)
+            if checkable and data_len != expected:
+                raise ValueError(
+                    f"cowrie: tensor dataLen {data_len} does not match shape/dtype (expected {expected} bytes)"
+                )
             data = self._read(data_len)
             return Value.tensor(dtype, shape, data)
         elif tag == Tag.IMAGE:
@@ -1254,8 +1314,8 @@ class Decoder:
             key_len = self._read_uvarint()
             if key_len > self.opts.max_string_len:
                 raise SecurityLimitExceeded(f"TensorRef key too long: {key_len} > {self.opts.max_string_len}")
-            key = self._read(key_len)
-            return Value.tensor_ref(store_id, key)
+            ref_key: bytes = self._read(key_len)
+            return Value.tensor_ref(store_id, ref_key)
         # Graph types
         elif tag == Tag.NODE:
             node = self._decode_node()
@@ -1510,6 +1570,178 @@ MAX_SAFE_INT = 9007199254740991
 MIN_SAFE_INT = -9007199254740991
 
 
+def _try_reconstruct_typed(m: dict) -> Optional[Value]:
+    """Inspect a dict for a '_type' key and reconstruct the original typed Value.
+
+    Matches the canonical Go projection schema from ToAny/fromAnyStrictTyped.
+    Returns None if the dict is not a known typed projection.
+    """
+    type_str = m.get("_type")
+    if not isinstance(type_str, str):
+        return None
+
+    def _b64(key: str) -> Optional[bytes]:
+        s = m.get(key)
+        if not isinstance(s, str):
+            return None
+        try:
+            return base64.b64decode(s)
+        except Exception:
+            return None
+
+    def _int(key: str) -> Optional[int]:
+        v = m.get(key)
+        if isinstance(v, int) and not isinstance(v, bool):
+            return v
+        if isinstance(v, float) and v == int(v):
+            return int(v)
+        return None
+
+    if type_str == "tensor":
+        dtype_str = m.get("dtype")
+        data = _b64("data")
+        dims_raw = m.get("dims")
+        if not isinstance(dtype_str, str) or data is None or not isinstance(dims_raw, list):
+            return None
+        # Map dtype string to DType enum
+        dtype_map = {
+            "float32": DType.FLOAT32, "float16": DType.FLOAT16, "bfloat16": DType.BFLOAT16,
+            "float64": DType.FLOAT64, "int8": DType.INT8, "int16": DType.INT16,
+            "int32": DType.INT32, "int64": DType.INT64, "uint8": DType.UINT8,
+            "uint16": DType.UINT16, "uint32": DType.UINT32, "uint64": DType.UINT64,
+            "bool": DType.BOOL,
+        }
+        dtype = dtype_map.get(dtype_str)
+        if dtype is None:
+            return None
+        dims = []
+        for d in dims_raw:
+            if isinstance(d, int) and not isinstance(d, bool):
+                dims.append(d)
+            elif isinstance(d, float) and d == int(d):
+                dims.append(int(d))
+            else:
+                return None
+        return Value.tensor(dtype, dims, data)
+
+    elif type_str == "tensor_ref":
+        store = _int("store")
+        key = _b64("key")
+        if store is None or key is None:
+            return None
+        return Value.tensor_ref(store, key)
+
+    elif type_str == "image":
+        fmt_str = m.get("format")
+        width = _int("width")
+        height = _int("height")
+        data = _b64("data")
+        if not isinstance(fmt_str, str) or width is None or height is None or data is None:
+            return None
+        fmt_map = {
+            "jpeg": ImageFormat.JPEG, "png": ImageFormat.PNG, "webp": ImageFormat.WEBP,
+            "avif": ImageFormat.AVIF, "bmp": ImageFormat.BMP,
+        }
+        fmt = fmt_map.get(fmt_str)
+        if fmt is None:
+            return None
+        return Value.image(fmt, width, height, data)
+
+    elif type_str == "audio":
+        enc_str = m.get("encoding")
+        rate = _int("rate")
+        channels = _int("channels")
+        data = _b64("data")
+        if not isinstance(enc_str, str) or rate is None or channels is None or data is None:
+            return None
+        enc_map = {
+            "pcm_int16": AudioEncoding.PCM_INT16, "pcm_float32": AudioEncoding.PCM_FLOAT32,
+            "opus": AudioEncoding.OPUS, "aac": AudioEncoding.AAC,
+        }
+        enc = enc_map.get(enc_str)
+        if enc is None:
+            return None
+        return Value.audio(enc, rate, channels, data)
+
+    elif type_str == "unknown_ext":
+        ext_type = _int("ext_type")
+        payload = _b64("payload")
+        if ext_type is None or payload is None:
+            return None
+        return Value.unknown_ext(ext_type, payload)
+
+    elif type_str == "node":
+        node_id = m.get("id")
+        labels_raw = m.get("labels")
+        props_raw = m.get("props")
+        if not isinstance(node_id, str) or not isinstance(labels_raw, list):
+            return None
+        labels = []
+        for l in labels_raw:
+            if not isinstance(l, str):
+                return None
+            labels.append(l)
+        props = {}
+        if props_raw is not None:
+            if not isinstance(props_raw, dict):
+                return None
+            for k, pv in props_raw.items():
+                props[k] = from_any(pv, k)
+        return Value.node(node_id, labels, props)
+
+    elif type_str == "edge":
+        from_id = m.get("fromId")
+        to_id = m.get("toId")
+        edge_type = m.get("type")
+        if not isinstance(from_id, str) or not isinstance(to_id, str) or not isinstance(edge_type, str):
+            return None
+        props = {}
+        props_raw = m.get("props")
+        if props_raw is not None:
+            if not isinstance(props_raw, dict):
+                return None
+            for k, pv in props_raw.items():
+                props[k] = from_any(pv, k)
+        return Value.edge(from_id, to_id, edge_type, props)
+
+    elif type_str == "node_batch":
+        nodes_raw = m.get("nodes")
+        if not isinstance(nodes_raw, list):
+            return None
+        nodes = []
+        for nr in nodes_raw:
+            if not isinstance(nr, dict):
+                return None
+            nv = _try_reconstruct_typed(nr)
+            if nv is None or nv.type != Type.NODE:
+                return None
+            nodes.append(nv.data)
+        return Value.node_batch(nodes)
+
+    elif type_str == "edge_batch":
+        edges_raw = m.get("edges")
+        if not isinstance(edges_raw, list):
+            return None
+        edges = []
+        for er in edges_raw:
+            if not isinstance(er, dict):
+                return None
+            ev = _try_reconstruct_typed(er)
+            if ev is None or ev.type != Type.EDGE:
+                return None
+            edges.append(ev.data)
+        return Value.edge_batch(edges)
+
+    elif type_str == "bitmask":
+        count = _int("count")
+        bits = _b64("bits")
+        if count is None or bits is None:
+            return None
+        return Value.bitmask(count, bits)
+
+    return None
+
+
 def from_json(data: Union[str, bytes]) -> Value:
     """Parse JSON into a Cowrie value with type inference."""
     if isinstance(data, bytes):
@@ -1541,13 +1773,9 @@ def from_any(v: Any, field_name: str = "") -> Value:
     elif isinstance(v, list):
         return Value.array([from_any(item) for item in v])
     elif isinstance(v, dict):
-        if v.get("_type") in ("ext", "unknown_ext") and "ext_type" in v and "payload" in v:
-            try:
-                ext_type = int(v.get("ext_type"))
-                payload = base64.b64decode(v.get("payload"))
-                return Value.unknown_ext(ext_type, payload)
-            except (ValueError, TypeError):
-                pass
+        typed = _try_reconstruct_typed(v)
+        if typed is not None:
+            return typed
         members = {}
         for key, val in v.items():
             members[key] = from_any(val, key)
@@ -1636,7 +1864,7 @@ def to_any(v: Value) -> Any:
         return {
             "_type": "tensor",
             "dtype": t.dtype.name.lower(),
-            "shape": t.shape,
+            "dims": t.shape,
             "data": base64.b64encode(t.data).decode('ascii'),
         }
     elif v.type == Type.IMAGE:
@@ -1653,7 +1881,7 @@ def to_any(v: Value) -> Any:
         return {
             "_type": "audio",
             "encoding": aud.encoding.name.lower(),
-            "sample_rate": aud.sample_rate,
+            "rate": aud.sample_rate,
             "channels": aud.channels,
             "data": base64.b64encode(aud.data).decode('ascii'),
         }
@@ -1661,7 +1889,7 @@ def to_any(v: Value) -> Any:
         ref = v.data  # TensorRefData
         return {
             "_type": "tensor_ref",
-            "store_id": ref.store_id,
+            "store": ref.store_id,
             "key": base64.b64encode(ref.key).decode('ascii'),
         }
     # Graph types
@@ -1677,8 +1905,8 @@ def to_any(v: Value) -> Any:
         edge = v.data  # EdgeData
         return {
             "_type": "edge",
-            "from": edge.from_id,
-            "to": edge.to_id,
+            "fromId": edge.from_id,
+            "toId": edge.to_id,
             "type": edge.edge_type,
             "props": {k: to_any(val) for k, val in edge.props.items()},
         }
@@ -1688,6 +1916,7 @@ def to_any(v: Value) -> Any:
             "_type": "node_batch",
             "nodes": [
                 {
+                    "_type": "node",
                     "id": n.id,
                     "labels": n.labels,
                     "props": {k: to_any(val) for k, val in n.props.items()},
@@ -1701,8 +1930,9 @@ def to_any(v: Value) -> Any:
             "_type": "edge_batch",
             "edges": [
                 {
-                    "from": e.from_id,
-                    "to": e.to_id,
+                    "_type": "edge",
+                    "fromId": e.from_id,
+                    "toId": e.to_id,
                     "type": e.edge_type,
                     "props": {k: to_any(val) for k, val in e.props.items()},
                 }
@@ -1714,7 +1944,7 @@ def to_any(v: Value) -> Any:
         return {
             "_type": "bitmask",
             "count": bm.count,
-            "bits": bm.to_bools(),
+            "bits": base64.b64encode(bm.bits).decode('ascii'),
         }
     elif v.type == Type.UNKNOWN_EXT:
         ext = v.data  # UnknownExtData
@@ -1780,6 +2010,24 @@ class DeterministicEncoder(Encoder):
                     continue
                 self._add_key(key)
                 self._collect_keys_sorted(val)
+        elif v.type == Type.NODE:
+            for key in sorted(v.data.props.keys()):
+                self._add_key(key)
+                self._collect_keys_sorted(v.data.props[key])
+        elif v.type == Type.EDGE:
+            for key in sorted(v.data.props.keys()):
+                self._add_key(key)
+                self._collect_keys_sorted(v.data.props[key])
+        elif v.type == Type.NODE_BATCH:
+            for node in v.data.nodes:
+                for key in sorted(node.props.keys()):
+                    self._add_key(key)
+                    self._collect_keys_sorted(node.props[key])
+        elif v.type == Type.EDGE_BATCH:
+            for edge in v.data.edges:
+                for key in sorted(edge.props.keys()):
+                    self._add_key(key)
+                    self._collect_keys_sorted(edge.props[key])
     def _encode_value_sorted(self, v: Value):
         """Encode value with sorted object keys."""
         if v is None or v.type == Type.NULL:
@@ -1888,6 +2136,52 @@ class DeterministicEncoder(Encoder):
             self._write_byte(ref.store_id)
             self._write_uvarint(len(ref.key))
             self._write(ref.key)
+        # Graph types — props sorted by UTF-8 byte order
+        elif v.type == Type.NODE:
+            node = v.data  # NodeData
+            self._write_byte(Tag.NODE)
+            self._encode_node_sorted(node)
+        elif v.type == Type.EDGE:
+            edge = v.data  # EdgeData
+            self._write_byte(Tag.EDGE)
+            self._encode_edge_sorted(edge)
+        elif v.type == Type.NODE_BATCH:
+            batch = v.data  # NodeBatchData
+            self._write_byte(Tag.NODE_BATCH)
+            self._write_uvarint(len(batch.nodes))
+            for node in batch.nodes:
+                self._encode_node_sorted(node)
+        elif v.type == Type.EDGE_BATCH:
+            batch = v.data  # EdgeBatchData
+            self._write_byte(Tag.EDGE_BATCH)
+            self._write_uvarint(len(batch.edges))
+            for edge in batch.edges:
+                self._encode_edge_sorted(edge)
+
+    def _encode_props_sorted(self, props: dict[str, Value]):
+        """Encode props with keys sorted by UTF-8 byte order."""
+        self._write_uvarint(len(props))
+        for key in sorted(props.keys()):
+            val = props[key]
+            idx = self.dict_lookup[key]
+            self._write_uvarint(idx)
+            self._encode_value_sorted(val)
+
+    def _encode_node_sorted(self, node: NodeData):
+        """Encode a node without tag byte, props sorted."""
+        self._write_string(node.id)
+        self._write_uvarint(len(node.labels))
+        for label in node.labels:
+            self._write_string(label)
+        self._encode_props_sorted(node.props)
+
+    def _encode_edge_sorted(self, edge: EdgeData):
+        """Encode an edge without tag byte, props sorted."""
+        self._write_string(edge.from_id)
+        self._write_string(edge.to_id)
+        self._write_string(edge.edge_type)
+        self._encode_props_sorted(edge.props)
+
     def encode_with_opts(self, v: Value) -> bytes:
         """Encode with options."""
         if not self.opts.deterministic:
@@ -1977,6 +2271,12 @@ def _type_to_ord(t: Type) -> int:
         Type.TENSOR_REF: 14,
         Type.IMAGE: 15,
         Type.AUDIO: 16,
+        Type.NODE: 17,
+        Type.EDGE: 18,
+        Type.NODE_BATCH: 19,
+        Type.EDGE_BATCH: 20,
+        Type.BITMASK: 21,
+        Type.UNKNOWN_EXT: 22,
     }
     return mapping.get(t, 0xFF)
 
@@ -2012,13 +2312,19 @@ def _hash_schema(v: Value, h: int) -> int:
         img = v.data  # ImageData
         h = _fnv_hash_byte(h, img.format)
     elif v.type == Type.AUDIO:
-        # Include encoding in schema (sample_rate, channels are data)
+        # Include encoding AND channels in schema (sample_rate is data) — matches
+        # the Go reference (schema.go hashes encoding then channels).
         aud = v.data  # AudioData
         h = _fnv_hash_byte(h, aud.encoding)
+        h = _fnv_hash_byte(h, aud.channels)
     elif v.type == Type.TENSOR_REF:
         # Include store_id in schema (key is data)
         ref = v.data  # TensorRefData
         h = _fnv_hash_byte(h, ref.store_id)
+    elif v.type == Type.UNKNOWN_EXT:
+        # Include ext type in schema (payload is data) — matches Go.
+        ext = v.data  # UnknownExtData
+        h = _fnv_hash_u64(h, ext.ext_type)
 
     return h
 
@@ -2043,7 +2349,67 @@ def schema_fingerprint32(v: Value) -> int:
 
 
 def schema_equals(a: Value, b: Value) -> bool:
-    """Check if two values have the same schema."""
+    """Check if two values have structurally identical schemas.
+
+    Performs a recursive structural comparison of types, object field names,
+    array element schemas, tensor dtype/rank, image format, audio
+    encoding/channels, tensor_ref store ID, and unknown-ext type.
+    Actual values (ints, strings, tensor data, etc.) are not compared.
+
+    Use schema_fingerprint_equal for a faster probabilistic check.
+    """
+    return _schema_equals_recursive(a, b)
+
+
+def _schema_equals_recursive(a: Value, b: Value) -> bool:
+    """Recursive structural schema comparison (mirrors Go SchemaEquals)."""
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    if a.type != b.type:
+        return False
+
+    t = a.type
+    if t in (Type.NULL, Type.BOOL, Type.INT64, Type.UINT64, Type.FLOAT64,
+             Type.DECIMAL128, Type.STRING, Type.BYTES, Type.DATETIME64,
+             Type.UUID128, Type.BIGINT):
+        # Scalar: type tag is sufficient
+        return True
+    elif t == Type.ARRAY:
+        if len(a.data) != len(b.data):
+            return False
+        return all(_schema_equals_recursive(ai, bi) for ai, bi in zip(a.data, b.data))
+    elif t == Type.OBJECT:
+        if len(a.data) != len(b.data):
+            return False
+        a_keys = sorted(a.data.keys())
+        b_keys = sorted(b.data.keys())
+        if a_keys != b_keys:
+            return False
+        return all(_schema_equals_recursive(a.data[k], b.data[k]) for k in a_keys)
+    elif t == Type.TENSOR:
+        at, bt = a.data, b.data  # TensorData
+        return at.dtype == bt.dtype and len(at.shape) == len(bt.shape)
+    elif t == Type.TENSOR_REF:
+        return a.data.store_id == b.data.store_id
+    elif t == Type.IMAGE:
+        return a.data.format == b.data.format
+    elif t == Type.AUDIO:
+        return a.data.encoding == b.data.encoding and a.data.channels == b.data.channels
+    elif t == Type.UNKNOWN_EXT:
+        return a.data.ext_type == b.data.ext_type
+    else:
+        # NODE, EDGE, NODE_BATCH, EDGE_BATCH, BITMASK: type tag is sufficient
+        return True
+
+
+def schema_fingerprint_equal(a: Value, b: Value) -> bool:
+    """Fast probabilistic schema equality check using 64-bit fingerprint.
+
+    Carries a 1-in-2^64 collision risk. Prefer schema_equals for
+    correctness-critical comparisons.
+    """
     return schema_fingerprint64(a) == schema_fingerprint64(b)
 
 

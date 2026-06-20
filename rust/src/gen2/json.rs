@@ -50,6 +50,15 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, CowrieError> {
             if let Some(serde_json::Value::String(type_name)) = obj.get("_type") {
                 match type_name.as_str() {
                     "tensor" => return parse_tensor_from_json(obj),
+                    "tensor_ref" => return parse_tensor_ref_from_json(obj),
+                    "image" => return parse_image_from_json(obj),
+                    "audio" => return parse_audio_from_json(obj),
+                    "unknown_ext" => return parse_unknown_ext_from_json(obj),
+                    "node" => return parse_node_from_json(obj),
+                    "edge" => return parse_edge_from_json(obj),
+                    "node_batch" => return parse_node_batch_from_json(obj),
+                    "edge_batch" => return parse_edge_batch_from_json(obj),
+                    "bitmask" => return parse_bitmask_from_json(obj),
                     "bytes" => return parse_bytes_from_json(obj),
                     "datetime" => return parse_datetime_from_json(obj),
                     "uuid" => return parse_uuid_from_json(obj),
@@ -152,6 +161,200 @@ fn parse_uuid_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Res
     Ok(Value::Uuid(bytes))
 }
 
+fn parse_tensor_ref_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let store_id = obj.get("store")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("tensor_ref missing store".into()))?
+        as u8;
+
+    let key_b64 = obj.get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("tensor_ref missing key".into()))?;
+
+    let key = BASE64.decode(key_b64)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+
+    Ok(Value::TensorRef(super::types::TensorRef { store_id, key }))
+}
+
+fn parse_image_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let format_str = obj.get("format")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("image missing format".into()))?;
+
+    let format = match format_str {
+        "jpeg" => super::types::ImageFormat::Jpeg,
+        "png" => super::types::ImageFormat::Png,
+        "webp" => super::types::ImageFormat::Webp,
+        "avif" => super::types::ImageFormat::Avif,
+        "bmp" => super::types::ImageFormat::Bmp,
+        _ => return Err(CowrieError::InvalidData(format!("unknown image format: {}", format_str))),
+    };
+
+    let width = obj.get("width")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("image missing width".into()))? as u16;
+
+    let height = obj.get("height")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("image missing height".into()))? as u16;
+
+    let data_b64 = obj.get("data")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("image missing data".into()))?;
+
+    let data = BASE64.decode(data_b64)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+
+    Ok(Value::Image(super::types::ImageData { format, width, height, data }))
+}
+
+fn parse_audio_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let encoding_str = obj.get("encoding")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("audio missing encoding".into()))?;
+
+    let encoding = match encoding_str {
+        "pcm_int16" => super::types::AudioEncoding::PcmInt16,
+        "pcm_float32" => super::types::AudioEncoding::PcmFloat32,
+        "opus" => super::types::AudioEncoding::Opus,
+        "aac" => super::types::AudioEncoding::Aac,
+        _ => return Err(CowrieError::InvalidData(format!("unknown audio encoding: {}", encoding_str))),
+    };
+
+    let sample_rate = obj.get("rate")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("audio missing rate".into()))? as u32;
+
+    let channels = obj.get("channels")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("audio missing channels".into()))? as u8;
+
+    let data_b64 = obj.get("data")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("audio missing data".into()))?;
+
+    let data = BASE64.decode(data_b64)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+
+    Ok(Value::Audio(super::types::AudioData { encoding, sample_rate, channels, data }))
+}
+
+fn parse_unknown_ext_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let type_id = obj.get("ext_type")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("unknown_ext missing ext_type".into()))?;
+
+    let payload_b64 = obj.get("payload")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("unknown_ext missing payload".into()))?;
+
+    let payload = BASE64.decode(payload_b64)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+
+    Ok(Value::Ext(super::types::ExtData { type_id, payload }))
+}
+
+fn parse_node_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let id = obj.get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("node missing id".into()))?
+        .to_string();
+
+    let labels: Vec<String> = obj.get("labels")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| CowrieError::InvalidData("node missing labels".into()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    let props_obj = obj.get("props")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| CowrieError::InvalidData("node missing props".into()))?;
+
+    let mut props = BTreeMap::new();
+    for (k, v) in props_obj {
+        props.insert(k.clone(), json_to_value(v)?);
+    }
+
+    Ok(Value::Node(super::types::NodeData { id, labels, props }))
+}
+
+fn parse_edge_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let from = obj.get("fromId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("edge missing fromId".into()))?
+        .to_string();
+
+    let to = obj.get("toId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("edge missing toId".into()))?
+        .to_string();
+
+    let edge_type = obj.get("type")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("edge missing type".into()))?
+        .to_string();
+
+    let props_obj = obj.get("props")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| CowrieError::InvalidData("edge missing props".into()))?;
+
+    let mut props = BTreeMap::new();
+    for (k, v) in props_obj {
+        props.insert(k.clone(), json_to_value(v)?);
+    }
+
+    Ok(Value::Edge(super::types::EdgeData { from, to, edge_type, props }))
+}
+
+fn parse_node_batch_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let arr = obj.get("nodes")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| CowrieError::InvalidData("node_batch missing nodes".into()))?;
+
+    let nodes: Result<Vec<super::types::NodeData>, CowrieError> = arr.iter().map(|item| {
+        match parse_node_from_json(item.as_object()
+            .ok_or_else(|| CowrieError::InvalidData("node_batch: node is not an object".into()))?)? {
+            Value::Node(n) => Ok(n),
+            _ => Err(CowrieError::InvalidData("node_batch: expected node".into())),
+        }
+    }).collect();
+
+    Ok(Value::NodeBatch(super::types::NodeBatchData { nodes: nodes? }))
+}
+
+fn parse_edge_batch_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let arr = obj.get("edges")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| CowrieError::InvalidData("edge_batch missing edges".into()))?;
+
+    let edges: Result<Vec<super::types::EdgeData>, CowrieError> = arr.iter().map(|item| {
+        match parse_edge_from_json(item.as_object()
+            .ok_or_else(|| CowrieError::InvalidData("edge_batch: edge is not an object".into()))?)? {
+            Value::Edge(e) => Ok(e),
+            _ => Err(CowrieError::InvalidData("edge_batch: expected edge".into())),
+        }
+    }).collect();
+
+    Ok(Value::EdgeBatch(super::types::EdgeBatchData { edges: edges? }))
+}
+
+fn parse_bitmask_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
+    let count = obj.get("count")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("bitmask missing count".into()))?;
+
+    let bits_b64 = obj.get("bits")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| CowrieError::InvalidData("bitmask missing bits".into()))?;
+
+    let bits = BASE64.decode(bits_b64)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+
+    Ok(Value::Bitmask { count, bits })
+}
+
 fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
     match value {
         Value::Null => Ok(serde_json::Value::Null),
@@ -245,7 +448,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
         Value::TensorRef(r) => {
             Ok(serde_json::json!({
                 "_type": "tensor_ref",
-                "store_id": r.store_id,
+                "store": r.store_id as u64,
                 "key": BASE64.encode(&r.key)
             }))
         }
@@ -275,16 +478,16 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             Ok(serde_json::json!({
                 "_type": "audio",
                 "encoding": encoding_str,
-                "sample_rate": aud.sample_rate,
+                "rate": aud.sample_rate,
                 "channels": aud.channels,
                 "data": BASE64.encode(&aud.data)
             }))
         }
         Value::Ext(ext) => {
             Ok(serde_json::json!({
-                "_type": "ext",
-                "type_id": ext.type_id,
-                "data": BASE64.encode(&ext.payload)
+                "_type": "unknown_ext",
+                "ext_type": ext.type_id,
+                "payload": BASE64.encode(&ext.payload)
             }))
         }
         // Graph types
@@ -307,8 +510,8 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
                 }).collect();
             Ok(serde_json::json!({
                 "_type": "edge",
-                "from": edge.from,
-                "to": edge.to,
+                "fromId": edge.from,
+                "toId": edge.to,
                 "type": edge.edge_type,
                 "props": serde_json::Value::Object(props?)
             }))
@@ -333,7 +536,7 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             Ok(serde_json::json!({
                 "_type": "bitmask",
                 "count": count,
-                "bits": bits
+                "bits": BASE64.encode(bits)
             }))
         }
     }
@@ -342,6 +545,11 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::types::{
+        AudioData, AudioEncoding, EdgeData, EdgeBatchData, ExtData, ImageData, ImageFormat,
+        NodeBatchData, NodeData, TensorRef,
+    };
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_json_roundtrip_object() {
@@ -376,5 +584,190 @@ mod tests {
         } else {
             panic!("expected tensor");
         }
+    }
+
+    // Round-trip helpers: serialize then deserialize and assert equal.
+    fn roundtrip(v: &Value) -> Value {
+        let json = to_json(v).expect("to_json");
+        from_json(&json).expect("from_json")
+    }
+
+    #[test]
+    fn test_roundtrip_tensor() {
+        let v = Value::Tensor(super::super::types::TensorData {
+            dtype: DType::Float32,
+            shape: vec![2, 3],
+            data: vec![0u8; 24],
+        });
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_tensor_field_names() {
+        // Verify to_json emits the canonical field names.
+        let v = Value::Tensor(super::super::types::TensorData {
+            dtype: DType::Int8,
+            shape: vec![4],
+            data: vec![1, 2, 3, 4],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(obj["_type"], "tensor");
+        assert_eq!(obj["dtype"], "int8");
+        assert!(obj.get("dims").is_some());
+        assert!(obj.get("data").is_some());
+    }
+
+    #[test]
+    fn test_roundtrip_tensor_ref() {
+        let v = Value::TensorRef(TensorRef {
+            store_id: 7,
+            key: vec![0xDE, 0xAD, 0xBE, 0xEF],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Canonical field names
+        assert_eq!(obj["_type"], "tensor_ref");
+        assert_eq!(obj["store"], 7);
+        assert!(obj.get("key").is_some());
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_image() {
+        let v = Value::Image(ImageData {
+            format: ImageFormat::Png,
+            width: 16,
+            height: 16,
+            data: vec![0u8; 10],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(obj["_type"], "image");
+        assert_eq!(obj["format"], "png");
+        assert_eq!(obj["width"], 16);
+        assert_eq!(obj["height"], 16);
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_audio() {
+        let v = Value::Audio(AudioData {
+            encoding: AudioEncoding::PcmInt16,
+            sample_rate: 44100,
+            channels: 2,
+            data: vec![0u8; 8],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Canonical: "rate" not "sample_rate"
+        assert_eq!(obj["_type"], "audio");
+        assert_eq!(obj["rate"], 44100);
+        assert!(obj.get("sample_rate").is_none(), "must not emit sample_rate");
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_unknown_ext() {
+        let v = Value::Ext(ExtData {
+            type_id: 999,
+            payload: vec![0x01, 0x02, 0x03],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Canonical: "_type":"unknown_ext", "ext_type", "payload"
+        assert_eq!(obj["_type"], "unknown_ext");
+        assert_eq!(obj["ext_type"], 999);
+        assert!(obj.get("payload").is_some());
+        assert!(obj.get("type_id").is_none(), "must not emit type_id");
+        assert!(obj.get("data").is_none(), "must not emit data");
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_node() {
+        let mut props = BTreeMap::new();
+        props.insert("age".to_string(), Value::Int(30));
+        let v = Value::Node(NodeData {
+            id: "n1".to_string(),
+            labels: vec!["Person".to_string()],
+            props,
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(obj["_type"], "node");
+        assert_eq!(obj["id"], "n1");
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_edge() {
+        let v = Value::Edge(EdgeData {
+            from: "n1".to_string(),
+            to: "n2".to_string(),
+            edge_type: "KNOWS".to_string(),
+            props: BTreeMap::new(),
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // Canonical: "fromId" and "toId"
+        assert_eq!(obj["_type"], "edge");
+        assert_eq!(obj["fromId"], "n1");
+        assert_eq!(obj["toId"], "n2");
+        assert!(obj.get("from").is_none(), "must not emit from");
+        assert!(obj.get("to").is_none(), "must not emit to");
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_node_batch() {
+        let mut props = BTreeMap::new();
+        props.insert("x".to_string(), Value::Int(1));
+        let v = Value::NodeBatch(NodeBatchData {
+            nodes: vec![NodeData {
+                id: "n1".to_string(),
+                labels: vec!["A".to_string()],
+                props,
+            }],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(obj["_type"], "node_batch");
+        assert!(obj["nodes"].as_array().is_some());
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_edge_batch() {
+        let v = Value::EdgeBatch(EdgeBatchData {
+            edges: vec![EdgeData {
+                from: "a".to_string(),
+                to: "b".to_string(),
+                edge_type: "REL".to_string(),
+                props: BTreeMap::new(),
+            }],
+        });
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(obj["_type"], "edge_batch");
+        // Inner edges must use fromId/toId
+        assert_eq!(obj["edges"][0]["fromId"], "a");
+        assert_eq!(obj["edges"][0]["toId"], "b");
+        assert_eq!(roundtrip(&v), v);
+    }
+
+    #[test]
+    fn test_roundtrip_bitmask() {
+        let v = Value::Bitmask {
+            count: 10,
+            bits: vec![0b10101010, 0b01010101],
+        };
+        let json = to_json(&v).unwrap();
+        let obj: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(obj["_type"], "bitmask");
+        assert_eq!(obj["count"], 10);
+        // bits must be a base64 string, not an array
+        assert!(obj["bits"].as_str().is_some(), "bits must be base64 string");
+        assert_eq!(roundtrip(&v), v);
     }
 }

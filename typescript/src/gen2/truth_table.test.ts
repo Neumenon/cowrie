@@ -10,8 +10,8 @@ import path from "path";
 import { encode, decode, toAny, fromAny, SJ, Type } from "./index.ts";
 import type { Value } from "./index.ts";
 
-const cogsRoot = path.resolve(__dirname, "../../../..");
-const truthPath = path.join(cogsRoot, "testdata", "robustness", "truth_cases.json");
+const repoRoot = path.resolve(__dirname, "../../..");
+const truthPath = path.join(repoRoot, "testdata", "robustness", "truth_cases.json");
 const truthDoc = JSON.parse(fs.readFileSync(truthPath, "utf8"));
 const cases: any[] = truthDoc.cowrie.cases;
 

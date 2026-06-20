@@ -135,10 +135,92 @@ func fnvHashUint64(h uint64, v uint64) uint64 {
 	return h
 }
 
-// SchemaEquals returns true if two values have identical schemas.
-// This is more reliable than comparing fingerprints for equality
-// (no collision risk), but slower for large schemas.
+// SchemaEquals returns true if two values have structurally identical schemas.
+// It recursively compares types, object field names, array element schemas,
+// tensor dtype/rank, image format, audio encoding/channels, tensor_ref store ID,
+// and unknown-ext type — mirroring exactly what SchemaFingerprint64 hashes.
+// Actual values (ints, strings, tensor data, etc.) are not compared.
+//
+// Use SchemaFingerprintEqual for a faster probabilistic check.
 func SchemaEquals(a, b *Value) bool {
+	// Handle nil (treated as TypeNull)
+	aNil := a == nil
+	bNil := b == nil
+	if aNil || bNil {
+		return aNil && bNil
+	}
+
+	if a.typ != b.typ {
+		return false
+	}
+
+	switch a.typ {
+	case TypeNull, TypeBool, TypeInt64, TypeUint64, TypeFloat64,
+		TypeDecimal128, TypeString, TypeBytes, TypeDatetime64,
+		TypeUUID128, TypeBigInt:
+		// Scalar types: type tag is sufficient
+		return true
+
+	case TypeArray:
+		if len(a.arrayVal) != len(b.arrayVal) {
+			return false
+		}
+		for i := range a.arrayVal {
+			if !SchemaEquals(a.arrayVal[i], b.arrayVal[i]) {
+				return false
+			}
+		}
+		return true
+
+	case TypeObject:
+		if len(a.objectVal) != len(b.objectVal) {
+			return false
+		}
+		// Sort both sides by key (same canonical order as hashSchema)
+		aSorted := make([]Member, len(a.objectVal))
+		bSorted := make([]Member, len(b.objectVal))
+		copy(aSorted, a.objectVal)
+		copy(bSorted, b.objectVal)
+		sort.Slice(aSorted, func(i, j int) bool { return aSorted[i].Key < aSorted[j].Key })
+		sort.Slice(bSorted, func(i, j int) bool { return bSorted[i].Key < bSorted[j].Key })
+		for i := range aSorted {
+			if aSorted[i].Key != bSorted[i].Key {
+				return false
+			}
+			if !SchemaEquals(aSorted[i].Value, bSorted[i].Value) {
+				return false
+			}
+		}
+		return true
+
+	case TypeTensor:
+		return a.tensorVal.DType == b.tensorVal.DType &&
+			len(a.tensorVal.Dims) == len(b.tensorVal.Dims)
+
+	case TypeTensorRef:
+		return a.tensorRefVal.StoreID == b.tensorRefVal.StoreID
+
+	case TypeImage:
+		return a.imageVal.Format == b.imageVal.Format
+
+	case TypeAudio:
+		return a.audioVal.Encoding == b.audioVal.Encoding &&
+			a.audioVal.Channels == b.audioVal.Channels
+
+	case TypeUnknownExt:
+		return a.unknownExtVal.ExtType == b.unknownExtVal.ExtType
+	}
+
+	// All other types (graph types, bitmask, etc.) have no sub-schema fields:
+	// type tag equality (checked above) is sufficient.
+	return true
+}
+
+// SchemaFingerprintEqual returns true if the two values share the same 64-bit
+// FNV-1a schema fingerprint. This is the original (probabilistic) implementation
+// of SchemaEquals: fast for large schemas, but carries a 1-in-2^64 collision risk.
+// Prefer SchemaEquals for correctness-critical comparisons.
+func SchemaFingerprintEqual(a, b *Value) bool {
 	return SchemaFingerprint64(a) == SchemaFingerprint64(b)
 }
 

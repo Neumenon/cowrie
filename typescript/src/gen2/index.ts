@@ -465,6 +465,56 @@ function zigzagDecode(n: bigint): bigint {
 // Reusable TextEncoder instance (created once, shared by all encoders)
 const sharedTextEncoder = new TextEncoder();
 
+// ============================================================
+// Tensor validation helpers
+// ============================================================
+
+/**
+ * Returns the element size in bytes for byte-aligned dtypes.
+ * Returns null for sub-byte packed types (BOOL, QINT4, QINT2, QINT3, TERNARY, BINARY)
+ * whose packing formula is non-trivial and is not validated here.
+ */
+function dtypeElemSize(dtype: number): number | null {
+  switch (dtype) {
+    case 0x01: return 4;  // FLOAT32
+    case 0x02: return 2;  // FLOAT16
+    case 0x03: return 2;  // BFLOAT16
+    case 0x04: return 1;  // INT8
+    case 0x05: return 2;  // INT16
+    case 0x06: return 4;  // INT32
+    case 0x07: return 8;  // INT64
+    case 0x08: return 1;  // UINT8
+    case 0x09: return 2;  // UINT16
+    case 0x0a: return 4;  // UINT32
+    case 0x0b: return 8;  // UINT64
+    case 0x0c: return 8;  // FLOAT64
+    default:              // Sub-byte packed types: skip validation
+      return null;
+  }
+}
+
+/**
+ * Computes the expected byte length for a tensor with the given shape and dtype.
+ * Returns null when the dtype uses sub-byte packing or when the product overflows
+ * Number.MAX_SAFE_INTEGER (skip the check rather than accept corrupt data silently).
+ * Rank-0 tensors and tensors with any zero dimension produce 0 bytes.
+ */
+function tensorExpectedBytes(dtype: number, shape: number[]): number | null {
+  const elemSize = dtypeElemSize(dtype);
+  if (elemSize === null) return null;
+  if (shape.length === 0) return 0;
+  let product = 1;
+  for (const dim of shape) {
+    if (dim === 0) return 0;
+    product *= dim;
+    // If product exceeds safe integer range, skip the check to avoid silent overflow.
+    if (product > Number.MAX_SAFE_INTEGER) return null;
+  }
+  const total = product * elemSize;
+  if (total > Number.MAX_SAFE_INTEGER) return null;
+  return total;
+}
+
 // Encoder
 class Encoder {
   private buf: number[] = [];
@@ -510,9 +560,10 @@ class Encoder {
   }
 
   private collectPropsKeys(props: Record<string, Value>): void {
-    for (const [key, val] of Object.entries(props)) {
+    const keys = Object.keys(props).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    for (const key of keys) {
       this.addKey(key);
-      this.collectKeys(val);
+      this.collectKeys(props[key]);
     }
   }
 
@@ -758,7 +809,7 @@ class Encoder {
   }
 
   private encodeProps(props: Record<string, Value>): void {
-    const entries = Object.entries(props);
+    const entries = Object.entries(props).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
     this.writeUvarint(entries.length);
     for (const [key, val] of entries) {
       const idx = this.dictLookup.get(key);
@@ -966,6 +1017,12 @@ class Decoder {
         const dataLen = this.readUvarintAsNumber();
         if (dataLen > this.limits.maxBytesLen) {
           throw new SecurityLimitExceeded(`Tensor data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
+        }
+        // Validate dataLen == product(dims) * elemSize for byte-aligned dtypes.
+        // Sub-byte packed types (BOOL, QINT4, etc.) are skipped (tensorExpectedBytes returns null).
+        const expected = tensorExpectedBytes(dtype, shape);
+        if (expected !== null && dataLen !== expected) {
+          throw new Error(`cowrie: tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
         }
         const data = this.read(dataLen);
         return SJ.tensor(dtype, shape, data);
@@ -1212,20 +1269,8 @@ export function fromAny(v: unknown, fieldName = ""): Value {
   }
   if (typeof v === "object") {
     const obj = v as Record<string, unknown>;
-    if ((obj._type === "unknown_ext" || obj._type === "ext") && obj.ext_type !== undefined && obj.payload !== undefined) {
-      const extType = typeof obj.ext_type === "string" ? BigInt(obj.ext_type) : BigInt(obj.ext_type as number);
-      const payloadStr = String(obj.payload);
-      let payload: Uint8Array;
-      if (typeof Buffer !== "undefined") {
-        payload = new Uint8Array(Buffer.from(payloadStr, "base64"));
-      } else {
-        const bin = atob(payloadStr);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        payload = arr;
-      }
-      return SJ.unknownExt(extType, payload);
-    }
+    const typed = tryReconstructTyped(obj);
+    if (typed !== null) return typed;
     const members: Record<string, Value> = {};
     for (const [key, val] of Object.entries(v)) {
       members[key] = fromAny(val, key);
@@ -1233,6 +1278,216 @@ export function fromAny(v: unknown, fieldName = ""): Value {
     return SJ.object(members);
   }
   return SJ.string(String(v));
+}
+
+/** Helper: decode a base64 string field from a plain-object map. */
+function b64FieldFromObj(obj: Record<string, unknown>, key: string): Uint8Array | null {
+  const s = obj[key];
+  if (typeof s !== "string") return null;
+  try {
+    if (typeof Buffer !== "undefined") {
+      return new Uint8Array(Buffer.from(s, "base64"));
+    }
+    const bin = atob(s);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  } catch {
+    return null;
+  }
+}
+
+/** Helper: get an integer from a number or string field. */
+function intFieldFromObj(obj: Record<string, unknown>, key: string): number | null {
+  const v = obj[key];
+  if (typeof v === "number") return Math.trunc(v);
+  if (typeof v === "bigint") return Number(v);
+  return null;
+}
+
+/**
+ * Inspect a plain-object for a "_type" key and reconstruct the original typed Value.
+ * Mirrors Go's tryReconstructTyped.  Returns null if not a typed projection.
+ */
+function tryReconstructTyped(obj: Record<string, unknown>): Value | null {
+  const typeStr = obj["_type"];
+  if (typeof typeStr !== "string") return null;
+
+  switch (typeStr) {
+    case "tensor": {
+      const dtypeStr = obj["dtype"];
+      if (typeof dtypeStr !== "string") return null;
+      const dtype = stringToDtype(dtypeStr);
+      if (dtype === null) return null;
+      const dimsRaw = obj["dims"];
+      if (!Array.isArray(dimsRaw)) return null;
+      const shape: number[] = [];
+      for (const d of dimsRaw) {
+        if (typeof d !== "number") return null;
+        shape.push(Math.trunc(d));
+      }
+      const data = b64FieldFromObj(obj, "data");
+      if (data === null) return null;
+      return SJ.tensor(dtype, shape, data);
+    }
+
+    case "tensor_ref": {
+      const store = intFieldFromObj(obj, "store");
+      if (store === null) return null;
+      const key = b64FieldFromObj(obj, "key");
+      if (key === null) return null;
+      return SJ.tensorRef(store, key);
+    }
+
+    case "image": {
+      const fmtStr = obj["format"];
+      if (typeof fmtStr !== "string") return null;
+      const format = stringToImageFormat(fmtStr);
+      if (format === null) return null;
+      const width = intFieldFromObj(obj, "width");
+      const height = intFieldFromObj(obj, "height");
+      if (width === null || height === null) return null;
+      const data = b64FieldFromObj(obj, "data");
+      if (data === null) return null;
+      return SJ.image(format, width, height, data);
+    }
+
+    case "audio": {
+      const encStr = obj["encoding"];
+      if (typeof encStr !== "string") return null;
+      const encoding = stringToAudioEncoding(encStr);
+      if (encoding === null) return null;
+      const rate = intFieldFromObj(obj, "rate");
+      const channels = intFieldFromObj(obj, "channels");
+      if (rate === null || channels === null) return null;
+      const data = b64FieldFromObj(obj, "data");
+      if (data === null) return null;
+      return SJ.audio(encoding, rate, channels, data);
+    }
+
+    case "unknown_ext":
+    case "ext": {
+      const extTypeRaw = obj["ext_type"];
+      if (extTypeRaw === undefined) return null;
+      const extType = typeof extTypeRaw === "string" ? BigInt(extTypeRaw) : BigInt(extTypeRaw as number);
+      const payload = b64FieldFromObj(obj, "payload");
+      if (payload === null) return null;
+      return SJ.unknownExt(extType, payload);
+    }
+
+    case "node": {
+      const id = obj["id"];
+      if (typeof id !== "string") return null;
+      const labelsRaw = obj["labels"];
+      if (!Array.isArray(labelsRaw)) return null;
+      const labels: string[] = [];
+      for (const l of labelsRaw) {
+        if (typeof l !== "string") return null;
+        labels.push(l);
+      }
+      const propsRaw = obj["props"];
+      const props: Record<string, Value> = {};
+      if (propsRaw !== null && propsRaw !== undefined && typeof propsRaw === "object") {
+        for (const [k, pv] of Object.entries(propsRaw as Record<string, unknown>)) {
+          props[k] = fromAny(pv, k);
+        }
+      }
+      return SJ.node(id, labels, props);
+    }
+
+    case "edge": {
+      const fromId = obj["fromId"];
+      const toId = obj["toId"];
+      const edgeType = obj["type"];
+      if (typeof fromId !== "string" || typeof toId !== "string" || typeof edgeType !== "string") return null;
+      const propsRaw = obj["props"];
+      const props: Record<string, Value> = {};
+      if (propsRaw !== null && propsRaw !== undefined && typeof propsRaw === "object") {
+        for (const [k, pv] of Object.entries(propsRaw as Record<string, unknown>)) {
+          props[k] = fromAny(pv, k);
+        }
+      }
+      return SJ.edge(fromId, toId, edgeType, props);
+    }
+
+    case "node_batch": {
+      const nodesRaw = obj["nodes"];
+      if (!Array.isArray(nodesRaw)) return null;
+      const nodes: NodeData[] = [];
+      for (const nr of nodesRaw) {
+        if (typeof nr !== "object" || nr === null) return null;
+        const nv = tryReconstructTyped(nr as Record<string, unknown>);
+        if (nv === null || nv.type !== Type.NODE) return null;
+        nodes.push(nv.data as NodeData);
+      }
+      return SJ.nodeBatch(nodes);
+    }
+
+    case "edge_batch": {
+      const edgesRaw = obj["edges"];
+      if (!Array.isArray(edgesRaw)) return null;
+      const edges: EdgeData[] = [];
+      for (const er of edgesRaw) {
+        if (typeof er !== "object" || er === null) return null;
+        const ev = tryReconstructTyped(er as Record<string, unknown>);
+        if (ev === null || ev.type !== Type.EDGE) return null;
+        edges.push(ev.data as EdgeData);
+      }
+      return SJ.edgeBatch(edges);
+    }
+
+    case "bitmask": {
+      const count = intFieldFromObj(obj, "count");
+      if (count === null) return null;
+      const bits = b64FieldFromObj(obj, "bits");
+      if (bits === null) return null;
+      return SJ.bitmask(count, bits);
+    }
+  }
+
+  return null;
+}
+
+/** Map dtype string (as produced by Go) to DType enum. */
+function stringToDtype(s: string): DType | null {
+  switch (s) {
+    case "float32":  return DType.FLOAT32;
+    case "float16":  return DType.FLOAT16;
+    case "bfloat16": return DType.BFLOAT16;
+    case "float64":  return DType.FLOAT64;
+    case "int8":     return DType.INT8;
+    case "int16":    return DType.INT16;
+    case "int32":    return DType.INT32;
+    case "int64":    return DType.INT64;
+    case "uint8":    return DType.UINT8;
+    case "uint16":   return DType.UINT16;
+    case "uint32":   return DType.UINT32;
+    case "uint64":   return DType.UINT64;
+    default:         return null;
+  }
+}
+
+/** Map image format string (as produced by Go) to ImageFormat enum. */
+function stringToImageFormat(s: string): ImageFormat | null {
+  switch (s) {
+    case "jpeg": return ImageFormat.JPEG;
+    case "png":  return ImageFormat.PNG;
+    case "webp": return ImageFormat.WEBP;
+    case "avif": return ImageFormat.AVIF;
+    case "bmp":  return ImageFormat.BMP;
+    default:     return null;
+  }
+}
+
+/** Map audio encoding string (as produced by Go) to AudioEncoding enum. */
+function stringToAudioEncoding(s: string): AudioEncoding | null {
+  switch (s) {
+    case "pcm_int16":   return AudioEncoding.PCM_INT16;
+    case "pcm_float32": return AudioEncoding.PCM_FLOAT32;
+    case "opus":        return AudioEncoding.OPUS;
+    case "aac":         return AudioEncoding.AAC;
+    default:            return null;
+  }
 }
 
 function inferStringType(s: string, fieldName: string): Value {
@@ -1335,7 +1590,7 @@ export function toAny(v: Value): unknown {
       return {
         _type: "tensor",
         dtype: DType[t.dtype]?.toLowerCase() ?? t.dtype,
-        shape: t.shape,
+        dims: t.shape,
         data: btoa(binary),
       };
     }
@@ -1358,7 +1613,7 @@ export function toAny(v: Value): unknown {
       return {
         _type: "audio",
         encoding: AudioEncoding[aud.encoding]?.toLowerCase() ?? aud.encoding,
-        sampleRate: aud.sampleRate,
+        rate: aud.sampleRate,
         channels: aud.channels,
         data: btoa(binary),
       };
@@ -1369,7 +1624,7 @@ export function toAny(v: Value): unknown {
       for (const b of ref.key) binary += String.fromCharCode(b);
       return {
         _type: "tensor_ref",
-        storeId: ref.storeId,
+        store: ref.storeId,
         key: btoa(binary),
       };
     }
@@ -1395,8 +1650,8 @@ export function toAny(v: Value): unknown {
       }
       return {
         _type: "edge",
-        from: edge.fromId,
-        to: edge.toId,
+        fromId: edge.fromId,
+        toId: edge.toId,
         type: edge.edgeType,
         props: propsJson,
       };
@@ -1406,6 +1661,7 @@ export function toAny(v: Value): unknown {
       return {
         _type: "node_batch",
         nodes: batch.nodes.map((n) => ({
+          _type: "node",
           id: n.id,
           labels: n.labels,
           props: Object.fromEntries(
@@ -1419,8 +1675,9 @@ export function toAny(v: Value): unknown {
       return {
         _type: "edge_batch",
         edges: batch.edges.map((e) => ({
-          from: e.fromId,
-          to: e.toId,
+          _type: "edge",
+          fromId: e.fromId,
+          toId: e.toId,
           type: e.edgeType,
           props: Object.fromEntries(
             Object.entries(e.props).map(([k, val]) => [k, toAny(val)])
@@ -1430,15 +1687,13 @@ export function toAny(v: Value): unknown {
     }
     case Type.BITMASK: {
       const bm = v.data as BitmaskData;
-      // Return as array of booleans for JSON interop
-      const bools: boolean[] = [];
-      for (let i = 0; i < bm.count; i++) {
-        bools.push((bm.bits[Math.floor(i / 8)] & (1 << (i % 8))) !== 0);
-      }
+      // Base64-encode the packed bits (matches Go's base64.StdEncoding)
+      let binary = "";
+      for (const b of bm.bits) binary += String.fromCharCode(b);
       return {
         _type: "bitmask",
         count: bm.count,
-        bits: bools,
+        bits: btoa(binary),
       };
     }
     case Type.UNKNOWN_EXT: {
@@ -1447,7 +1702,7 @@ export function toAny(v: Value): unknown {
       for (const b of ext.payload) binary += String.fromCharCode(b);
       const extVal = ext.extType <= MAX_SAFE_INT ? Number(ext.extType) : ext.extType.toString();
       return {
-        _type: "ext",
+        _type: "unknown_ext",
         ext_type: extVal,
         payload: btoa(binary),
       };
@@ -1511,6 +1766,26 @@ class DeterministicEncoder extends Encoder {
         this.addKeySorted(key);
         this.collectKeysSorted(val);
       }
+    } else if (v.type === Type.NODE) {
+      this.collectPropKeysSorted((v.data as NodeData).props);
+    } else if (v.type === Type.EDGE) {
+      this.collectPropKeysSorted((v.data as EdgeData).props);
+    } else if (v.type === Type.NODE_BATCH) {
+      for (const node of (v.data as NodeBatchData).nodes) {
+        this.collectPropKeysSorted(node.props);
+      }
+    } else if (v.type === Type.EDGE_BATCH) {
+      for (const edge of (v.data as EdgeBatchData).edges) {
+        this.collectPropKeysSorted(edge.props);
+      }
+    }
+  }
+
+  private collectPropKeysSorted(props: Record<string, Value>): void {
+    const keys = Object.keys(props).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+    for (const key of keys) {
+      this.addKeySorted(key);
+      this.collectKeysSorted(props[key]);
     }
   }
 
@@ -1686,6 +1961,30 @@ class DeterministicEncoder extends Encoder {
         this.writeSorted(ref.key);
         break;
       }
+      case Type.NODE: {
+        this.writeByteSorted(Tag.NODE);
+        this.encodeNodeSorted(v.data as NodeData);
+        break;
+      }
+      case Type.EDGE: {
+        this.writeByteSorted(Tag.EDGE);
+        this.encodeEdgeSorted(v.data as EdgeData);
+        break;
+      }
+      case Type.NODE_BATCH: {
+        const batch = v.data as NodeBatchData;
+        this.writeByteSorted(Tag.NODE_BATCH);
+        this.writeUvarintSorted(batch.nodes.length);
+        for (const node of batch.nodes) this.encodeNodeSorted(node);
+        break;
+      }
+      case Type.EDGE_BATCH: {
+        const batch = v.data as EdgeBatchData;
+        this.writeByteSorted(Tag.EDGE_BATCH);
+        this.writeUvarintSorted(batch.edges.length);
+        for (const edge of batch.edges) this.encodeEdgeSorted(edge);
+        break;
+      }
       case Type.BITMASK: {
         const bm = v.data as BitmaskData;
         this.writeByteSorted(Tag.BITMASK);
@@ -1693,6 +1992,33 @@ class DeterministicEncoder extends Encoder {
         this.writeSorted(bm.bits);
         break;
       }
+    }
+  }
+
+  private encodeNodeSorted(node: NodeData): void {
+    this.writeStringSorted(node.id);
+    this.writeUvarintSorted(node.labels.length);
+    for (const label of node.labels) this.writeStringSorted(label);
+    this.encodePropsSorted(node.props);
+  }
+
+  private encodeEdgeSorted(edge: EdgeData): void {
+    this.writeStringSorted(edge.fromId);
+    this.writeStringSorted(edge.toId);
+    this.writeStringSorted(edge.edgeType);
+    this.encodePropsSorted(edge.props);
+  }
+
+  private encodePropsSorted(props: Record<string, Value>): void {
+    const entries = Object.entries(props).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
+    this.writeUvarintSorted(entries.length);
+    for (const [key, val] of entries) {
+      const idx = this.sortedDictLookup.get(key);
+      if (idx === undefined) {
+        throw new Error(`Internal: graph prop key "${key}" missing from sorted dictionary`);
+      }
+      this.writeUvarintSorted(idx);
+      this.encodeValueSorted(val);
     }
   }
 
@@ -1799,6 +2125,21 @@ function typeToOrd(type: Type): number {
       return 15;
     case Type.AUDIO:
       return 16;
+    // Graph types, bitmask, and unknown-ext use Go's byte(Type) iota ordinals so
+    // fingerprints match the Go reference. hashSchema below mirrors Go's per-type
+    // recursion (graph types add nothing; UNKNOWN_EXT additionally hashes extType).
+    case Type.NODE:
+      return 17;
+    case Type.EDGE:
+      return 18;
+    case Type.NODE_BATCH:
+      return 19;
+    case Type.EDGE_BATCH:
+      return 20;
+    case Type.BITMASK:
+      return 21;
+    case Type.UNKNOWN_EXT:
+      return 22;
     default:
       return 0xff;
   }
@@ -1859,9 +2200,10 @@ function hashSchema(v: Value, h: bigint): bigint {
     }
 
     case Type.AUDIO: {
-      // Include encoding in schema (sample_rate, channels are data)
+      // Include encoding AND channels in schema (sample_rate is data) — matches Go.
       const aud = v.data as AudioData;
       h = fnvHashByte(h, aud.encoding);
+      h = fnvHashByte(h, aud.channels);
       break;
     }
 
@@ -1869,6 +2211,13 @@ function hashSchema(v: Value, h: bigint): bigint {
       // Include store_id in schema (key is data)
       const ref = v.data as TensorRefData;
       h = fnvHashByte(h, ref.storeId);
+      break;
+    }
+
+    case Type.UNKNOWN_EXT: {
+      // Include ext type in schema (payload is data) — matches Go.
+      const ext = v.data as UnknownExtData;
+      h = fnvHashU64(h, ext.extType);
       break;
     }
   }
@@ -1894,9 +2243,98 @@ export function schemaFingerprint32(v: Value): number {
 }
 
 /**
- * Check if two values have the same schema.
+ * Check if two values have structurally identical schemas.
+ * Recursively compares types, object field names, array element schemas,
+ * tensor dtype/rank, image format, audio encoding/channels, tensor_ref storeId,
+ * and unknown-ext type — mirroring exactly what schemaFingerprint64 hashes.
+ * Actual values (ints, strings, tensor data, etc.) are not compared.
+ *
+ * Use schemaFingerprintEqual for a faster probabilistic check.
  */
 export function schemaEquals(a: Value, b: Value): boolean {
+  if (a.type !== b.type) return false;
+
+  switch (a.type) {
+    case Type.NULL:
+    case Type.BOOL:
+    case Type.INT64:
+    case Type.UINT64:
+    case Type.FLOAT64:
+    case Type.DECIMAL128:
+    case Type.STRING:
+    case Type.BYTES:
+    case Type.DATETIME64:
+    case Type.UUID128:
+    case Type.BIGINT:
+      // Scalar types: type tag is sufficient
+      return true;
+
+    case Type.ARRAY: {
+      const aArr = a.data as Value[];
+      const bArr = b.data as Value[];
+      if (aArr.length !== bArr.length) return false;
+      for (let i = 0; i < aArr.length; i++) {
+        if (!schemaEquals(aArr[i], bArr[i])) return false;
+      }
+      return true;
+    }
+
+    case Type.OBJECT: {
+      const aObj = a.data as Record<string, Value>;
+      const bObj = b.data as Record<string, Value>;
+      const aEntries = Object.entries(aObj).sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0);
+      const bEntries = Object.entries(bObj).sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0);
+      if (aEntries.length !== bEntries.length) return false;
+      for (let i = 0; i < aEntries.length; i++) {
+        if (aEntries[i][0] !== bEntries[i][0]) return false;
+        if (!schemaEquals(aEntries[i][1], bEntries[i][1])) return false;
+      }
+      return true;
+    }
+
+    case Type.TENSOR: {
+      const aT = a.data as TensorData;
+      const bT = b.data as TensorData;
+      return aT.dtype === bT.dtype && aT.shape.length === bT.shape.length;
+    }
+
+    case Type.TENSOR_REF: {
+      const aR = a.data as TensorRefData;
+      const bR = b.data as TensorRefData;
+      return aR.storeId === bR.storeId;
+    }
+
+    case Type.IMAGE: {
+      const aI = a.data as ImageData;
+      const bI = b.data as ImageData;
+      return aI.format === bI.format;
+    }
+
+    case Type.AUDIO: {
+      const aA = a.data as AudioData;
+      const bA = b.data as AudioData;
+      return aA.encoding === bA.encoding && aA.channels === bA.channels;
+    }
+
+    case Type.UNKNOWN_EXT: {
+      const aE = a.data as UnknownExtData;
+      const bE = b.data as UnknownExtData;
+      return aE.extType === bE.extType;
+    }
+
+    default:
+      // Graph types, bitmask, etc.: type tag equality (checked above) is sufficient.
+      return true;
+  }
+}
+
+/**
+ * Returns true if the two values share the same 64-bit FNV-1a schema fingerprint.
+ * This is the original (probabilistic) implementation: fast for large schemas,
+ * but carries a 1-in-2^64 collision risk.
+ * Prefer schemaEquals for correctness-critical comparisons.
+ */
+export function schemaFingerprintEqual(a: Value, b: Value): boolean {
   return schemaFingerprint64(a) === schemaFingerprint64(b);
 }
 

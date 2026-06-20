@@ -122,12 +122,12 @@ impl TensorData {
         if self.data.is_empty() {
             return Some(&[]);
         }
-        if self.data.len() % 4 != 0 {
+        if !self.data.len().is_multiple_of(4) {
             return None;
         }
         // Check alignment
         let ptr = self.data.as_ptr();
-        if ptr as usize % std::mem::align_of::<f32>() != 0 {
+        if !(ptr as usize).is_multiple_of(std::mem::align_of::<f32>()) {
             return None;
         }
         // SAFETY: We checked dtype, alignment, and length divisibility
@@ -147,11 +147,11 @@ impl TensorData {
         if self.data.is_empty() {
             return Some(&[]);
         }
-        if self.data.len() % 8 != 0 {
+        if !self.data.len().is_multiple_of(8) {
             return None;
         }
         let ptr = self.data.as_ptr();
-        if ptr as usize % std::mem::align_of::<f64>() != 0 {
+        if !(ptr as usize).is_multiple_of(std::mem::align_of::<f64>()) {
             return None;
         }
         unsafe {
@@ -170,11 +170,11 @@ impl TensorData {
         if self.data.is_empty() {
             return Some(&[]);
         }
-        if self.data.len() % 4 != 0 {
+        if !self.data.len().is_multiple_of(4) {
             return None;
         }
         let ptr = self.data.as_ptr();
-        if ptr as usize % std::mem::align_of::<i32>() != 0 {
+        if !(ptr as usize).is_multiple_of(std::mem::align_of::<i32>()) {
             return None;
         }
         unsafe {
@@ -193,11 +193,11 @@ impl TensorData {
         if self.data.is_empty() {
             return Some(&[]);
         }
-        if self.data.len() % 8 != 0 {
+        if !self.data.len().is_multiple_of(8) {
             return None;
         }
         let ptr = self.data.as_ptr();
-        if ptr as usize % std::mem::align_of::<i64>() != 0 {
+        if !(ptr as usize).is_multiple_of(std::mem::align_of::<i64>()) {
             return None;
         }
         unsafe {

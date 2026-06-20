@@ -8,7 +8,7 @@ use cowrie_rs::gen2::{decode, encode, Value};
 
 fn truth_manifest() -> serde_json::Value {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../testdata/robustness/truth_cases.json");
+        .join("../testdata/robustness/truth_cases.json");
     let data = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("failed to read {}: {}", path.display(), e));
     serde_json::from_str(&data).expect("parse truth_cases.json")

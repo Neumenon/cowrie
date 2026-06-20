@@ -139,13 +139,13 @@ Each prospect falls into one of five opening conversations. Lead with their pain
 **For**: Teams frustrated with Protobuf schema management
 **Open with**: "How many .proto files do you maintain, and how often do you regenerate?"
 **They'll say**: Dozens of files, regeneration breaks builds, version conflicts across services
-**Cowrie answer**: Schemaless binary encoding, no codegen, same wire format across 5 languages
+**Cowrie answer**: Schemaless binary encoding, no codegen, same wire format across 4 languages
 
 ### Conversation 4: "The Graph Wire"
 **For**: GNN/graph teams with no standard serialization
 **Open with**: "How do you serialize graph mini-batches between your sampler and training workers?"
 **They'll say**: pickle, custom CSR-to-JSON, torch.save
-**Cowrie answer**: Node features + edge properties in NodeBatch/EdgeBatch messages (GraphShard/AdjList are on the roadmap; currently reserved)
+**Cowrie answer**: Node features + edge properties in NodeBatch/EdgeBatch messages (GraphShard/AdjList are deprecated — tags reserved, implementations moved to attic)
 
 ### Conversation 5: "The Multi-Modal Mess"
 **For**: Teams sending images + tensors + metadata between services

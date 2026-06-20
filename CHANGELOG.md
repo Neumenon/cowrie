@@ -2,13 +2,42 @@
 
 ## Unreleased
 
+### Fixed — graph-type cross-language determinism; added Gen1 fixtures
+
+Graph types (Node/Edge/NodeBatch/EdgeBatch, 0x35-0x38) now encode prop keys in
+UTF-8 byte order in **all** implementations, so deterministic encoding is
+byte-identical across Go, Rust, Python, and TypeScript. Previously Go assigned
+dictionary indices and emitted node/edge props in random map order; Python's and
+TypeScript's deterministic encoders had no graph arms and silently produced
+empty/zero-byte payloads. Each non-Go impl now pins a regression test to the Go
+canonical bytes. (Graph tags 0x35-0x38 remain active — see CUTLIST §6 D2.)
+
+Added the first Gen1 cross-language fixtures (`testdata/fixtures/gen1/`): core
+object/array/int/string plus Float64Array (0x17) and Float32Array (0x18)
+proto-tensors. The fixture manifest grows 34 → 40 cases.
+
+### Dropped — C implementation; Glyph consolidated to Go-only
+
+The standalone C implementation (`c/`, incl. `c/glyph/`) is removed. It published
+to no registry, used a `SJFR` compression-framing envelope incompatible with the
+wire spec, and gated releases without shipping anything. The Python package is
+unaffected: its Cython `_cext` fast path builds from the self-contained `python/csrc/`
+sources (not `c/`), and pure-Python remains the fallback. The dead ctypes path
+(`_native.py`/`_fast.py`, which loaded a `.so` built from `c/`) is removed.
+
+Glyph is now maintained Go-only: the diverged, unpublished `rust/glyph-codec/`
+copy is removed (use the standalone `glyph` repo for any future Rust/JS glyph
+publishing). The stale `benchmarks/` tree and `docs/glyph/archive/` are removed.
+
 ### Scope cut — graph types, RichText, Delta, ColumnHints parked
 
-Wire-format tags `0x30` (Adjlist), `0x31` (RichText), `0x32` (Delta), and
-`0x39` (GraphShard) are now reserved (deprecated). Encoders no longer emit
-them; decoders skip the length-prefixed payload silently. The dedicated
-packages (`go/graph/`, `go/gnn/`, `go/ld/`, `go/delta/`, hints/column
-helpers) moved to `attic/` — revivable but not built or tested by default.
+In **Gen2**, wire-format tags `0x30` (AdjList), `0x31` (RichText), `0x32`
+(Delta), and `0x39` (GraphShard) are now reserved (deprecated). Gen2 encoders no
+longer emit them; decoders skip the length-prefixed payload silently. The
+dedicated Gen2 packages (`go/graph/`, `go/gnn/`, `go/ld/`, `go/delta/`,
+hints/column helpers) moved to `attic/` — revivable but not built or tested by
+default. **Gen1 retains AdjList (0x30) and GraphShard (0x39)** as active graph
+types (implemented in `go/gen1`).
 
 The `FlagHasColumnHints = 0x08` header bit remains listed but is reserved;
 decoders MUST skip it.

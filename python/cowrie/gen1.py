@@ -314,10 +314,10 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
     if depth > MAX_DEPTH:
         raise SecurityLimitExceeded(f"Maximum nesting depth exceeded: {MAX_DEPTH}")
 
-    tag = r.read(1)
-    if not tag:
+    tag_bytes = r.read(1)
+    if not tag_bytes:
         raise EOFError("Unexpected end of data")
-    tag = tag[0]
+    tag: int = tag_bytes[0]
 
     if tag == TAG_NULL:
         return None
@@ -370,11 +370,11 @@ def _decode_value(r: io.BytesIO, depth: int = 0) -> Any:
         count = _read_uvarint(r)
         if count > MAX_ARRAY_LEN:
             raise SecurityLimitExceeded(f"Array too large: {count} > {MAX_ARRAY_LEN}")
-        result = []
+        str_list: list[str] = []
         for _ in range(count):
             length = _read_uvarint(r)
-            result.append(_read_exact(r, length).decode('utf-8'))
-        return result
+            str_list.append(_read_exact(r, length).decode('utf-8'))
+        return str_list
     elif tag == TAG_UINT64:
         return _read_uvarint(r)
     elif tag == TAG_DECIMAL128:

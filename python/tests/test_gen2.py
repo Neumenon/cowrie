@@ -816,8 +816,8 @@ class TestJSON:
         edge = Value.edge("a", "b", "REL", {"w": Value.float64(0.5)})
         result = to_any(edge)
         assert result["_type"] == "edge"
-        assert result["from"] == "a"
-        assert result["to"] == "b"
+        assert result["fromId"] == "a"
+        assert result["toId"] == "b"
         assert result["type"] == "REL"
 
     def test_to_any_node_batch(self):
@@ -838,7 +838,7 @@ class TestJSON:
         result = to_any(v)
         assert result["_type"] == "tensor"
         assert result["dtype"] == "float32"
-        assert result["shape"] == [2]
+        assert result["dims"] == [2]
 
     def test_to_any_image(self):
         v = Value.image(ImageFormat.PNG, 100, 200, b"png_data")
@@ -852,19 +852,22 @@ class TestJSON:
         result = to_any(v)
         assert result["_type"] == "audio"
         assert result["encoding"] == "opus"
-        assert result["sample_rate"] == 48000
+        assert result["rate"] == 48000
 
     def test_to_any_tensor_ref(self):
         v = Value.tensor_ref(1, b"key123")
         result = to_any(v)
         assert result["_type"] == "tensor_ref"
-        assert result["store_id"] == 1
+        assert result["store"] == 1
 
     def test_to_any_bitmask(self):
+        import base64
         v = Value.bitmask_from_bools([True, False, True])
         result = to_any(v)
         assert result["_type"] == "bitmask"
-        assert result["bits"] == [True, False, True]
+        assert result["count"] == 3
+        assert isinstance(result["bits"], str), "bits must be base64 string (Go canonical)"
+        assert base64.b64decode(result["bits"]) == bytes([0x05])  # 0b00000101
 
     def test_to_any_unknown_ext(self):
         v = Value.unknown_ext(42, b"data")
@@ -999,9 +1002,9 @@ class TestFromJson:
         assert v.type == Type.UUID128
 
     def test_from_any_ext_dict(self):
-        """Dict with _type=ext round-trips as unknown_ext."""
+        """Dict with _type=unknown_ext round-trips as unknown_ext (canonical Go schema)."""
         import base64
-        v = from_any({"_type": "ext", "ext_type": 42, "payload": base64.b64encode(b"data").decode()})
+        v = from_any({"_type": "unknown_ext", "ext_type": 42, "payload": base64.b64encode(b"data").decode()})
         assert v.type == Type.UNKNOWN_EXT
         assert v.data.ext_type == 42
 
@@ -1321,6 +1324,21 @@ class TestSchemaFingerprint:
         v1 = Value.object({"x": Value.int64(1)})
         v2 = Value.object({"x": Value.int64(999)})
         assert schema_equals(v1, v2)
+
+    def test_schema_fingerprint_cross_lang_audio_ext(self):
+        """Audio (encoding+channels) and unknown_ext fingerprints match the Go reference.
+
+        Before the parity fix, _type_to_ord stopped at AUDIO (returning 0xff for
+        unknown_ext) and audio omitted channels, so these silently disagreed with Go.
+        """
+        d = bytes([1, 2, 3])
+        a2 = Value.audio(AudioEncoding.PCM_INT16, 44100, 2, d)
+        a1 = Value.audio(AudioEncoding.PCM_INT16, 44100, 1, d)
+        # Ground truth from the Go reference implementation.
+        assert schema_fingerprint32(a2) == 3129750488
+        assert schema_fingerprint32(a1) == 3129751793
+        assert schema_fingerprint32(a1) != schema_fingerprint32(a2)  # channels are schema
+        assert schema_fingerprint32(Value.unknown_ext(99, d)) == 2917281034
 
     def test_schema_fingerprint_scalar_types(self):
         """Different scalar types have different fingerprints."""
@@ -1662,6 +1680,59 @@ class TestSkipReservedTag:
             assert decoded.type == Type.OBJECT, f"tag 0x{reserved_tag:02x}: expected OBJECT"
             assert decoded.data["flag"].data is True, f"tag 0x{reserved_tag:02x}: kept field wrong"
             assert decoded.data["x"].type == Type.NULL, f"tag 0x{reserved_tag:02x}: expected null for reserved"
+
+
+class TestGraphDeterministicGoCanonical:
+    """Regression: graph types with deterministic=True must produce byte-for-byte
+    identical output to the Go canonical encoder (ground truth pinned below)."""
+
+    # Go canonical hex strings (generated with Deterministic=true)
+    GO_NODE       = "534a02000203616765046e616d6535026e310106506572736f6e02005e010505416c696365"
+    GO_EDGE       = "534a0200020573696e6365067765696768743601610162054b4e4f5753020003c81f0145"
+    GO_NODE_BATCH = "534a02000203616765046e616d653701026e310106506572736f6e02005e010505416c696365"
+    GO_EDGE_BATCH = "534a0200020573696e636506776569676874380101610162054b4e4f5753020003c81f0145"
+
+    def _opts(self):
+        return EncodeOptions(deterministic=True)
+
+    def _node(self):
+        # Props intentionally passed in reverse-sorted order to prove sorting happens.
+        return Value.node("n1", ["Person"], {
+            "name": Value.string("Alice"),
+            "age":  Value.int64(30),
+        })
+
+    def _edge(self):
+        return Value.edge("a", "b", "KNOWS", {
+            "weight": Value.int64(5),
+            "since":  Value.int64(2020),
+        })
+
+    def test_node_deterministic_matches_go(self):
+        result = encode_with_opts(self._node(), self._opts()).hex()
+        assert result == self.GO_NODE, (
+            f"NODE mismatch\n  got: {result}\n  exp: {self.GO_NODE}"
+        )
+
+    def test_edge_deterministic_matches_go(self):
+        result = encode_with_opts(self._edge(), self._opts()).hex()
+        assert result == self.GO_EDGE, (
+            f"EDGE mismatch\n  got: {result}\n  exp: {self.GO_EDGE}"
+        )
+
+    def test_node_batch_deterministic_matches_go(self):
+        batch = Value.node_batch([self._node().data])
+        result = encode_with_opts(batch, self._opts()).hex()
+        assert result == self.GO_NODE_BATCH, (
+            f"NODE_BATCH mismatch\n  got: {result}\n  exp: {self.GO_NODE_BATCH}"
+        )
+
+    def test_edge_batch_deterministic_matches_go(self):
+        batch = Value.edge_batch([self._edge().data])
+        result = encode_with_opts(batch, self._opts()).hex()
+        assert result == self.GO_EDGE_BATCH, (
+            f"EDGE_BATCH mismatch\n  got: {result}\n  exp: {self.GO_EDGE_BATCH}"
+        )
 
 
 if __name__ == "__main__":

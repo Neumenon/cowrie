@@ -67,7 +67,8 @@ func TestEncodeAny_Float32Slice(t *testing.T) {
 }
 
 func TestEncodeAny_Float64Slice(t *testing.T) {
-	// Default (non high-precision) should downcast to float32
+	// Default now PRESERVES float64 precision (set Float32Tensors to opt into
+	// lossy float32 downcasting).
 	input := []float64{1.0, 2.0, 3.0}
 	data, err := EncodeAny(input)
 	if err != nil {
@@ -77,10 +78,10 @@ func TestEncodeAny_Float64Slice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodeAny failed: %v", err)
 	}
-	// Default downcasts to float32
-	floats, ok := result.([]float32)
+	// Default preserves float64 (no silent precision loss)
+	floats, ok := result.([]float64)
 	if !ok {
-		t.Fatalf("expected []float32, got %T", result)
+		t.Fatalf("expected []float64, got %T", result)
 	}
 	if len(floats) != 3 {
 		t.Fatalf("expected 3 elements, got %d", len(floats))

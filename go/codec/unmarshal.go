@@ -94,21 +94,36 @@ func unmarshalSlice(cowrieVal *cowrie.Value, target reflect.Value) error {
 		return unmarshalBytes(cowrieVal, target)
 	}
 
-	// Special case: float32 slice from tensor (the key optimization!)
+	// Special case: float32 slice from tensor.
+	// Handles DTypeFloat32 tensors natively; widens from DTypeFloat64 with narrowing.
 	if elemType.Kind() == reflect.Float32 && cowrieVal.Type() == cowrie.TypeTensor {
-		floats := DecodeFloat32Tensor(cowrieVal)
-		if floats != nil {
-			target.Set(reflect.ValueOf(floats))
+		if f32s := DecodeFloat32Tensor(cowrieVal); f32s != nil {
+			target.Set(reflect.ValueOf(f32s))
+			return nil
+		}
+		// Widen from float64 tensor with narrowing (precision loss accepted by caller
+		// since the target type is []float32).
+		if f64s := DecodeFloat64Tensor(cowrieVal); f64s != nil {
+			f32s := make([]float32, len(f64s))
+			for i, f := range f64s {
+				f32s[i] = float32(f)
+			}
+			target.Set(reflect.ValueOf(f32s))
 			return nil
 		}
 	}
 
-	// Special case: float64 slice from tensor (convert from float32)
+	// Special case: float64 slice from tensor.
+	// Prefers DTypeFloat64 tensors (full precision); widens from DTypeFloat32 (no precision loss).
 	if elemType.Kind() == reflect.Float64 && cowrieVal.Type() == cowrie.TypeTensor {
-		floats := DecodeFloat32Tensor(cowrieVal)
-		if floats != nil {
-			f64s := make([]float64, len(floats))
-			for i, f := range floats {
+		if f64s := DecodeFloat64Tensor(cowrieVal); f64s != nil {
+			target.Set(reflect.ValueOf(f64s))
+			return nil
+		}
+		// Widen from float32 tensor (no precision loss — float32 embeds exactly into float64).
+		if f32s := DecodeFloat32Tensor(cowrieVal); f32s != nil {
+			f64s := make([]float64, len(f32s))
+			for i, f := range f32s {
 				f64s[i] = float64(f)
 			}
 			target.Set(reflect.ValueOf(f64s))

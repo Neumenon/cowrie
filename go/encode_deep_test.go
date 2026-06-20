@@ -2,6 +2,8 @@ package cowrie
 
 import (
 	"bytes"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 	"time"
@@ -337,5 +339,71 @@ func TestEncodeFloat64MatrixTensor_Variants(t *testing.T) {
 	v2 := encodeFloat64MatrixTensor([][]float64{{1.0, 2.0}, {3.0, 4.0}}, false)
 	if v2 == nil {
 		t.Error("nil for valid matrix")
+	}
+}
+
+// TestGraphPropEncodingDeterministic verifies that node and edge encoding is
+// stable across repeated calls regardless of Go map iteration order.
+// Props are encoded in sorted UTF-8 byte order so the output is cross-language
+// identical (mirrors Rust's BTreeMap key ordering).
+func TestGraphPropEncodingDeterministic(t *testing.T) {
+	// Node with two props: "name" and "age" — sorted order is "age" then "name".
+	nodeVal := Node("n1", []string{"Person"}, map[string]any{
+		"name": "Alice",
+		"age":  int64(30),
+	})
+
+	var prev []byte
+	for i := 0; i < 20; i++ {
+		data, err := Encode(nodeVal)
+		if err != nil {
+			t.Fatalf("Encode iteration %d: %v", i, err)
+		}
+		if prev != nil && !bytes.Equal(prev, data) {
+			t.Fatalf("node encoding is non-deterministic: iteration %d differs\ngot  %s\nwant %s",
+				i, hex.EncodeToString(data), hex.EncodeToString(prev))
+		}
+		prev = data
+	}
+
+	// Edge with two props: "weight" and "since" — sorted order is "since" then "weight".
+	edgeVal := Edge("a", "b", "KNOWS", map[string]any{
+		"weight": int64(5),
+		"since":  int64(2020),
+	})
+
+	prev = nil
+	for i := 0; i < 20; i++ {
+		data, err := Encode(edgeVal)
+		if err != nil {
+			t.Fatalf("Encode edge iteration %d: %v", i, err)
+		}
+		if prev != nil && !bytes.Equal(prev, data) {
+			t.Fatalf("edge encoding is non-deterministic: iteration %d differs\ngot  %s\nwant %s",
+				i, hex.EncodeToString(data), hex.EncodeToString(prev))
+		}
+		prev = data
+	}
+
+	// Verify that props appear in sorted key order in the encoded bytes.
+	// Decode back and check that the dictionary ordering matches sorted prop keys.
+	// We confirm "age" (idx 0) appears before "name" (idx 1) in the node encoding
+	// by checking the dictionary emitted in the header (first dict entry = "age").
+	nodeData, _ := Encode(nodeVal)
+	// Header: Magic(2) + Version(1) + Flags(1) + DictLen varint + dict entries
+	// DictLen should be 2 (two unique keys). First key after the count should be "age".
+	// Skip 4 header bytes, then read dict count varint.
+	offset := 4
+	dictCount, n := binary.Uvarint(nodeData[offset:])
+	offset += n
+	if dictCount != 2 {
+		t.Fatalf("expected 2 dict entries, got %d", dictCount)
+	}
+	// Read first key length then key bytes.
+	keyLen, n := binary.Uvarint(nodeData[offset:])
+	offset += n
+	firstKey := string(nodeData[offset : offset+int(keyLen)])
+	if firstKey != "age" {
+		t.Errorf("expected first dict key to be \"age\" (sorted), got %q", firstKey)
 	}
 }

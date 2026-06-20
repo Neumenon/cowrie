@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 
 use cowrie_rs::gen2::{
-    self, decode, encode, encode_with_options, decode_with_options,
+    decode, encode, encode_with_options, decode_with_options,
     Value, DType, TensorData, EncodeOptions, CowrieError,
     encode_framed, decode_framed, Compression,
-    schema_fingerprint32, schema_fingerprint64, schema_equals,
+    schema_fingerprint64,
     from_json, to_json, to_json_pretty,
-    write_frame, read_frame, MasterWriterOptions, MasterFrame,
+    write_frame, read_frame, MasterWriterOptions,
 };
 use cowrie_rs::gen2::decode::DecodeOptions;
 use cowrie_rs::gen2::types::*;
@@ -94,7 +94,7 @@ fn roundtrip_uint() {
 
 #[test]
 fn roundtrip_float() {
-    for f in [0.0f64, 1.5, -3.14, f64::MAX, f64::MIN, f64::EPSILON] {
+    for f in [0.0f64, 1.5, -3.5, f64::MAX, f64::MIN, f64::EPSILON] {
         let v = Value::Float(f);
         let enc = encode(&v).unwrap();
         let dec = decode(&enc).unwrap();
@@ -164,7 +164,7 @@ fn roundtrip_decimal() {
 #[test]
 fn roundtrip_fixarray() {
     // FIXARRAY: 0..=15 elements
-    let arr: Vec<Value> = (0..5).map(|i| Value::Int(i)).collect();
+    let arr: Vec<Value> = (0..5).map(Value::Int).collect();
     let v = Value::Array(arr.clone());
     let enc = encode(&v).unwrap();
     let dec = decode(&enc).unwrap();
@@ -174,7 +174,7 @@ fn roundtrip_fixarray() {
 #[test]
 fn roundtrip_large_array() {
     // > 15 elements → ARRAY tag
-    let arr: Vec<Value> = (0..20).map(|i| Value::Int(i)).collect();
+    let arr: Vec<Value> = (0..20).map(Value::Int).collect();
     let v = Value::Array(arr.clone());
     let enc = encode(&v).unwrap();
     let dec = decode(&enc).unwrap();
@@ -286,19 +286,41 @@ fn roundtrip_tensor_int32() {
 
 #[test]
 fn roundtrip_tensor_all_dtypes() {
-    let dtypes = [
-        DType::Float32, DType::Float16, DType::BFloat16,
-        DType::Int8, DType::Int16, DType::Int32, DType::Int64,
-        DType::Uint8, DType::Uint16, DType::Uint32, DType::Uint64,
-        DType::Float64, DType::Bool,
-        DType::QINT4, DType::QINT2, DType::QINT3,
-        DType::Ternary, DType::Binary,
+    // Each (dtype, elem_size_bytes) pair. Sub-byte packed dtypes use 0 to indicate
+    // "no byte-level validation" — we store 1 byte for shape [1] to keep it simple.
+    let dtype_sizes: &[(DType, usize)] = &[
+        (DType::Float32,  4),
+        (DType::Float16,  2),
+        (DType::BFloat16, 2),
+        (DType::Int8,     1),
+        (DType::Int16,    2),
+        (DType::Int32,    4),
+        (DType::Int64,    8),
+        (DType::Uint8,    1),
+        (DType::Uint16,   2),
+        (DType::Uint32,   4),
+        (DType::Uint64,   8),
+        (DType::Float64,  8),
+        // Sub-byte: validation skipped; use shape [1] and 1 byte
+        (DType::Bool,     0),
+        (DType::QINT4,    0),
+        (DType::QINT2,    0),
+        (DType::QINT3,    0),
+        (DType::Ternary,  0),
+        (DType::Binary,   0),
     ];
-    for dtype in dtypes {
+    for &(dtype, elem_size) in dtype_sizes {
+        let (shape, data) = if elem_size == 0 {
+            // Sub-byte packed: any data length is accepted (no shape validation)
+            (vec![1u64], vec![0u8; 1])
+        } else {
+            // 2 elements, exact byte count
+            (vec![2u64], vec![0u8; 2 * elem_size])
+        };
         let v = Value::Tensor(TensorData {
             dtype,
-            shape: vec![2],
-            data: vec![0u8; 8],
+            shape,
+            data,
         });
         let enc = encode(&v).unwrap();
         let dec = decode(&enc).unwrap();
@@ -543,7 +565,7 @@ fn decode_trailing_data() {
 
 #[test]
 fn decode_with_custom_options() {
-    let v = Value::Array((0..100).map(|i| Value::Int(i)).collect());
+    let v = Value::Array((0..100).map(Value::Int).collect());
     let enc = encode(&v).unwrap();
 
     // Restrict array to 10 elements
@@ -606,8 +628,8 @@ fn json_negative_int() {
 
 #[test]
 fn json_float() {
-    let v = from_json("3.14").unwrap();
-    assert!(matches!(v, Value::Float(f) if (f - 3.14).abs() < 1e-10));
+    let v = from_json("3.5").unwrap();
+    assert!(matches!(v, Value::Float(f) if (f - 3.5).abs() < 1e-10));
 }
 
 #[test]
@@ -787,7 +809,10 @@ fn json_audio_all_encodings() {
 fn json_ext() {
     let v = Value::Ext(ExtData { type_id: 99, payload: vec![1, 2, 3] });
     let json_str = to_json(&v).unwrap();
-    assert!(json_str.contains("\"_type\":\"ext\""));
+    // Canonical schema: _type is "unknown_ext", fields are "ext_type" and "payload"
+    assert!(json_str.contains("\"_type\":\"unknown_ext\""));
+    assert!(json_str.contains("\"ext_type\":99"));
+    assert!(json_str.contains("\"payload\":"));
 }
 
 #[test]
@@ -955,7 +980,7 @@ fn schema_scalar_types() {
         Value::BigInt(vec![1]),
     ];
     // All should produce different fingerprints
-    let fps: Vec<u64> = types.iter().map(|v| schema_fingerprint64(v)).collect();
+    let fps: Vec<u64> = types.iter().map(schema_fingerprint64).collect();
     for i in 0..fps.len() {
         for j in (i+1)..fps.len() {
             assert_ne!(fps[i], fps[j], "types {} and {} have same fingerprint", i, j);
@@ -1003,9 +1028,11 @@ fn schema_ext_includes_type_id() {
 
 #[test]
 fn schema_bitmask() {
+    // Go parity: a bitmask's schema is the type ordinal alone; count/bits are
+    // data, not schema, so two bitmasks of different sizes hash identically.
     let b1 = Value::Bitmask { count: 8, bits: vec![0xFF] };
     let b2 = Value::Bitmask { count: 16, bits: vec![0xFF, 0xFF] };
-    assert_ne!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
+    assert_eq!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
 }
 
 #[test]
@@ -1139,7 +1166,7 @@ fn master_stream_is_checks() {
 #[test]
 fn master_stream_truncated() {
     let result = read_frame(&[0u8; 10]);
-    assert!(matches!(result, Err(_)));
+    assert!(result.is_err());
 }
 
 // ============================================================
@@ -1368,10 +1395,10 @@ fn tensor_float32_slice() {
 
 #[test]
 fn tensor_float64_slice() {
-    let data: Vec<u8> = 3.14f64.to_le_bytes().to_vec();
+    let data: Vec<u8> = 2.71f64.to_le_bytes().to_vec();
     let t = TensorData::new(DType::Float64, vec![1], data);
     let s = t.float64_slice().unwrap();
-    assert!((s[0] - 3.14).abs() < 1e-10);
+    assert!((s[0] - 2.71).abs() < 1e-10);
 }
 
 #[test]
@@ -1446,7 +1473,7 @@ fn cowrie_error_display() {
         CowrieError::InvalidData("test".into()),
         CowrieError::Truncated,
         CowrieError::InvalidUtf8,
-        CowrieError::Io(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+        CowrieError::Io(std::io::Error::other("test")),
         CowrieError::TooDeep,
         CowrieError::TooLarge,
         CowrieError::TrailingData { pos: 10, remaining: 5 },
@@ -1461,7 +1488,7 @@ fn cowrie_error_display() {
 
 #[test]
 fn cowrie_error_from_io() {
-    let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+    let io_err = std::io::Error::other("test");
     let cowrie_err: CowrieError = io_err.into();
     let s = format!("{}", cowrie_err);
     assert!(s.contains("test"));
@@ -1485,7 +1512,7 @@ fn gen1_roundtrip_all_scalars() {
         Value::Int64(i64::MAX),
         Value::Int64(i64::MIN),
         Value::Float64(0.0),
-        Value::Float64(3.14),
+        Value::Float64(3.5),
         Value::Float64(-2.5),
         Value::String("".to_string()),
         Value::String("hello world".to_string()),
@@ -1540,7 +1567,7 @@ fn gen1_roundtrip_proto_tensors() {
         Value::Int64Array(vec![]),
         Value::Int64Array(vec![1, -2, 3, i64::MAX, i64::MIN]),
         Value::Float64Array(vec![]),
-        Value::Float64Array(vec![1.0, -2.5, 3.14, f64::MAX]),
+        Value::Float64Array(vec![1.0, -2.5, 3.5, f64::MAX]),
         Value::StringArray(vec![]),
         Value::StringArray(vec!["a".into(), "bb".into(), "ccc".into()]),
     ];
@@ -1673,7 +1700,7 @@ fn gen1_error_display() {
 #[test]
 fn gen1_error_from_io() {
     use cowrie_rs::gen1::Gen1Error;
-    let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+    let io_err = std::io::Error::other("boom");
     let gen1_err: Gen1Error = io_err.into();
     let s = format!("{}", gen1_err);
     assert!(s.contains("boom"));

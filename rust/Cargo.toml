@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "glyph-codec"]
+members = ["."]
 
 [package]
 name = "cowrie-rs"

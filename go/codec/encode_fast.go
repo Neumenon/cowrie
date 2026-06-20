@@ -178,6 +178,9 @@ func getTypeEncoder(t reflect.Type) encoderFunc {
 		if t.Elem().Kind() == reflect.Float32 {
 			return encodeFloat32Slice
 		}
+		if t.Elem().Kind() == reflect.Float64 {
+			return encodeFloat64Slice
+		}
 		return encodeSlice
 	case reflect.Map:
 		return encodeMap
@@ -252,6 +255,16 @@ func encodeFloat32Slice(v reflect.Value) *cowrie.Value {
 	}
 	slice := v.Interface().([]float32)
 	return EncodeFloat32Tensor(slice)
+}
+
+// encodeFloat64Slice encodes []float64 as a DTypeFloat64 tensor, preserving full precision.
+// This is consistent with the any-encoder default (any_api.go) which also defaults to float64.
+func encodeFloat64Slice(v reflect.Value) *cowrie.Value {
+	if v.IsNil() {
+		return cowrie.Null()
+	}
+	slice := v.Interface().([]float64)
+	return EncodeFloat64Tensor(slice)
 }
 
 func encodeSlice(v reflect.Value) *cowrie.Value {
@@ -375,6 +388,8 @@ func fastToCowrieValue(v any) *cowrie.Value {
 	switch x := v.(type) {
 	case []float32:
 		return EncodeFloat32Tensor(x)
+	case []float64:
+		return EncodeFloat64Tensor(x)
 	case map[string]any:
 		return toCowrieValue(v) // Use existing path for map[string]any
 	case []any:

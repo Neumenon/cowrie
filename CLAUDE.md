@@ -29,7 +29,7 @@
 - **7 codec invariants** tested across all languages — see `cogs/docs/TESTING_STANDARDS.md`.
 - **NaN/Inf policy**: allowed in cowrie binary encoding, rejected in glyph text/JSON bridges.
 - **C build**: `mkdir -p build && cd build && cmake .. && make && ctest --output-on-failure`
-- **Rust integration tests**: `cargo test --test coverage_boost` (173 tests incl. invariants).
+- **Rust integration tests**: `cargo test --test coverage_boost` (157 tests incl. invariants).
 
 ## Session Management
 - Break work into focused sessions: one major deliverable per session.

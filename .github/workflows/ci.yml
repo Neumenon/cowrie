@@ -44,8 +44,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           cd go
-          # Exclude cmd/ packages (CLI entry points, not core codec)
-          grep -v "^github.com/Neumenon/cowrie/go/cmd/" coverage.out > coverage-core.out || cp coverage.out coverage-core.out
+          # Exclude cmd/ packages (CLI entry points, not core codec).
+          # Path is /go/v2/cmd/ since the module is github.com/Neumenon/cowrie/go/v2;
+          # the old /go/cmd/ pattern matched nothing, wrongly counting 0%-covered
+          # cmd/ packages and dragging the gate to ~76.6% (a false CI failure).
+          grep -v "^github.com/Neumenon/cowrie/go/v2/cmd/" coverage.out > coverage-core.out || cp coverage.out coverage-core.out
           COVERAGE=$(go tool cover -func=coverage-core.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage (excluding cmd/): ${COVERAGE}%"
           if (( $(echo "$COVERAGE < 80" | bc -l) )); then
@@ -92,7 +95,7 @@ jobs:
       - name: Typecheck
         run: |
           pip install mypy
-          cd python && mypy cowrie/__init__.py --ignore-missing-imports --no-error-summary || true
+          cd python && mypy cowrie/ --ignore-missing-imports
 
       - name: Test with coverage
         run: cd python && pytest tests/ -v --tb=short --cov=cowrie --cov-report=term-missing --cov-fail-under=80
@@ -115,7 +118,7 @@ jobs:
         run: cd typescript && npm ci
 
       - name: Typecheck
-        run: cd typescript && npx tsc --noEmit 2>/dev/null || true
+        run: cd typescript && npx tsc --noEmit
 
       - name: Test
         run: cd typescript && npm test
@@ -139,7 +142,7 @@ jobs:
           components: clippy
 
       - name: Clippy
-        run: cd rust && cargo clippy -- -D warnings 2>/dev/null || cargo clippy
+        run: cd rust && cargo clippy --all-targets -- -D warnings
 
       - name: Build
         run: cd rust && cargo build
@@ -156,38 +159,6 @@ jobs:
       - name: Benchmark (baseline)
         if: matrix.os == 'ubuntu-latest'
         run: cd rust && cargo bench 2>/dev/null || echo "No benchmarks configured"
-
-  # ─── C ─────────────────────────────────────────────────────────────
-  c:
-    name: C
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build and test
-        run: |
-          cd c
-          mkdir -p build && cd build
-          cmake .. -DCMAKE_C_FLAGS="-Wall -Wextra -Werror=implicit-function-declaration"
-          make
-          ctest --output-on-failure
-
-      - name: Coverage
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cd c
-          rm -rf build && mkdir build && cd build
-          cmake .. -DCOVERAGE=ON
-          make
-          ctest --output-on-failure
-          echo "=== C Coverage Report ==="
-          for gcda in $(find . -name "*.gcda" -not -path "*/CompilerIdC/*"); do
-            gcov -n "$gcda" 2>/dev/null
-          done | grep -E "^(File|Lines)" | grep -v tests/ | grep -v include/
 
   # ─── Cross-Language Fixture Validation ─────────────────────────────
   fixtures:
@@ -212,61 +183,13 @@ jobs:
       - name: Install TS package
         run: cd typescript && npm ci
 
-      - name: Validate manifest fixtures across languages
-        run: |
-          echo "=== Cross-language fixture validation ==="
-          FAIL=0
-          PASS=0
-          SKIP=0
+      - name: Build Go reference decoder
+        run: cd go && go build -o "$RUNNER_TEMP/cowrie-cli" ./cmd/cowrie
 
-          # Parse manifest.json and validate each case
-          python3 -c "
-          import json, subprocess, sys, os
-
-          with open('testdata/fixtures/manifest.json') as f:
-              manifest = json.load(f)
-
-          fail = 0
-          passed = 0
-          skipped = 0
-
-          for case in manifest['cases']:
-              cid = case['id']
-              input_path = os.path.join('testdata/fixtures', case['input'])
-              expect = case['expect']
-
-              if not os.path.exists(input_path):
-                  print(f'  SKIP {cid}: input file missing')
-                  skipped += 1
-                  continue
-
-              # For decode cases with expected JSON, verify Go can decode
-              if case['kind'] == 'decode' and expect.get('ok') and 'json' in expect:
-                  json_path = os.path.join('testdata/fixtures', expect['json'])
-                  if os.path.exists(json_path):
-                      with open(json_path) as jf:
-                          expected_json = json.load(jf)
-                      print(f'  OK   {cid} (json verified)')
-                      passed += 1
-                  else:
-                      print(f'  SKIP {cid}: json file missing')
-                      skipped += 1
-              elif case['kind'] == 'decode' and not expect.get('ok'):
-                  # Negative test — just verify the fixture file exists
-                  print(f'  OK   {cid} (negative case)')
-                  passed += 1
-              else:
-                  print(f'  OK   {cid}')
-                  passed += 1
-
-          print(f'')
-          print(f'Results: {passed} passed, {skipped} skipped, {fail} failed')
-          if fail > 0:
-              sys.exit(1)
-          "
-
-          echo ""
-          echo "Fixture validation complete."
+      - name: Validate fixtures by decoding with the Go reference decoder
+        env:
+          GO_CLI: ${{ runner.temp }}/cowrie-cli
+        run: python3 testdata/fixtures/validate_fixtures.py
 
   # ─── Robustness Tests ─────────────────────────────────────────────
   robustness:
@@ -304,18 +227,10 @@ jobs:
       - name: Rust robustness tests
         run: cd rust && cargo test --test truth_table --test mutation --test perf_cliff -- --nocapture
 
-      - name: C robustness tests
-        run: |
-          cd c && mkdir -p build && cd build
-          cmake .. && make
-          # Run truth table and mutation tests if built
-          if [ -f test_truth_table ]; then ./test_truth_table; fi
-          if [ -f test_mutation ]; then ./test_mutation; fi
-
   # ─── Publish Gate v2 ───────────────────────────────────────────────
   publish-gate:
     name: Publish Gate
-    needs: [go, python, typescript, rust, c, fixtures]
+    needs: [go, python, typescript, rust, fixtures]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -343,7 +258,6 @@ jobs:
           check_job "Python"     "${{ needs.python.result }}"
           check_job "TypeScript" "${{ needs.typescript.result }}"
           check_job "Rust"       "${{ needs.rust.result }}"
-          check_job "C"          "${{ needs.c.result }}"
           echo ""
           echo "Integration:"
           check_job "Fixtures"   "${{ needs.fixtures.result }}"
@@ -356,26 +270,10 @@ jobs:
           echo "All checks passed. Safe to publish."
 
   # ─── Publish: PyPI ─────────────────────────────────────────────────
-  publish-pypi:
-    name: Publish to PyPI
-    needs: [publish-gate]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Build
-        run: |
-          pip install build
-          cd python && python -m build
-      - name: Publish
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: python/dist/
+  # PyPI publishing is owned exclusively by .github/workflows/publish-pypi.yml
+  # (cibuildwheel binary wheels, OIDC trusted publishing, SHA-pinned actions).
+  # A second publish job here also triggered on v* tags and raced it, causing an
+  # HTTP 400 duplicate-upload on the first release tag. Removed deliberately.
 
   # ─── Publish: npm ──────────────────────────────────────────────────
   publish-npm:

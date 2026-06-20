@@ -39,14 +39,14 @@ var (
 // The sanity checks (length vs remaining data) are the primary protection;
 // these limits are a secondary defense against legitimately-sized but huge payloads.
 const (
-	DefaultMaxDepth     = 1000          // Maximum nesting depth
-	DefaultMaxArrayLen  = 1_000_000     // 1M elements (tightened: was 100M)
-	DefaultMaxObjectLen = 1_000_000     // 1M fields (tightened: was 10M)
-	DefaultMaxStringLen = 10_000_000    // 10MB strings (tightened: was 500MB)
-	DefaultMaxBytesLen  = 50_000_000    // 50MB bytes (tightened: was 1GB)
-	DefaultMaxExtLen    = 1_000_000     // 1MB max extension payload (tightened: was 100MB)
-	DefaultMaxDictLen   = 1_000_000     // 1M dictionary entries (tightened: was 10M)
-	DefaultMaxRank      = 32            // Maximum tensor rank (dimensions)
+	DefaultMaxDepth     = 1000       // Maximum nesting depth
+	DefaultMaxArrayLen  = 1_000_000  // 1M elements (tightened: was 100M)
+	DefaultMaxObjectLen = 1_000_000  // 1M fields (tightened: was 10M)
+	DefaultMaxStringLen = 10_000_000 // 10MB strings (tightened: was 500MB)
+	DefaultMaxBytesLen  = 50_000_000 // 50MB bytes (tightened: was 1GB)
+	DefaultMaxExtLen    = 1_000_000  // 1MB max extension payload (tightened: was 100MB)
+	DefaultMaxDictLen   = 1_000_000  // 1M dictionary entries (tightened: was 10M)
+	DefaultMaxRank      = 32         // Maximum tensor rank (dimensions)
 )
 
 // UnknownExtBehavior controls how the decoder handles unknown TagExt extensions.
@@ -129,6 +129,77 @@ func (e *TagError) Error() string {
 func hexByte(b byte) string {
 	const hex = "0123456789abcdef"
 	return string([]byte{hex[b>>4], hex[b&0x0F]})
+}
+
+// dtypeElemSize returns the element size in bytes for byte-aligned dtypes.
+// Returns (size, true) for known byte-aligned types, (0, false) for sub-byte
+// packed types (bool, qint4, qint2, qint3, ternary, binary) whose packing
+// formula is non-trivial and not validated here.
+func dtypeElemSize(d DType) (uint64, bool) {
+	switch d {
+	case DTypeFloat32:
+		return 4, true
+	case DTypeFloat16:
+		return 2, true
+	case DTypeBFloat16:
+		return 2, true
+	case DTypeFloat64:
+		return 8, true
+	case DTypeInt8:
+		return 1, true
+	case DTypeInt16:
+		return 2, true
+	case DTypeInt32:
+		return 4, true
+	case DTypeInt64:
+		return 8, true
+	case DTypeUint8:
+		return 1, true
+	case DTypeUint16:
+		return 2, true
+	case DTypeUint32:
+		return 4, true
+	case DTypeUint64:
+		return 8, true
+	default:
+		// Sub-byte packed types (DTypeBool, DTypeQINT4, DTypeQINT2, DTypeQINT3,
+		// DTypeTernary, DTypeBinary) use non-trivial packing; skip shape validation.
+		return 0, false
+	}
+}
+
+// tensorExpectedBytes computes the expected byte length for a tensor with the
+// given dims and dtype. Returns (expected, true) when a definitive check is
+// possible, or (0, false) when the dtype uses sub-byte packing.
+// Overflow in the product of dims is detected and causes (0, false) so the
+// caller skips the check rather than accepting a corrupt tensor silently.
+// Rank-0 tensors (no dims) and tensors with any zero dimension produce 0 bytes.
+func tensorExpectedBytes(dtype DType, dims []uint64) (uint64, bool) {
+	elemSize, ok := dtypeElemSize(dtype)
+	if !ok {
+		return 0, false
+	}
+	// Rank-0 or any zero dimension → 0 bytes of payload.
+	if len(dims) == 0 {
+		return 0, true
+	}
+	product := uint64(1)
+	for _, d := range dims {
+		if d == 0 {
+			return 0, true
+		}
+		// Overflow-safe multiplication: if product > MaxUint64/d, it overflows.
+		if product > ^uint64(0)/d {
+			// Overflow: can't validate safely; skip check.
+			return 0, false
+		}
+		product *= d
+	}
+	// Overflow-safe multiplication for elemSize.
+	if elemSize > 0 && product > ^uint64(0)/elemSize {
+		return 0, false
+	}
+	return product * elemSize, true
 }
 
 // isValidDType checks if the dtype is a known value.
@@ -684,6 +755,14 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		// Enforce MaxBytesLen for tensor data
 		if r.opts.MaxBytesLen > 0 && dataLen > uint64(r.opts.MaxBytesLen) {
 			return nil, ErrBytesTooLarge
+		}
+		// Validate dataLen == product(dims) * elemSize to catch malformed tensors
+		// whose declared shape does not match their byte payload. Sub-byte packed
+		// types and overflow cases are skipped (tensorExpectedBytes returns false).
+		if expected, ok := tensorExpectedBytes(DType(dtype), dims); ok {
+			if dataLen != expected {
+				return nil, fmt.Errorf("cowrie: tensor dataLen %d does not match shape/dtype (expected %d bytes)", dataLen, expected)
+			}
 		}
 		// Streaming tensor decode via TensorSink
 		if r.opts.TensorSink != nil {
