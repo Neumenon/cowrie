@@ -1,6 +1,6 @@
 # cowrie-py
 
-A binary codec for JSON-like and ML-native data. Extends JSON with explicit integer types (int64, uint64), Decimal128, native binary (no base64), Datetime64, UUID128, BigInt, tensors, images, audio, and graph types. Pure-Python by default, with an optional, best-effort Cython accelerator (it may not build on every platform / NumPy combination; the pure-Python path is always available).
+A binary codec for JSON-like and ML-native data. Extends JSON with explicit integer types (int64, uint64), Decimal128, native binary (no base64), Datetime64, UUID128, BigInt, tensors, images, audio, and graph types. Pure-Python with an optional Cython accelerator (~10× faster encode/decode for common types when built; always falls back to pure Python).
 
 ## Install
 

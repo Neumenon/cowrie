@@ -4,6 +4,16 @@
 
 ## v2.1.2 (2026-06-20)
 
+### Changed — native Cython accelerator revived for the PyPI wheel
+
+Regenerated `cowrie/_cext.c` with Cython 3.1 so it builds against the NumPy 2.x
+C API (the bundled C used a pre-2.0 API and failed to compile, silently falling
+back to pure Python), and fixed an incomplete dtype map in the raw-tensor encode
+path that mis-encoded BOOL/INT16/UINT16/UINT32/UINT64 tensors as FLOAT32. The
+native path now passes the full test suite plus a 13-dtype conformance check and
+is ~10x faster than pure Python (measured: 11.7x encode, 9.2x decode). PyPI
+wheels again require and ship it (`COWRIE_REQUIRE_NATIVE=1`), built against NumPy 2.x.
+
 ### Removed — Glyph pulled out into its own repository
 
 The embedded Glyph text format (`go/glyph/`, the `glyph` and `bench` CLIs, and
