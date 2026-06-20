@@ -138,12 +138,12 @@ jobs:
           CIBW_BEFORE_BUILD_LINUX: 'yum install -y zlib-devel || apk add zlib-dev'
           CIBW_BEFORE_BUILD_MACOS: 'brew install zlib || true'
           # Windows: zlib bundled with Python, should work
-          # Test the wheel — conformance smoke (round-trips + golden bytes + malformed input).
-          # Pure-Python for 2.1.2: native is NOT required (the Cython accelerator is
-          # best-effort and falls back to pure Python). {project} is the python/ dir
-          # because cibuildwheel runs with working-directory: python.
+          # Test the wheel — conformance smoke (round-trips + golden bytes + malformed
+          # input) with the native Cython extension REQUIRED: it must build, load, and
+          # produce conformant bytes (built against NumPy 2.x for a portable ABI).
+          # {project} is the python/ dir because cibuildwheel runs working-directory: python.
           CIBW_TEST_COMMAND: >
-            python {project}/scripts/wheel_smoke.py
+            COWRIE_REQUIRE_NATIVE=1 python {project}/scripts/wheel_smoke.py
           # Build numpy for build-time headers
           CIBW_BUILD_FRONTEND: 'pip'
           # macOS: build universal2 (x86_64 + arm64)

@@ -245,13 +245,11 @@ cdef int _write(object obj, WBuf *b, dict key_idx) except -1:
                 # Raw tensor — write from raw bytes
                 raw = td.data
                 shape = td.shape
-                _dt = {
-                    _DType.FLOAT32: DTYPE_FLOAT32, _DType.FLOAT64: DTYPE_FLOAT64,
-                    _DType.FLOAT16: DTYPE_FLOAT16, _DType.INT8: DTYPE_INT8,
-                    _DType.INT32: DTYPE_INT32, _DType.INT64: DTYPE_INT64,
-                    _DType.UINT8: DTYPE_UINT8,
-                }
-                dtype_code = _dt.get(td.dtype, DTYPE_FLOAT32)
+                # The cowrie DType enum value IS the wire dtype code (FLOAT32=0x01,
+                # INT32=0x06, BOOL=0x0D, ...), so use it directly. The previous
+                # hand-maintained map here was incomplete (missing INT16/UINT16/
+                # UINT32/UINT64/BOOL), so those tensors were mis-encoded as FLOAT32.
+                dtype_code = <uint8_t>(<int>td.dtype)
                 rank = <uint8_t>len(shape)
                 if wb_byte(b, TAG_TENSOR) != 0: return -1
                 if wb_byte(b, dtype_code) != 0: return -1
