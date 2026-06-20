@@ -1,0 +1,302 @@
+{
+  "version": 1,
+  "description": "Spec clarity truth tables: edge-case decisions codified as testable assertions",
+  "cowrie": {
+    "cases": [
+      {
+        "id": "duplicate_map_keys",
+        "description": "Object with duplicate keys: last-writer-wins on decode",
+        "action": "encode_decode",
+        "input": {"type": "object", "entries": [["a", 1], ["b", 2], ["a", 3]]},
+        "expect": {"ok": true, "value": {"a": 3, "b": 2}},
+        "notes": "Cowrie uses last-writer-wins for duplicate keys during decode"
+      },
+      {
+        "id": "int64_max",
+        "description": "Maximum int64 value roundtrips correctly",
+        "action": "roundtrip",
+        "input": {"type": "int64", "value": 9223372036854775807},
+        "expect": {"ok": true, "value": 9223372036854775807}
+      },
+      {
+        "id": "int64_min",
+        "description": "Minimum int64 value roundtrips correctly",
+        "action": "roundtrip",
+        "input": {"type": "int64", "value": -9223372036854775808},
+        "expect": {"ok": true, "value": -9223372036854775808}
+      },
+      {
+        "id": "empty_string_key",
+        "description": "Empty string is a valid object key",
+        "action": "roundtrip",
+        "input": {"type": "object", "entries": [["", 42]]},
+        "expect": {"ok": true, "value": {"": 42}}
+      },
+      {
+        "id": "negative_zero_float",
+        "description": "-0.0 roundtrips as -0.0 in binary (IEEE 754 sign bit preserved)",
+        "action": "roundtrip",
+        "input": {"type": "float64", "value": "-0.0"},
+        "expect": {"ok": true, "negative_zero": true}
+      },
+      {
+        "id": "nan_binary_roundtrip",
+        "description": "NaN roundtrips through cowrie binary encoding",
+        "action": "roundtrip",
+        "input": {"type": "float64", "value": "NaN"},
+        "expect": {"ok": true, "is_nan": true}
+      },
+      {
+        "id": "positive_inf_binary_roundtrip",
+        "description": "+Inf roundtrips through cowrie binary encoding",
+        "action": "roundtrip",
+        "input": {"type": "float64", "value": "+Inf"},
+        "expect": {"ok": true, "is_positive_inf": true}
+      },
+      {
+        "id": "negative_inf_binary_roundtrip",
+        "description": "-Inf roundtrips through cowrie binary encoding",
+        "action": "roundtrip",
+        "input": {"type": "float64", "value": "-Inf"},
+        "expect": {"ok": true, "is_negative_inf": true}
+      },
+      {
+        "id": "unknown_tag_rejected",
+        "description": "Unknown tag byte in payload must return error",
+        "action": "decode_raw",
+        "input": {"type": "raw_hex", "value": "534A0200001F"},
+        "expect": {"ok": false}
+      },
+      {
+        "id": "empty_array_roundtrip",
+        "description": "Empty array roundtrips",
+        "action": "roundtrip",
+        "input": {"type": "array", "value": []},
+        "expect": {"ok": true, "value": []}
+      },
+      {
+        "id": "empty_object_roundtrip",
+        "description": "Empty object roundtrips",
+        "action": "roundtrip",
+        "input": {"type": "object", "entries": []},
+        "expect": {"ok": true, "value": {}}
+      },
+      {
+        "id": "nested_depth_100",
+        "description": "100 levels of nesting succeeds",
+        "action": "roundtrip_depth",
+        "input": {"type": "nested_arrays", "depth": 100},
+        "expect": {"ok": true}
+      },
+      {
+        "id": "null_roundtrip",
+        "description": "Null value roundtrips",
+        "action": "roundtrip",
+        "input": {"type": "null"},
+        "expect": {"ok": true, "value": null}
+      },
+      {
+        "id": "bool_true_roundtrip",
+        "description": "Boolean true roundtrips",
+        "action": "roundtrip",
+        "input": {"type": "bool", "value": true},
+        "expect": {"ok": true, "value": true}
+      },
+      {
+        "id": "bool_false_roundtrip",
+        "description": "Boolean false roundtrips",
+        "action": "roundtrip",
+        "input": {"type": "bool", "value": false},
+        "expect": {"ok": true, "value": false}
+      },
+      {
+        "id": "empty_bytes_roundtrip",
+        "description": "Empty bytes value roundtrips",
+        "action": "roundtrip",
+        "input": {"type": "bytes", "value_base64": ""},
+        "expect": {"ok": true, "value_base64": ""}
+      },
+      {
+        "id": "unicode_string_roundtrip",
+        "description": "Unicode strings with multi-byte chars roundtrip",
+        "action": "roundtrip",
+        "input": {"type": "string", "value": "hello 世界 🌍"},
+        "expect": {"ok": true, "value": "hello 世界 🌍"}
+      },
+      {
+        "id": "trailing_garbage_rejected",
+        "description": "Extra bytes after valid root value must be rejected",
+        "action": "trailing_garbage",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "truncated_input_rejected",
+        "description": "Truncated input must return error, not panic",
+        "action": "truncated",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "empty_input_rejected",
+        "description": "Empty (zero-length) input returns error",
+        "action": "decode_raw",
+        "input": {"type": "raw_hex", "value": ""},
+        "expect": {"ok": false}
+      }
+    ]
+  },
+  "glyph": {
+    "cases": [
+      {
+        "id": "duplicate_keys_last_wins",
+        "description": "Duplicate keys in glyph text: last-writer-wins",
+        "action": "parse",
+        "input": "a 1\na 2",
+        "expect": {"ok": true, "value": {"a": 2}}
+      },
+      {
+        "id": "nan_rejected_in_text",
+        "description": "NaN is rejected in glyph text format",
+        "action": "canonicalize",
+        "input": {"type": "float", "value": "NaN"},
+        "expect": {"ok": false}
+      },
+      {
+        "id": "inf_rejected_in_text",
+        "description": "+Inf/-Inf are rejected in glyph text format",
+        "action": "canonicalize",
+        "input": {"type": "float", "value": "+Inf"},
+        "expect": {"ok": false}
+      },
+      {
+        "id": "trailing_whitespace_ignored",
+        "description": "Trailing whitespace after valid glyph text is ignored",
+        "action": "parse",
+        "input": "key value  \n  ",
+        "expect": {"ok": true, "value": {"key": "value"}}
+      },
+      {
+        "id": "negative_zero_canonicalizes_to_zero",
+        "description": "-0.0 canonicalizes to '0' in glyph text (no sign bit in text)",
+        "action": "canonicalize",
+        "input": {"type": "float", "value": "-0.0"},
+        "expect": {"ok": true, "text": "0"}
+      },
+      {
+        "id": "empty_document_valid",
+        "description": "Empty string is a valid glyph document (empty map)",
+        "action": "parse",
+        "input": "",
+        "expect": {"ok": true, "value": {}}
+      },
+      {
+        "id": "number_normalization_integer",
+        "description": "1.0 normalizes to 1 in canonical form",
+        "action": "canonicalize",
+        "input": {"type": "float", "value": "1.0"},
+        "expect": {"ok": true, "text": "1"}
+      },
+      {
+        "id": "number_normalization_exponent",
+        "description": "1e2 normalizes to 100 in canonical form",
+        "action": "canonicalize",
+        "input": {"type": "float", "value": "1e2"},
+        "expect": {"ok": true, "text": "100"}
+      },
+      {
+        "id": "reserved_words_quoted",
+        "description": "Reserved words (true, false, null) are quoted as values",
+        "action": "canonicalize_string",
+        "input": "true",
+        "expect": {"ok": true, "text": "\"true\""}
+      },
+      {
+        "id": "bare_string_safe",
+        "description": "Simple identifier strings are emitted bare (unquoted)",
+        "action": "canonicalize_string",
+        "input": "hello_world",
+        "expect": {"ok": true, "text": "hello_world"}
+      },
+      {
+        "id": "string_with_spaces_quoted",
+        "description": "Strings with spaces must be quoted",
+        "action": "canonicalize_string",
+        "input": "hello world",
+        "expect": {"ok": true, "text": "\"hello world\""}
+      },
+      {
+        "id": "null_canonical_form",
+        "description": "Null canonicalizes to _ (underscore)",
+        "action": "canonicalize",
+        "input": {"type": "null"},
+        "expect": {"ok": true, "text_underscore": "_", "text_symbol": "∅"}
+      }
+    ]
+  },
+  "shard": {
+    "cases": [
+      {
+        "id": "duplicate_entry_names_rejected",
+        "description": "Shard with duplicate entry names is rejected on write",
+        "action": "write_reject",
+        "input": {"entries": [{"name": "a", "data": ""}, {"name": "a", "data": ""}]},
+        "expect": {"ok": false}
+      },
+      {
+        "id": "zero_length_entry_valid",
+        "description": "Entry with zero-length data is valid",
+        "action": "roundtrip",
+        "input": {"entries": [{"name": "empty", "data": ""}]},
+        "expect": {"ok": true, "entry_count": 1}
+      },
+      {
+        "id": "unicode_entry_name",
+        "description": "Unicode entry names are valid",
+        "action": "roundtrip",
+        "input": {"entries": [{"name": "日本語", "data": "aGVsbG8="}]},
+        "expect": {"ok": true, "entry_count": 1}
+      },
+      {
+        "id": "bad_magic_rejected",
+        "description": "Invalid magic bytes rejected",
+        "action": "decode_corrupt",
+        "fixture": "corrupt_bad_magic.shard",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "truncated_header_rejected",
+        "description": "Truncated header rejected",
+        "action": "decode_corrupt",
+        "fixture": "corrupt_truncated_header.shard",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "crc_mismatch_rejected",
+        "description": "CRC checksum mismatch rejected",
+        "action": "decode_corrupt",
+        "fixture": "corrupt_crc_mismatch.shard",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "truncated_data_rejected",
+        "description": "Truncated data section rejected",
+        "action": "decode_corrupt",
+        "fixture": "corrupt_truncated_data.shard",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "entry_count_overflow_rejected",
+        "description": "Absurd entry count rejected without OOM",
+        "action": "decode_corrupt",
+        "fixture": "corrupt_entry_count_overflow.shard",
+        "expect": {"ok": false}
+      },
+      {
+        "id": "empty_input_rejected",
+        "description": "Zero-length input returns error",
+        "action": "decode_raw",
+        "input": "",
+        "expect": {"ok": false}
+      }
+    ]
+  }
+}

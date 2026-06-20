@@ -32,8 +32,8 @@ from cowrie.gen2 import (
 
 
 def _cogs_root() -> Path:
-    """Return the cogs workspace root (parent of cowrie repo)."""
-    return Path(__file__).resolve().parents[3]
+    """Return the repo root (cowrie/), which contains testdata/robustness/."""
+    return Path(__file__).resolve().parents[2]
 
 
 def _load_cowrie_cases():
