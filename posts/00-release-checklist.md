@@ -2,122 +2,89 @@
 
 ## Current Package Names & Versions
 
-### Cowrie (`cowrie/`)
-| Registry | Package | Version | File |
-|----------|---------|---------|------|
-| npm | `cowrie-codec` | 2.0.0 | `typescript/package.json` |
-| PyPI | `cowrie-py` | 2.0.0 | `python/pyproject.toml` |
-| crates.io | `cowrie-rs` | 2.0.0 | `rust/Cargo.toml` |
-| Go | `github.com/Neumenon/cowrie/go/v2` | untagged | `go/go.mod` |
+| Registry | Package | Version | Manifest |
+|----------|---------|---------|----------|
+| npm | `cowrie-codec` | 2.1.2 | `typescript/package.json` |
+| PyPI | `cowrie-py` | 2.1.2 | `python/pyproject.toml` |
+| crates.io | `cowrie-rs` | 2.1.2 | `rust/Cargo.toml` |
+| Go | `github.com/Neumenon/cowrie/go/v2` | `go/v2.1.2` | `go/go.mod` |
 
-### Glyph (`glyph/`)
-| Registry | Package | Version | File |
-|----------|---------|---------|------|
-| npm | `cowrie-glyph` | 0.3.0 | `js/package.json` |
-| PyPI | `glyph-py` | 1.0.0 | `py/pyproject.toml` |
-| crates.io | `glyph-rs` | 0.1.0 | `rust/glyph-codec/Cargo.toml` |
-| Go | `github.com/Neumenon/glyph` | untagged | `go/go.mod` |
-
-### Shard (`shard/`)
-| Registry | Package | Version | File |
-|----------|---------|---------|------|
-| npm | `shard-format` | 0.1.0 | `shard-ts/package.json` |
-| crates.io | `shard-format` | 0.1.0 | `shard-rs/Cargo.toml` |
-| Go | embedded in ucodec | n/a | n/a |
-| PyPI | not yet | - | - |
-| C | not yet | - | - |
+Go is released under two tags pushed together: the canonical `v<version>` tag (e.g. `v2.1.2`) and the subdir-module tag `go/v<version>` (e.g. `go/v2.1.2`) that the Go module proxy resolves for `github.com/Neumenon/cowrie/go/v2`.
 
 ---
 
-## Pre-Release
+## Release Flow
 
-### 1. Version Bump
-Bump version in ALL files for the target package:
-- `package.json` (npm)
-- `pyproject.toml` (PyPI)
-- `Cargo.toml` (crates.io)
-- Git tag (Go)
+**`./release.sh` is the single release authority.** CI publishes all registries automatically when the `v*` tag lands — manual per-registry publish commands are not used and would double-publish against the tag-triggered CI.
 
-### 2. Run Tests (ALL languages must pass)
+### 1. Ensure manifests are at the target version
 
-**Cowrie:**
+All four manifests must declare the same version before running the script:
+
+- `typescript/package.json`
+- `python/pyproject.toml`
+- `rust/Cargo.toml`
+- `go/go.mod` (module path version suffix must match the major)
+
+### 2. Sync to clean main
+
 ```bash
-cd cowrie
-cd go && go test ./... && cd ..
-cd python && pip install -e ".[dev]" && pytest tests/ && cd ..
-cd typescript && npm ci && npm test && cd ..
-cd rust && cargo test && cd ..
+git checkout main && git pull --ff-only origin main
 ```
 
-**Glyph:**
+The release script enforces this — it will abort if the working tree is dirty or if `main` is not in sync with `origin/main`.
+
+### 3. Run the release script
+
 ```bash
-cd glyph
-cd go && go test ./... && cd ..
-cd py && pytest tests/ && cd ..
-cd js && npm ci && npm test && cd ..
-cd rust/glyph-codec && cargo test && cd ../..
-cd c/glyph-codec && make clean && make test && cd ../..
+./release.sh <version>   # e.g. ./release.sh 2.1.2
 ```
 
-### 3. Git Tag
+The script runs a PREFLIGHT + TAG-ONLY sequence:
+
+1. Asserts `main` is clean and in sync with origin.
+2. Verifies every manifest declares `<version>`.
+3. Runs all 4 language test suites (Go, Python, TypeScript, Rust).
+4. Runs the 47-case cross-language fixture harness.
+5. Pushes `v<version>` and `go/v<version>` tags.
+
+### 4. CI publishes all registries
+
+On the `v*` tag, CI triggers automatically:
+
+- **`ci.yml`** → publishes `cowrie-codec` to npm and `cowrie-rs` to crates.io.
+- **`publish-pypi.yml`** → publishes `cowrie-py` to PyPI (pure-Python wheels; no native build step required).
+
+No manual publish commands needed.
+
+### 5. (Optional) Create a GitHub release
+
 ```bash
-git tag -a v0.X.Y -m "Release v0.X.Y"
-git push origin v0.X.Y
+gh release create v<version> --generate-notes
 ```
 
 ---
 
-## Publish Order
+## Post-Release Verification
 
-Publish in this order (npm first — easiest to unpublish if broken; crates.io last — permanent):
+Confirm the packages landed correctly:
 
-### 1. npm
 ```bash
-cd typescript && npm publish --access public
+# npm
+npm install cowrie-codec@<version> && node -e "require('cowrie-codec'); console.log('ok')"
+
+# PyPI
+pip install cowrie-py==<version> && python -c "import cowrie; print('ok')"
+
+# crates.io  (search.crates.io updates within a few minutes)
+cargo add cowrie-rs@<version>
+
+# Go
+go get github.com/Neumenon/cowrie/go/v2@go/v<version>
 ```
-
-### 2. PyPI
-```bash
-cd python && python -m build && twine upload dist/*
-```
-
-### 3. crates.io
-```bash
-cd rust && cargo publish
-```
-
-### 4. Go
-Just needs the git tag pushed. Go proxy picks it up automatically.
-
----
-
-## Post-Release
-
-### Verify installs
-```bash
-# Cowrie
-npm install cowrie-codec && node -e "const c = require('cowrie-codec'); console.log('ok')"
-pip install cowrie-py && python -c "import cowrie; print('ok')"
-cargo add cowrie-rs
-
-# Glyph
-npm install cowrie-glyph && node -e "const g = require('cowrie-glyph'); console.log('ok')"
-pip install glyph-py && python -c "import glyph; print('ok')"
-cargo add glyph-rs
-```
-
-### Agent-GO (Deprecated)
-Agent-GO is deprecated. All code now lives in the cogs repos (`github.com/Neumenon/cowrie`, `github.com/Neumenon/glyph`, `shard/`). No Agent-GO updates needed.
-
-### GitHub Release
-Create release on GitHub with changelog notes.
 
 ---
 
 ## Known Issues
 
-1. **Glyph go.mod replace directive**: `glyph/go/go.mod` has a `replace` pointing to cowrie within the cogs workspace (for `bridge.go` build tag). Must remove before tagging for Go proxy.
-
-2. **Shard Python/C not implemented**: Only npm and crates.io packages exist.
-
-3. **Existing release script**: `cowrie/release.sh` exists — check if it's up to date before using.
+1. **Shard Python/C not implemented**: Only npm and crates.io packages exist for Shard.

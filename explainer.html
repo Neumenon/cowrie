@@ -649,13 +649,13 @@ details .details-body {
   Cowrie is a binary JSON bridge for structured data with native ML extensions.
   It encodes tensors, images, audio, bitmasks, graph nodes and edges alongside the usual
   strings, numbers, and nested objects, and round-trips cleanly to and from JSON.
-  Five language implementations produce byte-identical output. This is the story of how it
+  Four language implementations produce byte-identical output. This is the story of how it
   was built, what it encodes, and why it exists.
 </p>
 
 <div class="stat-grid">
   <div class="stat-card">
-    <div class="stat-num">5</div>
+    <div class="stat-num">4</div>
     <div class="stat-label">Languages</div>
   </div>
   <div class="stat-card">
@@ -667,7 +667,7 @@ details .details-body {
     <div class="stat-label">Days to Ship</div>
   </div>
   <div class="stat-card">
-    <div class="stat-num">14k+</div>
+    <div class="stat-num">12k+</div>
     <div class="stat-label">Lines of Code</div>
   </div>
   <div class="stat-card">
@@ -686,7 +686,7 @@ details .details-body {
 
 <p class="drop-cap">JSON won the internet. It is the lingua franca of APIs, configuration files, and data interchange. But JSON has a ceiling, and if you work with machine learning, real-time agents, or graph-structured data, you hit it fast. JSON cannot represent a tensor without base64-encoding it into a string. It cannot carry an image without doubling its size. It has no integers&mdash;only IEEE 754 doubles that silently mangle values above 2<sup>53</sup>. It has no schema fingerprinting, no streaming framing, no compression, no checksums. And it is <em>slow</em>&mdash;parsing JSON is dominated by string allocation, UTF-8 validation, and hash table construction for every object key, every time.</p>
 
-<p>Cowrie exists because the systems that need structured data most&mdash;ML inference engines, agent orchestration layers, graph databases, multimodal pipelines&mdash;need more than JSON can offer. Cowrie is a binary JSON bridge with native types: the JSON basics (null, bool, int64, float64, string, bytes, array, object) plus tensors with 20+ dtypes, images with format metadata, audio with sample rates, bitmasks, UUIDs, datetime64, decimal128, and bigints. Graph node and edge types carry structured graph data at the wire level. Dictionary-coded object keys eliminate redundancy. Varint encoding keeps small values small. A single-byte <code>FIXINT</code> tag encodes integers 0-127 with zero overhead. Five language implementations&mdash;Go, Python, TypeScript, Rust, C&mdash;all produce identical bytes.</p>
+<p>Cowrie exists because the systems that need structured data most&mdash;ML inference engines, agent orchestration layers, graph databases, multimodal pipelines&mdash;need more than JSON can offer. Cowrie is a binary JSON bridge with native types: the JSON basics (null, bool, int64, float64, string, bytes, array, object) plus tensors with 20+ dtypes, images with format metadata, audio with sample rates, bitmasks, UUIDs, datetime64, decimal128, and bigints. Graph node and edge types carry structured graph data at the wire level. Dictionary-coded object keys eliminate redundancy. Varint encoding keeps small values small. A single-byte <code>FIXINT</code> tag encodes integers 0-127 with zero overhead. Four language implementations&mdash;Go, Python, TypeScript, and Rust&mdash;all produce identical bytes.</p>
 
 <p>The name comes from the cowrie shell, one of humanity's oldest units of exchange. The ambition is similar: a universal token of value that any system can accept.</p>
 
@@ -702,7 +702,7 @@ details .details-body {
     <tr><th>Time</th><th>Commit</th><th>Action</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>10:29</code></td><td><code>80d04e8</code></td><td>Glyph text codec integrated across all 5 languages</td></tr>
+    <tr><td><code>10:29</code></td><td><code>80d04e8</code></td><td>Glyph text codec integrated across the implementations</td></tr>
     <tr><td><code>10:33</code></td><td><code>bfbefdd</code></td><td>Agent-GO packages carried forward (codec, gnn, delta, graph, ld)</td></tr>
     <tr><td><code>10:37</code></td><td><code>b774096</code></td><td>7 critical/high security vulnerabilities fixed in Gen2 decoder</td></tr>
     <tr><td><code>10:45</code></td><td><code>157969f</code></td><td>16 security regression tests added</td></tr>
@@ -710,7 +710,7 @@ details .details-body {
   </tbody>
 </table>
 
-<p>By 12:02 PM &mdash; less than two hours after the first commit &mdash; ten commits had landed. Cowrie had a header format, two codec generations, five language implementations, a security audit, and cross-language fixture tests. The sprint had begun.</p>
+<p>By 12:02 PM &mdash; less than two hours after the first commit &mdash; ten commits had landed. Cowrie had a header format, two codec generations, four language implementations, a security audit, and cross-language fixture tests. The sprint had begun.</p>
 
 <h3>What the Codec Actually Does</h3>
 
@@ -739,7 +739,7 @@ details .details-body {
 
 <p>The sixth commit&mdash;still on Day 1&mdash;patched seven critical vulnerabilities inherited from SJSON: unchecked varint overflows that could cause infinite loops, unbounded string allocations that could exhaust memory, missing depth limits on recursive decode, and tensor data length validation gaps. The fix touched 4 files and 66 lines. The follow-up commit added 16 regression tests. This pattern&mdash;fix, then test, in adjacent commits&mdash;became the project's standard operating procedure.</p>
 
-<p>By the end of Day 1, all five implementations could encode and decode every Gen2 type tag, handle compressed payloads, accept configurable decode limits, and round-trip through cross-language fixtures. The codec was not just renamed&mdash;it was hardened.</p>
+<p>By the end of Day 1, all four implementations could encode and decode every Gen2 type tag, handle compressed payloads, accept configurable decode limits, and round-trip through cross-language fixtures. The codec was not just renamed&mdash;it was hardened.</p>
 
 <!-- ════════════════════════════════════════════════════════════ -->
 <!-- CHAPTER 2: THE WIRE FORMAT                                 -->
@@ -1620,7 +1620,7 @@ details .details-body {
 
 <h3>The Value Tree</h3>
 
-<p>At the center of all five implementations sits the <code>Value</code> type &mdash; a discriminated union holding exactly one of the 26+ type variants. In Go, this is a struct with a <code>typ</code> discriminant and a field per variant. Two API styles coexist: panicking accessors (<code>.Int64()</code>, <code>.String()</code>) for code that has already type-checked, and safe accessors (<code>.TryInt64()</code>, <code>.TryString()</code>) that return <code>(T, bool)</code>:</p>
+<p>At the center of all four implementations sits the <code>Value</code> type &mdash; a discriminated union holding exactly one of the 26+ type variants. In Go, this is a struct with a <code>typ</code> discriminant and a field per variant. Two API styles coexist: panicking accessors (<code>.Int64()</code>, <code>.String()</code>) for code that has already type-checked, and safe accessors (<code>.TryInt64()</code>, <code>.TryString()</code>) that return <code>(T, bool)</code>:</p>
 
 <pre><code><span class="code-dim">// Panicking — use when type is known</span>
 name := v.Get(<span class="code-green">"name"</span>).String()
@@ -1685,7 +1685,7 @@ name := v.Get(<span class="code-green">"name"</span>).String()
   Cross-Language Surface
 </h2>
 
-<p class="drop-cap">Five languages, one wire format. Every Cowrie implementation must produce byte-identical output for the same input. But not every language has the same capabilities. Go is the reference implementation, and it has grown exclusive features that the other four do not (yet) provide.</p>
+<p class="drop-cap">Four languages, one wire format. Every Cowrie implementation must produce byte-identical output for the same input. But not every language has the same capabilities. Go is the reference implementation, and it has grown exclusive features that the other three do not (yet) provide.</p>
 
 <h3>Go-Only Features</h3>
 
@@ -1762,30 +1762,30 @@ opts := DecodeOptions{
   </div>
 </details>
 
-<h3>Five-Language API Comparison</h3>
+<h3>Four-Language API Comparison</h3>
 
 <table>
-  <thead><tr><th>Capability</th><th>Go</th><th>Python</th><th>Rust</th><th>C</th><th>TypeScript</th></tr></thead>
+  <thead><tr><th>Capability</th><th>Go</th><th>Python</th><th>Rust</th><th>TypeScript</th></tr></thead>
   <tbody>
-    <tr><td>Gen1 encode/decode</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>Gen2 encode/decode</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>v3 inline types</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>Bitmask</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>Compression (gzip)</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>Compression (zstd)</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
-    <tr><td>Column hints</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>JSON bridge</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
-    <tr><td>UnsafeStrings</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
-    <tr><td>TensorSink</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
-    <tr><td>EncodeToWriter</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
-    <tr><td>SchemaFingerprint</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
-    <tr><td>Configurable limits</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Gen1 encode/decode</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Gen2 encode/decode</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>v3 inline types</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Bitmask</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Compression (gzip)</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>Compression (zstd)</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>Column hints</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>JSON bridge</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
+    <tr><td>UnsafeStrings</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>TensorSink</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>EncodeToWriter</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>SchemaFingerprint</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td><td style="color: var(--green);">Yes</td><td style="color: var(--text-dim);">No</td></tr>
+    <tr><td>Configurable limits</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td><td style="color: var(--green);">Yes</td></tr>
   </tbody>
 </table>
 
 <div class="insight">
   <div class="insight-label">Implementation Scale</div>
-  <p>By lines of code (Gen2 only): C leads at <strong>3,773</strong> lines, followed by TypeScript at <strong>3,044</strong>, Python at <strong>2,727</strong>, Rust at <strong>2,984</strong> (across 7 modules), and Go which spans dozens of files totaling well over <strong>4,000</strong> lines including tests. The total across all five languages exceeds <strong>14,000</strong> lines of implementation code.</p>
+  <p>By lines of code (Gen2 only): TypeScript at <strong>3,044</strong> lines, Python at <strong>2,727</strong>, Rust at <strong>2,984</strong> (across 7 modules), and Go which spans dozens of files totaling well over <strong>4,000</strong> lines including tests. Each implementation runs to several thousand lines; Go is the largest by a significant margin.</p>
 </div>
 
 <h3>Language-Specific Notes</h3>
@@ -1793,7 +1793,7 @@ opts := DecodeOptions{
 <details>
   <summary>Go &mdash; the reference implementation</summary>
   <div class="details-body">
-    <p>Go serves as the reference implementation and the testing ground for new features. Every new type tag, encoding rule, or security fix lands in Go first, then propagates to the other four languages. The Go implementation is distinguished by:</p>
+    <p>Go serves as the reference implementation and the testing ground for new features. Every new type tag, encoding rule, or security fix lands in Go first, then propagates to the other three languages. The Go implementation is distinguished by:</p>
     <ul style="margin: 0.5rem 0; padding-left: 1.5rem; color: var(--text-dim);">
       <li><code>sync.Pool</code> buffer recycling with 1 MB cap</li>
       <li><code>unsafe.Slice</code> zero-copy tensor views</li>
@@ -1822,13 +1822,6 @@ opts := DecodeOptions{
   </div>
 </details>
 
-<details>
-  <summary>C &mdash; the largest implementation</summary>
-  <div class="details-body">
-    <p>At 3,773 lines, <code>c/src/gen2.c</code> is the largest single file in the project. C requires manual memory management, explicit bounds checking, and careful overflow arithmetic &mdash; all of which add line count. The C decoder was the target of specific security fixes: commit <code>aa8930c</code> addressed malloc overflow (multiplying count by element size without checking for overflow), and the adjacency list decoder had a <code>ro_alloc</code>/<code>ro_count</code> guard bug fixed during invariant testing.</p>
-    <p>Headers: <code>cowrie_gen1.h</code>, <code>cowrie_gen2.h</code>, <code>cowrie_json.h</code></p>
-  </div>
-</details>
 
 <details>
   <summary>TypeScript &mdash; V8 precision concerns</summary>
@@ -1842,7 +1835,7 @@ opts := DecodeOptions{
 
 <p>The <code>go/codec/cowrie_master_stream.go</code> file implements a framed streaming protocol for sending multiple Cowrie values over a single connection. Each frame is a self-contained Cowrie message with a length prefix and CRC-32 checksum. This is the protocol used by Agent-GO's real-time inference pipeline, where model outputs (tensors, embeddings, graph updates) are streamed as a sequence of Cowrie frames.</p>
 
-<p>The stream protocol is Go-only &mdash; the other four languages implement encode/decode for individual messages but not the framing layer. This is a deliberate design choice: the framing layer is an application concern (different applications want different framing), while the message format is universal.</p>
+<p>The stream protocol is Go-only &mdash; the other three languages implement encode/decode for individual messages but not the framing layer. This is a deliberate design choice: the framing layer is an application concern (different applications want different framing), while the message format is universal.</p>
 
 <h3>The Reflection Codec</h3>
 
@@ -1850,7 +1843,7 @@ opts := DecodeOptions{
 
 <h3>Cross-Language Fixtures</h3>
 
-<p>The <code>testdata/fixtures/</code> directory contains binary fixtures generated by the Go implementation. Every other language must decode these fixtures and produce identical values. Every language must also encode the same logical values and produce byte-identical output. This is the contract that makes "five languages, one wire format" real:</p>
+<p>The <code>testdata/fixtures/</code> directory contains binary fixtures generated by the Go implementation. Every other language must decode these fixtures and produce identical values. Every language must also encode the same logical values and produce byte-identical output. This is the contract that makes "four languages, one wire format" real:</p>
 
 <pre><code><span class="code-dim">testdata/fixtures/</span>
   <span class="code-accent">basic_types.cowrie</span>       <span class="code-dim"># null, bool, int, float, string</span>
@@ -1894,7 +1887,7 @@ opts := DecodeOptions{
     <div class="timeline-date">Days 12-13 &mdash; March 5-6</div>
     <div class="timeline-title">Release Infrastructure</div>
     <div class="timeline-body">
-      Package alignment, v0.1.1 version bump, elevator pitches, benchmarks across all 5 languages with JSON baselines, Go module path fix. Eight commits of release polish.
+      Package alignment, v0.1.1 version bump, elevator pitches, benchmarks across all implementations with JSON baselines, Go module path fix. Eight commits of release polish.
     </div>
   </div>
 
@@ -1928,7 +1921,7 @@ opts := DecodeOptions{
     <div class="timeline-date">Day 15 &mdash; March 8 (evening)</div>
     <div class="timeline-title">v3 Wire Format</div>
     <div class="timeline-body">
-      Commit <code>533a380</code>: FIXINT, FIXNEG, FIXARRAY, FIXMAP, Bitmask, Gen1/Gen2 tag alignment, UnsafeStrings, TensorSink, EncodeToWriter. The most impactful single commit in the project's history, touching all 5 language implementations simultaneously.
+      Commit <code>533a380</code>: FIXINT, FIXNEG, FIXARRAY, FIXMAP, Bitmask, Gen1/Gen2 tag alignment, UnsafeStrings, TensorSink, EncodeToWriter. The most impactful single commit in the project's history, touching all four language implementations simultaneously.
     </div>
   </div>
 
@@ -1936,7 +1929,7 @@ opts := DecodeOptions{
     <div class="timeline-date">Day 16 &mdash; March 9</div>
     <div class="timeline-title">Invariant Testing</div>
     <div class="timeline-body">
-      7 codec invariants tested across all 5 languages. NaN/Inf policy established (allowed in binary, rejected in Glyph text/JSON). Coverage pushed toward 80% threshold. Glyph safety fixes synced; CLI glue promoted to library APIs.
+      7 codec invariants tested across all four languages. NaN/Inf policy established (allowed in binary, rejected in Glyph text/JSON). Coverage pushed toward 80% threshold. Glyph safety fixes synced; CLI glue promoted to library APIs.
     </div>
   </div>
 
@@ -1944,7 +1937,7 @@ opts := DecodeOptions{
     <div class="timeline-date">Day 17 &mdash; March 10</div>
     <div class="timeline-title">Robustness Framework</div>
     <div class="timeline-body">
-      Seven test suites: truth tables (5 langs), mutation/corruption testing (Rust/Python/C/TS), performance cliff detection (Go/Rust), property-based fuzzing (hypothesis + cargo-fuzz), cross-format roundtrip, differential testing scaffold, and CI workflows.
+      Seven test suites: truth tables (4 langs), mutation/corruption testing (Rust/Python/TS), performance cliff detection (Go/Rust), property-based fuzzing (hypothesis + cargo-fuzz), cross-format roundtrip, differential testing scaffold, and CI workflows.
     </div>
   </div>
 
@@ -1952,7 +1945,7 @@ opts := DecodeOptions{
 
 <div class="insight insight-pink">
   <div class="insight-label">Velocity</div>
-  <p>The hardening phase (March 7-10) produced 14 commits in 4 days, touching security, performance, and correctness simultaneously across 5 language implementations. The v3 wire format commit alone changed files in Go, Python, Rust, C, and TypeScript &mdash; all in a single atomic commit with regenerated cross-language fixtures.</p>
+  <p>The hardening phase (March 7-10) produced 14 commits in 4 days, touching security, performance, and correctness simultaneously across all four language implementations. The v3 wire format commit alone changed files in Go, Python, Rust, and TypeScript &mdash; all in a single atomic commit with regenerated cross-language fixtures.</p>
 </div>
 
 <h3>Commit Density by Phase</h3>
@@ -2048,7 +2041,7 @@ opts := DecodeOptions{
 
 <h3>Seven Codec Invariants</h3>
 
-<p>By Day 16, seven invariants had been identified and tested across all five languages:</p>
+<p>By Day 16, seven invariants had been identified and tested across all four languages:</p>
 
 <table>
   <thead><tr><th>#</th><th>Invariant</th><th>Meaning</th></tr></thead>
@@ -2106,8 +2099,8 @@ opts := DecodeOptions{
 <table>
   <thead><tr><th>Suite</th><th>Languages</th><th>What It Tests</th></tr></thead>
   <tbody>
-    <tr><td><strong>Truth Tables</strong></td><td>All 5</td><td>Exhaustive encode/decode for every type tag, including edge cases (empty strings, zero-length arrays, max-value integers)</td></tr>
-    <tr><td><strong>Mutation/Corruption</strong></td><td>Rust, Python, C, TS</td><td>Bit-flip, truncation, and byte-insertion attacks on valid messages &mdash; decoder must never panic</td></tr>
+    <tr><td><strong>Truth Tables</strong></td><td>All 4</td><td>Exhaustive encode/decode for every type tag, including edge cases (empty strings, zero-length arrays, max-value integers)</td></tr>
+    <tr><td><strong>Mutation/Corruption</strong></td><td>Rust, Python, TS</td><td>Bit-flip, truncation, and byte-insertion attacks on valid messages &mdash; decoder must never panic</td></tr>
     <tr><td><strong>Perf Cliff Detection</strong></td><td>Go, Rust</td><td>Identifies non-linear performance degradation: O(n) operations that secretly become O(n^2) at scale</td></tr>
     <tr><td><strong>Property Fuzzing</strong></td><td>Python (hypothesis), Rust (cargo-fuzz)</td><td>Random input generation with property-based assertions (roundtrip, no panic, bounded memory)</td></tr>
     <tr><td><strong>Cross-Format Roundtrip</strong></td><td>Go</td><td>Cowrie &rarr; JSON &rarr; Cowrie &rarr; JSON, verifying semantic preservation through format transitions</td></tr>
@@ -2155,7 +2148,7 @@ opts := DecodeOptions{
       <li>NaN: ALLOWED in Float32 and Float64</li>
       <li>+Inf/-Inf: ALLOWED in Float32 and Float64</li>
       <li>Rationale: binary format must faithfully represent IEEE 754</li>
-      <li>Tested across all 5 languages</li>
+      <li>Tested across all four languages</li>
     </ul>
   </div>
   <div class="compare-card">
@@ -2175,7 +2168,7 @@ opts := DecodeOptions{
 
 <p>In 17 days, Cowrie went from a fork to a hardened, multi-language binary codec with 26+ type tags, seven codec invariants, a robustness framework, and performance optimizations that approach zero-copy. The "SJ" magic bytes still anchor every message to its SJSON origins &mdash; a deliberate choice that prioritizes wire compatibility over branding.</p>
 
-<p>The code tells the story of a format designed for a specific moment: when LLMs, GNNs, and multimodal models all need to exchange structured data that JSON can't efficiently represent. Tensors, images, audio, attention masks, graph nodes and edges &mdash; these aren't abstract features. They're the data types of the AI stack, encoded in a format that five languages can produce and consume, byte-for-byte identical, with security limits and invariants tested at every layer.</p>
+<p>The code tells the story of a format designed for a specific moment: when LLMs, GNNs, and multimodal models all need to exchange structured data that JSON can't efficiently represent. Tensors, images, audio, attention masks, graph nodes and edges &mdash; these aren't abstract features. They're the data types of the AI stack, encoded in a format that four languages can produce and consume, byte-for-byte identical, with security limits and invariants tested at every layer.</p>
 
 <h3>The Commit Graph</h3>
 
@@ -2188,9 +2181,9 @@ opts := DecodeOptions{
       <thead><tr><th>Hash</th><th>Date</th><th>Domain</th><th>Message</th></tr></thead>
       <tbody>
         <tr><td><code>54a82c5</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>init: cowrie-final from sjson-final</td></tr>
-        <tr><td><code>2faf026</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>rename: sjson &rarr; cowrie across all 5 languages</td></tr>
+        <tr><td><code>2faf026</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>rename: sjson &rarr; cowrie across all implementations</td></tr>
         <tr><td><code>5d66f35</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>refactor(go): promote gen2 to root cowrie package</td></tr>
-        <tr><td><code>80d04e8</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>feat: integrate glyph codec (5 languages)</td></tr>
+        <tr><td><code>80d04e8</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>feat: integrate glyph codec (4 languages)</td></tr>
         <tr><td><code>bfbefdd</code></td><td>Feb 22</td><td style="color: var(--accent);">genesis</td><td>feat: carry forward Agent-GO codec packages</td></tr>
         <tr><td><code>b774096</code></td><td>Feb 22</td><td style="color: var(--pink);">security</td><td>security: fix 7 critical/high vulnerabilities</td></tr>
         <tr><td><code>157969f</code></td><td>Feb 22</td><td style="color: var(--cyan);">testing</td><td>test: add 16 security regression tests</td></tr>
@@ -2229,7 +2222,7 @@ opts := DecodeOptions{
 
 <h3>The Specification as Living Document</h3>
 
-<p>The <code>SPEC.md</code> file (328 lines at last count) serves as both documentation and contract. It defines canonical error codes that all five implementations must map to for fixture validation:</p>
+<p>The <code>SPEC.md</code> file (328 lines at last count) serves as both documentation and contract. It defines canonical error codes that all four implementations must map to for fixture validation:</p>
 
 <pre><code><span class="code-dim">// Canonical error codes from SPEC.md:</span>
 <span class="code-pink">ERR_INVALID_MAGIC</span>         <span class="code-dim">ERR_INVALID_VERSION</span>
@@ -2242,7 +2235,7 @@ opts := DecodeOptions{
 <span class="code-pink">ERR_UNSUPPORTED_COMPRESSION</span>
 <span class="code-pink">ERR_DECOMPRESSED_TOO_LARGE</span></code></pre>
 
-<p>Each implementation translates its native error types to these canonical codes when running fixture tests. A C <code>COWRIE_ERR_OVERFLOW</code> maps to <code>ERR_TOO_LARGE</code>; a Rust <code>CowrieError::DepthExceeded</code> maps to <code>ERR_TOO_DEEP</code>. The fixtures are the source of truth. If an implementation disagrees with the fixtures, the implementation is wrong.</p>
+<p>Each implementation translates its native error types to these canonical codes when running fixture tests. A Python <code>CowrieError.TOO_LARGE</code> maps to <code>ERR_TOO_LARGE</code>; a Rust <code>CowrieError::DepthExceeded</code> maps to <code>ERR_TOO_DEEP</code>. The fixtures are the source of truth. If an implementation disagrees with the fixtures, the implementation is wrong.</p>
 
 <h3>Looking Forward</h3>
 
@@ -2252,7 +2245,7 @@ opts := DecodeOptions{
 
 <p>Specifically: 16 bytes in the 0x10-0x1F range, 11 bytes in the 0x25-0x2F range, 2 bytes in the 0x33-0x34 range, 6 bytes in the 0x3A-0x3F range, and 16 bytes in the reserved 0xF0-0xFF range &mdash; totaling 51 unallocated tag values available for future extensions without any wire format changes.</p>
 
-<p>The 80% coverage threshold enforced across all five languages in CI ensures that new code ships with tests. The fuzz workflow runs continuously. The seven codec invariants serve as a regression net that catches cross-language drift before it reaches production.</p>
+<p>The 80% coverage threshold enforced across all four languages in CI ensures that new code ships with tests. The fuzz workflow runs continuously. The seven codec invariants serve as a regression net that catches cross-language drift before it reaches production.</p>
 
 <p>Cowrie is complete in the sense that matters: it can encode everything the AI stack needs today, and it has room to encode what it will need tomorrow. The "SJ" magic bytes will be there in every message, a quiet reminder that all codecs are forks of codecs, all the way down.</p>
 
@@ -2321,23 +2314,23 @@ opts := DecodeOptions{
 
 <h3>The CI Contract</h3>
 
-<p>The CI pipeline (<code>.github/workflows/ci.yml</code>) enforces the five-language contract on every commit. Five parallel jobs (Go, Python, TypeScript, Rust, C) run their respective test suites. A Fixtures job verifies cross-language compatibility. A Publish Gate job aggregates the results &mdash; if any job fails, the gate fails, and the commit cannot merge to main:</p>
+<p>The CI pipeline (<code>.github/workflows/ci.yml</code>) enforces the four-language contract on every commit. Four parallel jobs (Go, Python, TypeScript, Rust) run their respective test suites. A Fixtures job verifies cross-language compatibility. A Publish Gate job aggregates the results &mdash; if any job fails, the gate fails, and the commit cannot merge to main:</p>
 
 <pre><code><span class="code-accent">Publish Gate v2</span>:
-  needs: [go, python, typescript, rust, c, fixtures]
+  needs: [go, python, typescript, rust, fixtures]
   if: always()
   <span class="code-dim"># Fails if ANY dependency failed</span>
   <span class="code-dim"># Required status check on main branch</span></code></pre>
 
-<p>Coverage thresholds are enforced at 80% across all five languages, using language-appropriate tools: <code>go tool cover</code> (excluding <code>cmd/</code>), <code>pytest-cov</code> for Python, <code>c8</code> (V8 native) for TypeScript, <code>cargo-tarpaulin</code> for Rust, and <code>gcov</code> for C. Admin bypass lets pushes go through, but CI still runs &mdash; the gate can fail retroactively.</p>
+<p>Coverage thresholds are enforced at 80% across all four languages, using language-appropriate tools: <code>go tool cover</code> (excluding <code>cmd/</code>), <code>pytest-cov</code> for Python, <code>c8</code> (V8 native) for TypeScript, and <code>cargo-tarpaulin</code> for Rust. Admin bypass lets pushes go through, but CI still runs &mdash; the gate can fail retroactively.</p>
 
 
 <!-- ════════════════════════════════════════════════════════════ -->
 <!-- COLOPHON                                                   -->
 <!-- ════════════════════════════════════════════════════════════ -->
 <div style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.85rem;">
-  <p><strong style="color: var(--accent);">Colophon.</strong> This document was generated entirely from forensic analysis of the Cowrie repository at <code>github.com/Neumenon/cowrie</code>. Sources: 32 git commits (<code>54a82c5</code> through <code>6ad5635</code>), <code>SPEC.md</code>, <code>types.go</code>, <code>encode.go</code>, <code>decode.go</code>, <code>encode_writer.go</code>, <code>schema.go</code>, <code>gen1/gen1.go</code>, and corresponding implementations in Python, Rust, C, and TypeScript. No external documentation, blog posts, or design docs were consulted.</p>
-  <p style="margin-top: 0.5rem;">Commit range: <code>54a82c5..6ad5635</code> | 17 calendar days | 32 commits | 5 languages | 14,000+ lines</p>
+  <p><strong style="color: var(--accent);">Colophon.</strong> This document was generated entirely from forensic analysis of the Cowrie repository at <code>github.com/Neumenon/cowrie</code>. Sources: 32 git commits (<code>54a82c5</code> through <code>6ad5635</code>), <code>SPEC.md</code>, <code>types.go</code>, <code>encode.go</code>, <code>decode.go</code>, <code>encode_writer.go</code>, <code>schema.go</code>, <code>gen1/gen1.go</code>, and corresponding implementations in Python, Rust, and TypeScript. No external documentation, blog posts, or design docs were consulted.</p>
+  <p style="margin-top: 0.5rem;">Commit range: <code>54a82c5..6ad5635</code> | 17 calendar days | 32 commits | 4 languages | 12,000+ lines</p>
 </div>
 
 <!-- ════════════════════════════════════════════════════════════ -->
