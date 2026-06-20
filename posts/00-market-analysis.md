@@ -119,7 +119,7 @@ Small but growing fast. GNN adoption is accelerating in drug discovery, social n
 - Gen1's niche (simple, no header, low overhead): maybe 5% → $12M
 - **SAM: $12M**
 
-Gen1 specifically — simple binary, single-pass, predictable latency, tiny code footprint. The C implementation makes this feasible for embedded targets.
+Gen1 specifically — simple binary, single-pass, predictable latency, tiny code footprint. Its small code footprint makes this feasible for embedded targets.
 
 ### Summary
 
@@ -129,7 +129,7 @@ Gen1 specifically — simple binary, single-pass, predictable latency, tiny code
 | API Serialization | $12-24M | Dictionary coding, schemaless |
 | Log/Event Pipelines | $90-130M | Dictionary coding (47-95% reduction) |
 | Graph ML / GNN | $50-80M | Native graph wire types |
-| Edge/IoT | $12M | Gen1 simplicity, C impl |
+| Edge/IoT | $12M | Gen1 simplicity, small footprint |
 | **Total** | **$240M - $850M** | |
 
 Note: These are addressable markets for the *value delivered*, not for software licensing. As an OSS project, Cowrie's monetization path would be enterprise support, managed services, or being the serialization layer in a commercial ML platform.
@@ -225,10 +225,10 @@ Note: These are addressable markets for the *value delivered*, not for software 
 - Protobuf's type safety is valued by platform teams managing 100+ services
 
 **New unlocks (where Cowrie still adds value)**:
-- **Standardization**: Replace 3-5 different custom binary formats with one that works across all 5 major languages
+- **Standardization**: Replace 3-5 different custom binary formats with one that works across all 4 major languages
 - **GNN teams**: Even large labs often lack a standard graph wire format — each GNN project invents its own
 - **ML experiment pipeline**: Research code (Python) can now send tensors directly to production services (Go/Rust) without the "productionization" serialization step
-- **Edge deployment**: Gen1 + C implementation for on-device inference with server-side Go/Rust
+- **Edge deployment**: Gen1 for on-device inference with server-side Go/Rust
 
 **Verdict**: $1-5M/yr potential savings, but adoption friction is highest here. The most likely entry point is a specific team (GNN, feature store, edge) adopting it for a targeted use case, then spreading organically.
 

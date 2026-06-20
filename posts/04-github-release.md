@@ -9,17 +9,16 @@ Initial public release of Cowrie — a multi-language binary codec for structure
 - **Gen1**: Simple binary JSON encoding — core types, no header, single-pass encode/decode. A 46-byte JSON object encodes to 35 bytes (76%).
 - **Gen2**: Dictionary-coded keys, gzip/zstd compression, ML extensions, graph types. 1,000 repeated-schema objects go from 48KB JSON to 23KB (47%).
 
-### 5 Language Implementations
+### 4 Language Implementations
 
 All implementations are feature-complete and pass the same 34 cross-language test fixtures.
 
 | Language | Package | Version |
 |----------|---------|---------|
-| Go | `github.com/Neumenon/cowrie` | v2.0.0 |
+| Go | `github.com/Neumenon/cowrie/go/v2` | v2.0.0 |
 | Rust | `cowrie-rs` | 2.0.0 |
 | Python | `cowrie-py` | 2.0.0 |
 | TypeScript | `cowrie-codec` | 2.0.0 |
-| C | Source (CMake) | v2.0.0 |
 
 ### ML Extension Types (Gen2)
 
@@ -36,7 +35,7 @@ All implementations are feature-complete and pass the same 34 cross-language tes
 ### CLI Tool
 
 ```bash
-go install github.com/Neumenon/cowrie/cmd/cowrie@latest
+go install github.com/Neumenon/cowrie/go/v2/cmd/cowrie@latest
 
 echo '{"name":"Alice","age":30}' | cowrie encode --gen2 > data.cowrie
 cowrie decode < data.cowrie
@@ -62,7 +61,7 @@ cowrie info < data.cowrie
 
 ```bash
 # Go
-go get github.com/Neumenon/cowrie@v2.0.0
+go get github.com/Neumenon/cowrie/go/v2@v2.0.0
 
 # Rust
 cargo add cowrie-rs@2.0.0
@@ -72,10 +71,6 @@ pip install cowrie-py==2.0.0
 
 # TypeScript
 npm install cowrie-codec@2.0.0
-
-# C
-git clone https://github.com/Neumenon/cowrie.git
-cd cowrie/c && mkdir build && cd build && cmake .. && make
 ```
 
 ## Cross-Language Test Fixtures

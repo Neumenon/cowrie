@@ -47,7 +47,7 @@ testpaths = ["tests"]
 # Only build CPython (C extension uses CPython API)
 build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
 skip = "*-musllinux_i686"
-test-command = "python -c \"from cowrie.gen2 import _HAS_NATIVE; assert _HAS_NATIVE\""
+test-command = "COWRIE_REQUIRE_NATIVE=1 python {project}/python/scripts/wheel_smoke.py"
 
 [tool.cibuildwheel.linux]
 before-build = "yum install -y zlib-devel 2>/dev/null || apk add zlib-dev 2>/dev/null || true"

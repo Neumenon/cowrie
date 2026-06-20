@@ -138,9 +138,9 @@ jobs:
           CIBW_BEFORE_BUILD_LINUX: 'yum install -y zlib-devel || apk add zlib-dev'
           CIBW_BEFORE_BUILD_MACOS: 'brew install zlib || true'
           # Windows: zlib bundled with Python, should work
-          # Test the wheel
+          # Test the wheel — conformance smoke (round-trips + golden bytes + malformed input)
           CIBW_TEST_COMMAND: >
-            python -c "from cowrie.gen2 import _HAS_NATIVE; assert _HAS_NATIVE, 'C extension not loaded'"
+            COWRIE_REQUIRE_NATIVE=1 python {project}/python/scripts/wheel_smoke.py
           # Build numpy for build-time headers
           CIBW_BUILD_FRONTEND: 'pip'
           # macOS: build universal2 (x86_64 + arm64)

@@ -36,7 +36,7 @@ Hi HN, I built Cowrie to solve a specific problem: moving tensors and structured
 
 **Try it:**
 ```bash
-go install github.com/Neumenon/cowrie/cmd/cowrie@latest
+go install github.com/Neumenon/cowrie/go/v2/cmd/cowrie@latest
 echo '{"name":"Alice","scores":[1.0,2.0,3.0]}' | cowrie encode --gen2 | cowrie decode
 ```
 

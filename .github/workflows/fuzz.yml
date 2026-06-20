@@ -22,16 +22,10 @@ jobs:
 
       - name: Fuzz MasterStreamReader
         run: cd go && go test -fuzz=FuzzMasterStreamReader_Next -fuzztime=5m ./codec/
-        continue-on-error: true
-
       - name: Fuzz DecodeBytes
         run: cd go && go test -fuzz=FuzzDecodeBytes -fuzztime=5m ./codec/
-        continue-on-error: true
-
       - name: Fuzz FastEncode
         run: cd go && go test -fuzz=FuzzFastEncode -fuzztime=5m ./codec/
-        continue-on-error: true
-
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -53,12 +47,8 @@ jobs:
 
       - name: Fuzz decode
         run: cd rust && cargo fuzz run fuzz_decode -- -max_total_time=300
-        continue-on-error: true
-
       - name: Fuzz roundtrip
         run: cd rust && cargo fuzz run fuzz_roundtrip -- -max_total_time=300
-        continue-on-error: true
-
       - name: Upload crash artifacts
         if: failure()
         uses: actions/upload-artifact@v4
