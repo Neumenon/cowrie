@@ -142,6 +142,11 @@ def python_decode(path, gen=2):
         return None, None, f"not implemented: {exc}", True
     except Exception as exc:
         msg = str(exc)
+        # A missing OPTIONAL compression codec (e.g. zstd not installed in this
+        # environment) is outside the Python decoder's scope, not a parity failure:
+        # skip the Python cross-check (Go still validates the fixture).
+        if "not available" in msg.lower() or "not installed" in msg.lower():
+            return None, None, f"optional codec unavailable: {msg}", True
         # ValueError signals a decode error (invalid magic, version, tag, etc.)
         return False, None, msg, False
 
