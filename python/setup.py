@@ -1,9 +1,10 @@
 #!/usr/bin/env python
-"""Build script for cowrie-py with optional C extension.
+"""Build script for cowrie-py with an optional Cython extension.
 
-The C extension provides 10x faster encode/decode for common types.
-If compilation fails (no C compiler, missing zlib, etc.), cowrie falls
-back to pure Python automatically — no functionality is lost.
+cowrie-py is pure Python by default. The optional Cython extension can
+accelerate encode/decode where it builds, but it is best-effort: if
+compilation fails (no compiler, missing zlib, or a NumPy C-ABI mismatch),
+cowrie falls back to pure Python automatically — no functionality is lost.
 
 C sources are bundled in csrc/ (self-contained — the standalone c/
 implementation was removed; csrc/ is now the canonical Cython backend).

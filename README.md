@@ -55,7 +55,7 @@ makes the output suitable for content-addressable storage and cross-service cach
 
 ```bash
 # Go
-go get github.com/Neumenon/cowrie/go/v2@v2.0.0
+go get github.com/Neumenon/cowrie/go/v2@latest
 
 # Python
 pip install cowrie-py

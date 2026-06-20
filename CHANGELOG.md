@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.1.2 (2026-06-20)
+
 ### Removed — Glyph pulled out into its own repository
 
 The embedded Glyph text format (`go/glyph/`, the `glyph` and `bench` CLIs, and
