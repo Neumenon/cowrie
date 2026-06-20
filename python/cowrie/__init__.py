@@ -29,7 +29,7 @@ Feature Comparison
 | Graph types | 6 | Adjlist |
 """
 
-__version__ = "2.1.1"
+__version__ = "2.1.2"
 
 from . import gen1
 from . import gen2
