@@ -56,15 +56,19 @@ pub fn schema_equals(a: &Value, b: &Value) -> bool {
 
         (Value::Array(av), Value::Array(bv)) => {
             av.len() == bv.len()
-                && av.iter().zip(bv.iter()).all(|(ai, bi)| schema_equals(ai, bi))
+                && av
+                    .iter()
+                    .zip(bv.iter())
+                    .all(|(ai, bi)| schema_equals(ai, bi))
         }
 
         (Value::Object(ao), Value::Object(bo)) => {
             // BTreeMap iterates in sorted key order — same canonical order as hash_schema
             ao.len() == bo.len()
-                && ao.iter().zip(bo.iter()).all(|((ak, av), (bk, bv))| {
-                    ak == bk && schema_equals(av, bv)
-                })
+                && ao
+                    .iter()
+                    .zip(bo.iter())
+                    .all(|((ak, av), (bk, bv))| ak == bk && schema_equals(av, bv))
         }
 
         (Value::Tensor(at), Value::Tensor(bt)) => {
@@ -140,9 +144,17 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
     h = fnv_hash_byte(h, value_type_ord(value));
 
     match value {
-        Value::Null | Value::Bool(_) | Value::Int(_) | Value::Uint(_) |
-        Value::Float(_) | Value::String(_) | Value::Bytes(_) |
-        Value::Decimal(_) | Value::DateTime(_) | Value::Uuid(_) | Value::BigInt(_) => {
+        Value::Null
+        | Value::Bool(_)
+        | Value::Int(_)
+        | Value::Uint(_)
+        | Value::Float(_)
+        | Value::String(_)
+        | Value::Bytes(_)
+        | Value::Decimal(_)
+        | Value::DateTime(_)
+        | Value::Uuid(_)
+        | Value::BigInt(_) => {
             // Scalar types: type tag is sufficient
         }
 
@@ -188,8 +200,11 @@ fn hash_schema(value: &Value, mut h: u64) -> u64 {
 
         // Graph types and bitmask: the Go reference hashes only the type ordinal
         // (no structural recursion), so match that for cross-language parity.
-        Value::Node(_) | Value::Edge(_) | Value::NodeBatch(_)
-        | Value::EdgeBatch(_) | Value::Bitmask { .. } => {}
+        Value::Node(_)
+        | Value::Edge(_)
+        | Value::NodeBatch(_)
+        | Value::EdgeBatch(_)
+        | Value::Bitmask { .. } => {}
     }
 
     h
@@ -298,10 +313,7 @@ mod tests {
             ("age", Value::Int(25)),
         ]);
 
-        assert_eq!(
-            schema_fingerprint64(&obj1),
-            schema_fingerprint64(&obj2)
-        );
+        assert_eq!(schema_fingerprint64(&obj1), schema_fingerprint64(&obj2));
     }
 
     #[test]
@@ -309,23 +321,14 @@ mod tests {
         let obj1 = Value::object(vec![("name", Value::String("test".into()))]);
         let obj2 = Value::object(vec![("id", Value::String("test".into()))]);
 
-        assert_ne!(
-            schema_fingerprint64(&obj1),
-            schema_fingerprint64(&obj2)
-        );
+        assert_ne!(schema_fingerprint64(&obj1), schema_fingerprint64(&obj2));
     }
 
     #[test]
     fn test_schema_equals() {
-        let obj1 = Value::object(vec![
-            ("x", Value::Int(1)),
-            ("y", Value::Int(2)),
-        ]);
+        let obj1 = Value::object(vec![("x", Value::Int(1)), ("y", Value::Int(2))]);
 
-        let obj2 = Value::object(vec![
-            ("x", Value::Int(100)),
-            ("y", Value::Int(200)),
-        ]);
+        let obj2 = Value::object(vec![("x", Value::Int(100)), ("y", Value::Int(200))]);
 
         assert!(schema_equals(&obj1, &obj2));
     }
@@ -345,44 +348,39 @@ mod tests {
             ("name", Value::String("Bob".into())),
             ("age", Value::Int(99)),
         ]);
-        assert!(schema_equals(&a, &b), "same fields+types but different values should be schema-equal");
+        assert!(
+            schema_equals(&a, &b),
+            "same fields+types but different values should be schema-equal"
+        );
     }
 
     #[test]
     fn test_schema_equals_structural_renamed_field() {
         // Field renamed → schemas must differ
-        let a = Value::object(vec![
-            ("name", Value::String("Alice".into())),
-        ]);
-        let b = Value::object(vec![
-            ("alias", Value::String("Alice".into())),
-        ]);
-        assert!(!schema_equals(&a, &b), "renamed field should make schemas unequal");
+        let a = Value::object(vec![("name", Value::String("Alice".into()))]);
+        let b = Value::object(vec![("alias", Value::String("Alice".into()))]);
+        assert!(
+            !schema_equals(&a, &b),
+            "renamed field should make schemas unequal"
+        );
     }
 
     #[test]
     fn test_schema_equals_structural_type_change() {
         // Field type changed → schemas must differ
-        let a = Value::object(vec![
-            ("count", Value::Int(1)),
-        ]);
-        let b = Value::object(vec![
-            ("count", Value::Float(1.0)),
-        ]);
-        assert!(!schema_equals(&a, &b), "type change on field should make schemas unequal");
+        let a = Value::object(vec![("count", Value::Int(1))]);
+        let b = Value::object(vec![("count", Value::Float(1.0))]);
+        assert!(
+            !schema_equals(&a, &b),
+            "type change on field should make schemas unequal"
+        );
     }
 
     #[test]
     fn test_schema_fingerprint_equal_agrees_with_schema_equals() {
         // On matching schemas, both functions agree
-        let a = Value::object(vec![
-            ("x", Value::Int(1)),
-            ("y", Value::Int(2)),
-        ]);
-        let b = Value::object(vec![
-            ("x", Value::Int(99)),
-            ("y", Value::Int(0)),
-        ]);
+        let a = Value::object(vec![("x", Value::Int(1)), ("y", Value::Int(2))]);
+        let b = Value::object(vec![("x", Value::Int(99)), ("y", Value::Int(0))]);
         assert!(schema_equals(&a, &b));
         assert!(schema_fingerprint_equal(&a, &b));
     }
@@ -390,17 +388,26 @@ mod tests {
     #[test]
     fn test_schema_equals_structural_nested() {
         // Nested objects: structural equality must recurse
-        let a = Value::object(vec![
-            ("inner", Value::object(vec![("val", Value::Bool(true))])),
-        ]);
-        let b = Value::object(vec![
-            ("inner", Value::object(vec![("val", Value::Bool(false))])),
-        ]);
-        let c = Value::object(vec![
-            ("inner", Value::object(vec![("other", Value::Bool(true))])),
-        ]);
-        assert!(schema_equals(&a, &b), "same nested field names should be equal");
-        assert!(!schema_equals(&a, &c), "different nested field names should be unequal");
+        let a = Value::object(vec![(
+            "inner",
+            Value::object(vec![("val", Value::Bool(true))]),
+        )]);
+        let b = Value::object(vec![(
+            "inner",
+            Value::object(vec![("val", Value::Bool(false))]),
+        )]);
+        let c = Value::object(vec![(
+            "inner",
+            Value::object(vec![("other", Value::Bool(true))]),
+        )]);
+        assert!(
+            schema_equals(&a, &b),
+            "same nested field names should be equal"
+        );
+        assert!(
+            !schema_equals(&a, &c),
+            "different nested field names should be unequal"
+        );
     }
 
     #[test]
@@ -420,14 +427,31 @@ mod tests {
         use crate::gen2::types::{AudioData, AudioEncoding, ExtData};
         let d = vec![1u8, 2, 3];
         let a2 = Value::Audio(AudioData {
-            encoding: AudioEncoding::PcmInt16, sample_rate: 44100, channels: 2, data: d.clone(),
+            encoding: AudioEncoding::PcmInt16,
+            sample_rate: 44100,
+            channels: 2,
+            data: d.clone(),
         });
         let a1 = Value::Audio(AudioData {
-            encoding: AudioEncoding::PcmInt16, sample_rate: 44100, channels: 1, data: d.clone(),
+            encoding: AudioEncoding::PcmInt16,
+            sample_rate: 44100,
+            channels: 1,
+            data: d.clone(),
         });
-        let ext = Value::Ext(ExtData { type_id: 99, payload: d.clone() });
-        assert_eq!(schema_fingerprint32(&a2), 3129750488, "audio ch=2 must match Go");
-        assert_eq!(schema_fingerprint32(&a1), 3129751793, "audio ch=1 must match Go");
+        let ext = Value::Ext(ExtData {
+            type_id: 99,
+            payload: d.clone(),
+        });
+        assert_eq!(
+            schema_fingerprint32(&a2),
+            3129750488,
+            "audio ch=2 must match Go"
+        );
+        assert_eq!(
+            schema_fingerprint32(&a1),
+            3129751793,
+            "audio ch=1 must match Go"
+        );
         assert_ne!(schema_fingerprint32(&a1), schema_fingerprint32(&a2));
         assert_eq!(schema_fingerprint32(&ext), 2917281034, "ext must match Go");
     }

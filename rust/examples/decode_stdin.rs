@@ -1,8 +1,8 @@
 //! Decode cowrie binary from stdin, emit JSON to stdout.
 //! Used by the differential testing runner.
 
-use std::io::Read;
 use cowrie_rs::gen2::{decode, to_json};
+use std::io::Read;
 
 fn main() {
     let mut data = Vec::new();

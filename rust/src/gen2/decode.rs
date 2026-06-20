@@ -1,7 +1,10 @@
 //! Cowrie decoder.
 
-use super::types::{Value, CowrieError, DType, TensorData, TensorRef, ImageFormat, ImageData, AudioEncoding, AudioData, ExtData, NodeData, EdgeData, NodeBatchData, EdgeBatchData};
 use super::tags;
+use super::types::{
+    AudioData, AudioEncoding, CowrieError, DType, EdgeBatchData, EdgeData, ExtData, ImageData,
+    ImageFormat, NodeBatchData, NodeData, TensorData, TensorRef, Value,
+};
 use crate::{MAGIC, VERSION};
 use std::collections::BTreeMap;
 
@@ -34,12 +37,12 @@ impl Default for DecodeOptions {
     fn default() -> Self {
         Self {
             max_depth: 1_000,
-            max_array_len: 1_000_000,     // Tightened: was 100M
-            max_object_len: 1_000_000,    // Tightened: was 10M
-            max_string_len: 10_000_000,   // Tightened: was 500M
-            max_bytes_len: 50_000_000,    // Tightened: was 1G
-            max_ext_len: 1_000_000,       // Tightened: was 100M
-            max_dict_len: 1_000_000,      // Tightened: was 10M
+            max_array_len: 1_000_000,   // Tightened: was 100M
+            max_object_len: 1_000_000,  // Tightened: was 10M
+            max_string_len: 10_000_000, // Tightened: was 500M
+            max_bytes_len: 50_000_000,  // Tightened: was 1G
+            max_ext_len: 1_000_000,     // Tightened: was 100M
+            max_dict_len: 1_000_000,    // Tightened: was 10M
             max_rank: 32,
         }
     }
@@ -269,7 +272,12 @@ impl<'a> Reader<'a> {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
-                Value::Image(ImageData { format, width, height, data })
+                Value::Image(ImageData {
+                    format,
+                    width,
+                    height,
+                    data,
+                })
             }
             tags::AUDIO => {
                 let encoding_byte = self.read_byte()?;
@@ -281,7 +289,12 @@ impl<'a> Reader<'a> {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(data_len)?;
-                Value::Audio(AudioData { encoding, sample_rate, channels, data })
+                Value::Audio(AudioData {
+                    encoding,
+                    sample_rate,
+                    channels,
+                    data,
+                })
             }
             // Graph types
             tags::NODE => {
@@ -472,7 +485,12 @@ impl<'a> Reader<'a> {
         let edge_type = self.read_string()?;
         // Properties
         let props = self.decode_props()?;
-        Ok(EdgeData { from, to, edge_type, props })
+        Ok(EdgeData {
+            from,
+            to,
+            edge_type,
+            props,
+        })
     }
 
     /// Decode dictionary-coded properties.
@@ -487,7 +505,8 @@ impl<'a> Reader<'a> {
             if key_idx >= self.dict.len() {
                 return Err(CowrieError::InvalidData(format!(
                     "dictionary index {} out of range (dict size: {})",
-                    key_idx, self.dict.len()
+                    key_idx,
+                    self.dict.len()
                 )));
             }
             let key = self.dict[key_idx].clone();
@@ -515,21 +534,24 @@ fn dtype_elem_size(dtype: DType) -> Option<u64> {
         DType::Uint16 => Some(2),
         DType::Uint32 => Some(4),
         DType::Uint64 => Some(8),
+        // Bool stores one byte per element; bit-packed booleans use the Bitmask type.
+        DType::Bool => Some(1),
         // Sub-byte packed types: skip validation
-        DType::Bool | DType::QINT4 | DType::QINT2 | DType::QINT3
-        | DType::Ternary | DType::Binary => None,
+        DType::QINT4 | DType::QINT2 | DType::QINT3 | DType::Ternary | DType::Binary => None,
     }
 }
 
 /// Computes the expected byte length for a tensor with the given dtype and shape.
 /// Returns Some(expected) for byte-aligned dtypes with overflow-safe product.
 /// Returns None for sub-byte dtypes or when the product overflows u64.
-/// Rank-0 tensors and tensors with any zero dimension produce Some(0).
-fn tensor_expected_bytes(dtype: DType, shape: &[u64]) -> Option<usize> {
+/// A rank-0 tensor (no dims) is a scalar — one element; a zero dimension yields
+/// an empty 0-byte tensor.
+pub(crate) fn tensor_expected_bytes(dtype: DType, shape: &[u64]) -> Option<usize> {
     let elem_size = dtype_elem_size(dtype)?;
 
+    // Rank-0 (no dims) is a scalar: one element. A zero dimension is handled below.
     if shape.is_empty() {
-        return Some(0);
+        return Some(elem_size as usize);
     }
 
     let mut product: u64 = 1;
@@ -583,13 +605,11 @@ mod tests {
         let val = Value::object(vec![
             ("name", Value::String("test".into())),
             ("count", Value::Int(42)),
-            ("scores", Value::Array(vec![
-                Value::Float(1.1),
-                Value::Float(2.2),
-            ])),
-            ("nested", Value::object(vec![
-                ("inner", Value::Bool(true)),
-            ])),
+            (
+                "scores",
+                Value::Array(vec![Value::Float(1.1), Value::Float(2.2)]),
+            ),
+            ("nested", Value::object(vec![("inner", Value::Bool(true))])),
         ]);
 
         let encoded = encode(&val).expect("encode");
@@ -679,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_roundtrip_node_batch() {
-        use super::super::types::{NodeData, NodeBatchData};
+        use super::super::types::{NodeBatchData, NodeData};
 
         let nodes = vec![
             NodeData {
@@ -867,8 +887,8 @@ mod tests {
         buf.push(0); // dict len = 0
         buf.push(0x20); // TENSOR tag
         buf.push(0x01); // dtype = Float32
-        buf.push(33);   // rank = 33 (exceeds MAX_RANK=32)
-        // Shape: 33 dimensions all = 1
+        buf.push(33); // rank = 33 (exceeds MAX_RANK=32)
+                      // Shape: 33 dimensions all = 1
         buf.extend(std::iter::repeat_n(1u8, 33)); // uvarint 1 per dimension
         buf.push(0); // data len = 0
 
@@ -887,10 +907,10 @@ mod tests {
         buf.push(0); // dict len = 0
         buf.push(0x20); // TENSOR tag
         buf.push(0x01); // dtype = Float32
-        buf.push(32);   // rank = 32 (exactly MAX_RANK)
-        // Shape: 32 dimensions all = 1
+        buf.push(32); // rank = 32 (exactly MAX_RANK)
+                      // Shape: 32 dimensions all = 1
         buf.extend(std::iter::repeat_n(1u8, 32)); // uvarint 1 per dimension
-        // data_len = 4 bytes (1 float32 element = product of all dims * 4)
+                                                  // data_len = 4 bytes (1 float32 element = product of all dims * 4)
         buf.push(4); // uvarint 4
         buf.extend_from_slice(&1.0f32.to_le_bytes());
 
@@ -929,7 +949,11 @@ mod tests {
         assert!(result.is_err(), "dataLen mismatch should be rejected");
         match result {
             Err(CowrieError::InvalidData(msg)) => {
-                assert!(msg.contains("dataLen"), "error should mention dataLen: {}", msg);
+                assert!(
+                    msg.contains("dataLen"),
+                    "error should mention dataLen: {}",
+                    msg
+                );
             }
             other => panic!("expected InvalidData, got {:?}", other),
         }
@@ -940,7 +964,11 @@ mod tests {
         // Float32 tensor with shape [2,3] = 6 elements = 24 bytes.
         let buf = make_tensor_buf(0x01, &[2, 3], &[0u8; 24]);
         let result = decode(&buf);
-        assert!(result.is_ok(), "valid tensor should be accepted: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "valid tensor should be accepted: {:?}",
+            result
+        );
         match result.unwrap() {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 3]);
@@ -956,16 +984,32 @@ mod tests {
         // Provide only 16 bytes (2 elements).
         let buf = make_tensor_buf(0x0C, &[3], &[0u8; 16]);
         let result = decode(&buf);
-        assert!(result.is_err(), "float64 dataLen mismatch should be rejected");
+        assert!(
+            result.is_err(),
+            "float64 dataLen mismatch should be rejected"
+        );
     }
 
     #[test]
     fn test_tensor_sub_byte_dtype_not_validated() {
-        // Bool dtype (0x0D) is sub-byte: validation is skipped, any data len is accepted.
-        // shape [4] with 1 byte of data should pass (packing not validated).
-        let buf = make_tensor_buf(0x0D, &[4], &[0b1010_1010u8]);
-        let result = decode(&buf);
-        assert!(result.is_ok(), "sub-byte dtype should skip shape validation");
+        // QINT4 (0x10) is genuinely sub-byte: validation is skipped, any data len passes.
+        let buf = make_tensor_buf(0x10, &[8], &[0xAB, 0xCD, 0xEF, 0x01]);
+        assert!(
+            decode(&buf).is_ok(),
+            "sub-byte dtype should skip shape validation"
+        );
+    }
+
+    #[test]
+    fn test_tensor_bool_validated() {
+        // Bool (0x0D) is one byte per element now: shape [4] needs exactly 4 bytes.
+        let bad = make_tensor_buf(0x0D, &[4], &[0b1010_1010u8]);
+        assert!(
+            decode(&bad).is_err(),
+            "bool[4] with 1 byte should be rejected"
+        );
+        let good = make_tensor_buf(0x0D, &[4], &[1, 0, 1, 0]);
+        assert!(decode(&good).is_ok(), "bool[4] with 4 bytes should pass");
     }
 
     #[test]
@@ -997,24 +1041,35 @@ mod tests {
         //   -256       → [0xFF, 0x00]
         //  large negative (-2^63) → [0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
         let cases: Vec<(&str, Vec<u8>)> = vec![
-            ("zero",         vec![0x00]),
-            ("one",          vec![0x01]),
-            ("127",          vec![0x7F]),
-            ("128",          vec![0x00, 0x80]),
-            ("255",          vec![0x00, 0xFF]),
-            ("-1",           vec![0xFF]),
-            ("-128",         vec![0x80]),
-            ("-129",         vec![0xFF, 0x7F]),
-            ("-256",         vec![0xFF, 0x00]),
-            ("-2^63",        vec![0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
-            ("large-pos",    vec![0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]),
+            ("zero", vec![0x00]),
+            ("one", vec![0x01]),
+            ("127", vec![0x7F]),
+            ("128", vec![0x00, 0x80]),
+            ("255", vec![0x00, 0xFF]),
+            ("-1", vec![0xFF]),
+            ("-128", vec![0x80]),
+            ("-129", vec![0xFF, 0x7F]),
+            ("-256", vec![0xFF, 0x00]),
+            (
+                "-2^63",
+                vec![0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            ),
+            (
+                "large-pos",
+                vec![0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+            ),
         ];
 
         for (label, bytes) in cases {
             let val = Value::BigInt(bytes.clone());
             let encoded = encode(&val).unwrap_or_else(|_| panic!("encode {}", label));
             let decoded = decode(&encoded).unwrap_or_else(|_| panic!("decode {}", label));
-            assert_eq!(decoded, Value::BigInt(bytes), "round-trip failed for {}", label);
+            assert_eq!(
+                decoded,
+                Value::BigInt(bytes),
+                "round-trip failed for {}",
+                label
+            );
         }
     }
 
@@ -1047,15 +1102,23 @@ mod tests {
         // depth=5 should work with max_depth=10
         let val = nested_array(5);
         let encoded = encode(&val).expect("encode");
-        let opts = DecodeOptions { max_depth: 10, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_depth: 10,
+            ..DecodeOptions::default()
+        };
         let decoded = decode_with_options(&encoded, &opts);
         assert!(decoded.is_ok(), "depth 5 should pass with max_depth=10");
 
         // depth=5 should fail with max_depth=3
-        let opts_tight = DecodeOptions { max_depth: 3, ..DecodeOptions::default() };
+        let opts_tight = DecodeOptions {
+            max_depth: 3,
+            ..DecodeOptions::default()
+        };
         let result = decode_with_options(&encoded, &opts_tight);
-        assert!(matches!(result, Err(CowrieError::TooDeep)),
-            "depth 5 should fail with max_depth=3");
+        assert!(
+            matches!(result, Err(CowrieError::TooDeep)),
+            "depth 5 should fail with max_depth=3"
+        );
     }
 
     #[test]
@@ -1064,12 +1127,21 @@ mod tests {
         let encoded = encode(&val).expect("encode");
 
         // max_array_len=3: should pass
-        let opts = DecodeOptions { max_array_len: 3, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_array_len: 3,
+            ..DecodeOptions::default()
+        };
         assert!(decode_with_options(&encoded, &opts).is_ok());
 
         // max_array_len=2: should fail
-        let opts_tight = DecodeOptions { max_array_len: 2, ..DecodeOptions::default() };
-        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+        let opts_tight = DecodeOptions {
+            max_array_len: 2,
+            ..DecodeOptions::default()
+        };
+        assert!(matches!(
+            decode_with_options(&encoded, &opts_tight),
+            Err(CowrieError::TooLarge)
+        ));
     }
 
     #[test]
@@ -1082,12 +1154,21 @@ mod tests {
         let encoded = encode(&val).expect("encode");
 
         // max_object_len=3: should pass
-        let opts = DecodeOptions { max_object_len: 3, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_object_len: 3,
+            ..DecodeOptions::default()
+        };
         assert!(decode_with_options(&encoded, &opts).is_ok());
 
         // max_object_len=2: should fail
-        let opts_tight = DecodeOptions { max_object_len: 2, ..DecodeOptions::default() };
-        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+        let opts_tight = DecodeOptions {
+            max_object_len: 2,
+            ..DecodeOptions::default()
+        };
+        assert!(matches!(
+            decode_with_options(&encoded, &opts_tight),
+            Err(CowrieError::TooLarge)
+        ));
     }
 
     #[test]
@@ -1096,12 +1177,21 @@ mod tests {
         let encoded = encode(&val).expect("encode");
 
         // max_string_len=10: should pass
-        let opts = DecodeOptions { max_string_len: 10, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_string_len: 10,
+            ..DecodeOptions::default()
+        };
         assert!(decode_with_options(&encoded, &opts).is_ok());
 
         // max_string_len=3: should fail
-        let opts_tight = DecodeOptions { max_string_len: 3, ..DecodeOptions::default() };
-        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+        let opts_tight = DecodeOptions {
+            max_string_len: 3,
+            ..DecodeOptions::default()
+        };
+        assert!(matches!(
+            decode_with_options(&encoded, &opts_tight),
+            Err(CowrieError::TooLarge)
+        ));
     }
 
     #[test]
@@ -1110,12 +1200,21 @@ mod tests {
         let encoded = encode(&val).expect("encode");
 
         // max_bytes_len=10: should pass
-        let opts = DecodeOptions { max_bytes_len: 10, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_bytes_len: 10,
+            ..DecodeOptions::default()
+        };
         assert!(decode_with_options(&encoded, &opts).is_ok());
 
         // max_bytes_len=3: should fail
-        let opts_tight = DecodeOptions { max_bytes_len: 3, ..DecodeOptions::default() };
-        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+        let opts_tight = DecodeOptions {
+            max_bytes_len: 3,
+            ..DecodeOptions::default()
+        };
+        assert!(matches!(
+            decode_with_options(&encoded, &opts_tight),
+            Err(CowrieError::TooLarge)
+        ));
     }
 
     #[test]
@@ -1130,33 +1229,51 @@ mod tests {
         buf.push(0); // dict len = 0
         buf.push(0x20); // TENSOR tag
         buf.push(0x01); // dtype = Float32
-        buf.push(5);    // rank = 5
+        buf.push(5); // rank = 5
         buf.extend(std::iter::repeat_n(1u8, 5)); // uvarint 1 per dimension
         buf.push(4); // data_len = 4
         buf.extend_from_slice(&1.0f32.to_le_bytes());
 
         // max_rank=5: should pass
-        let opts = DecodeOptions { max_rank: 5, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_rank: 5,
+            ..DecodeOptions::default()
+        };
         assert!(decode_with_options(&buf, &opts).is_ok());
 
         // max_rank=3: should fail
-        let opts_tight = DecodeOptions { max_rank: 3, ..DecodeOptions::default() };
+        let opts_tight = DecodeOptions {
+            max_rank: 3,
+            ..DecodeOptions::default()
+        };
         let result = decode_with_options(&buf, &opts_tight);
         assert!(result.is_err(), "rank 5 should fail with max_rank=3");
     }
 
     #[test]
     fn test_decode_with_options_max_ext_len() {
-        let val = Value::Ext(ExtData { type_id: 42, payload: vec![0xAB; 100] });
+        let val = Value::Ext(ExtData {
+            type_id: 42,
+            payload: vec![0xAB; 100],
+        });
         let encoded = encode(&val).expect("encode");
 
         // max_ext_len=200: should pass
-        let opts = DecodeOptions { max_ext_len: 200, ..DecodeOptions::default() };
+        let opts = DecodeOptions {
+            max_ext_len: 200,
+            ..DecodeOptions::default()
+        };
         assert!(decode_with_options(&encoded, &opts).is_ok());
 
         // max_ext_len=50: should fail
-        let opts_tight = DecodeOptions { max_ext_len: 50, ..DecodeOptions::default() };
-        assert!(matches!(decode_with_options(&encoded, &opts_tight), Err(CowrieError::TooLarge)));
+        let opts_tight = DecodeOptions {
+            max_ext_len: 50,
+            ..DecodeOptions::default()
+        };
+        assert!(matches!(
+            decode_with_options(&encoded, &opts_tight),
+            Err(CowrieError::TooLarge)
+        ));
     }
 
     #[test]
@@ -1170,7 +1287,8 @@ mod tests {
         let encoded = encode(&val).expect("encode");
 
         let d1 = decode(&encoded).expect("decode");
-        let d2 = decode_with_options(&encoded, &DecodeOptions::default()).expect("decode_with_options");
+        let d2 =
+            decode_with_options(&encoded, &DecodeOptions::default()).expect("decode_with_options");
         assert_eq!(d1, d2);
     }
 }

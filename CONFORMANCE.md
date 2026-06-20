@@ -1,7 +1,7 @@
 # Cowrie Cross-Language Conformance
 
 This document is the canonical reference for how cross-language correctness is
-guaranteed across the Go, Rust, Python, TypeScript, and C implementations.
+guaranteed across the Go, Rust, Python, and TypeScript implementations.
 
 ---
 
@@ -10,7 +10,8 @@ guaranteed across the Go, Rust, Python, TypeScript, and C implementations.
 Correctness guarantees are built in four layers:
 
 1. **Shared fixture manifest** — binary `.cowrie` files + expected JSON, decoded
-   by every language under a single harness.
+   by the Go reference and Python decoders under the shared harness; Rust and
+   TypeScript are gated by their own pinned parity tests.
 2. **Per-language pinned parity tests** — decode invariants, schema fingerprint
    stability, and JSON round-trip tests pinned inside each language's own test
    suite.
@@ -28,15 +29,15 @@ Correctness guarantees are built in four layers:
 | Group | Count | Kind | Notes |
 |---|---|---|---|
 | `core/` | 7 | decode + JSON check | null, bool, int, float, string, array, object |
-| `ml/` | 7 | decode (4 ok-only, 3 ERR_TRAILING_DATA) | tensor, tensor_ref, image, audio; adjlist/richtext/delta reserved |
+| `ml/` | 9 | decode (ok-only or ERR_TRAILING_DATA) | tensor, rank0_scalar, bool_tensor, tensor_ref, image, audio; adjlist/richtext/delta reserved |
 | `graph/` | 5 | decode (4 ok-only, 1 ERR_TRAILING_DATA) | node, edge, node_batch, edge_batch; graph_shard reserved |
 | `neg/` | 4 | decode + error check | bad_magic, bad_version, truncated, invalid_tag |
-| `v3/` | 8 | decode (6 JSON, 2 ok-only) | fixint, fixneg, fixarray, fixmap, bitmask variants |
+| `v3/` | 11 | decode (JSON or ok-only) | fixint, fixneg, fixarray, fixmap, bitmask variants |
 | `gen1/` | 6 | decode (4 JSON, 2 ok-only) | gen1 core types + proto-tensor float64/float32 |
 | `bigint/` | 3 | decode + JSON check | pos_large, neg_large, u64plus1 — all round-trip as JSON strings |
 | `compressed/` | 2 | decode + JSON check | gzip_framed, zstd_framed — verify `EncodeFramed` / `DecodeFramed` path |
 
-**Total: 45 cases** as of 2026-06-19.
+**Total: 47 cases** as of 2026-06-19.
 
 ### Fixture format
 
@@ -91,7 +92,7 @@ header reveals the actual encoding: `0x00` = uncompressed, `0x03` = gzip,
 
 | Decoder | When used | How |
 |---|---|---|
-| Go (primary) | All 45 cases | subprocess `cowrie decode [--gen1]` |
+| Go (primary) | All 47 cases | subprocess `cowrie decode [--gen1]` |
 | Python (secondary) | All gen2 cases + gen1 where tag is implemented | in-process `COWRIE_PUREPYTHON=1` |
 
 The Python decoder is loaded from the sibling `python/` source tree (or
@@ -123,7 +124,7 @@ Expected output:
   OK   gen2_compressed_gzip
   OK   gen2_compressed_zstd
 
-Results: 45 passed, 0 skipped, 0 failed, 1 py-skipped
+Results: 47 passed, 0 skipped, 0 failed, 1 py-skipped
 ```
 
 Exit code is non-zero on any failure.
@@ -183,12 +184,6 @@ invariants independently of the shared harness.
 | `mutation.test.ts` | Decoder never panics on corrupted/truncated input |
 | `skip_reserved_tag.test.ts` | Reserved tags (0x30-0x39, 0xF0-0xFF) are skipped or rejected cleanly |
 | `gen2.test.ts` | Full gen2 encode/decode round-trips |
-
-### C (`c/`)
-
-`cmake && make && ctest --output-on-failure` runs gen1 and gen2 tests. C is a
-decode-only reference — it does not participate in the cross-language harness
-due to the earlier SJFR framing incompatibility (now resolved).
 
 ---
 

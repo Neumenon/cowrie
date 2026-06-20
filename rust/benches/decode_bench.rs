@@ -38,11 +38,15 @@ fn bench(label: &str, data: &[u8], decode_fn: fn(&[u8]) -> Result<(), String>, i
 }
 
 fn decode_gen1(data: &[u8]) -> Result<(), String> {
-    cowrie_rs::gen1::decode(data).map(|_| ()).map_err(|e| format!("{:?}", e))
+    cowrie_rs::gen1::decode(data)
+        .map(|_| ())
+        .map_err(|e| format!("{:?}", e))
 }
 
 fn decode_gen2(data: &[u8]) -> Result<(), String> {
-    cowrie_rs::gen2::decode::decode(data).map(|_| ()).map_err(|e| format!("{:?}", e))
+    cowrie_rs::gen2::decode::decode(data)
+        .map(|_| ())
+        .map_err(|e| format!("{:?}", e))
 }
 
 fn main() {

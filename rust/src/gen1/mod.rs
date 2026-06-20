@@ -61,8 +61,8 @@ pub mod tags {
 /// Security limits - prevent DoS from malicious input
 pub mod limits {
     pub const MAX_DEPTH: usize = 1000;
-    pub const MAX_ARRAY_LEN: usize = 100_000_000;  // 100M elements
-    pub const MAX_OBJECT_LEN: usize = 10_000_000;  // 10M fields
+    pub const MAX_ARRAY_LEN: usize = 100_000_000; // 100M elements
+    pub const MAX_OBJECT_LEN: usize = 10_000_000; // 10M fields
     pub const MAX_STRING_LEN: usize = 500_000_000; // 500MB
     pub const MAX_BYTES_LEN: usize = 1_000_000_000; // 1GB
 }
@@ -119,22 +119,47 @@ pub enum Value {
     // Gen2 scalar types
     Uint64(u64),
     Float32(f32),
-    Decimal128 { scale: i8, coefficient: [u8; 16] },
+    Decimal128 {
+        scale: i8,
+        coefficient: [u8; 16],
+    },
     Datetime64(i64),
     UUID128([u8; 16]),
     BigInt(Vec<u8>),
-    Extension { ext_type: u64, data: Vec<u8> },
+    Extension {
+        ext_type: u64,
+        data: Vec<u8>,
+    },
     // Proto-tensor types
     Int64Array(Vec<i64>),
     Float64Array(Vec<f64>),
     StringArray(Vec<String>),
     // Graph types
-    Node { id: i64, label: String, properties: HashMap<String, Value> },
-    Edge { src: i64, dst: i64, label: String, properties: HashMap<String, Value> },
-    AdjList { id_width: u8, node_count: u64, edge_count: u64, row_offsets: Vec<u64>, col_indices: Vec<u8> },
+    Node {
+        id: i64,
+        label: String,
+        properties: HashMap<String, Value>,
+    },
+    Edge {
+        src: i64,
+        dst: i64,
+        label: String,
+        properties: HashMap<String, Value>,
+    },
+    AdjList {
+        id_width: u8,
+        node_count: u64,
+        edge_count: u64,
+        row_offsets: Vec<u64>,
+        col_indices: Vec<u8>,
+    },
     NodeBatch(Vec<Value>),
     EdgeBatch(Vec<Value>),
-    GraphShard { nodes: Vec<Value>, edges: Vec<Value>, meta: HashMap<String, Value> },
+    GraphShard {
+        nodes: Vec<Value>,
+        edges: Vec<Value>,
+        meta: HashMap<String, Value>,
+    },
 }
 
 /// Encode a Gen1 value to bytes.
@@ -297,7 +322,11 @@ fn encode_value<W: Write>(w: &mut W, val: &Value) -> Result<(), Gen1Error> {
             }
         }
         // Graph types - simplified encoding
-        Value::Node { id, label, properties } => {
+        Value::Node {
+            id,
+            label,
+            properties,
+        } => {
             w.write_all(&[tags::NODE])?;
             write_uvarint(w, zigzag_encode(*id))?;
             write_uvarint(w, label.len() as u64)?;
@@ -309,7 +338,12 @@ fn encode_value<W: Write>(w: &mut W, val: &Value) -> Result<(), Gen1Error> {
                 encode_value(w, v)?;
             }
         }
-        Value::Edge { src, dst, label, properties } => {
+        Value::Edge {
+            src,
+            dst,
+            label,
+            properties,
+        } => {
             w.write_all(&[tags::EDGE])?;
             write_uvarint(w, zigzag_encode(*src))?;
             write_uvarint(w, zigzag_encode(*dst))?;
@@ -322,7 +356,13 @@ fn encode_value<W: Write>(w: &mut W, val: &Value) -> Result<(), Gen1Error> {
                 encode_value(w, v)?;
             }
         }
-        Value::AdjList { id_width, node_count, edge_count, row_offsets, col_indices } => {
+        Value::AdjList {
+            id_width,
+            node_count,
+            edge_count,
+            row_offsets,
+            col_indices,
+        } => {
             w.write_all(&[tags::ADJLIST])?;
             w.write_all(&[*id_width])?;
             write_uvarint(w, *node_count)?;
@@ -559,7 +599,11 @@ fn decode_value_depth<R: Read>(r: &mut R, depth: usize) -> Result<Value, Gen1Err
                 let val = decode_value_depth(r, depth + 1)?;
                 properties.insert(key, val);
             }
-            Ok(Value::Node { id, label, properties })
+            Ok(Value::Node {
+                id,
+                label,
+                properties,
+            })
         }
         tags::EDGE => {
             let src = zigzag_decode(read_uvarint(r)?);
@@ -587,7 +631,12 @@ fn decode_value_depth<R: Read>(r: &mut R, depth: usize) -> Result<Value, Gen1Err
                 let val = decode_value_depth(r, depth + 1)?;
                 properties.insert(key, val);
             }
-            Ok(Value::Edge { src, dst, label, properties })
+            Ok(Value::Edge {
+                src,
+                dst,
+                label,
+                properties,
+            })
         }
         tags::ADJLIST => {
             let mut id_width_buf = [0u8; 1];
@@ -599,10 +648,20 @@ fn decode_value_depth<R: Read>(r: &mut R, depth: usize) -> Result<Value, Gen1Err
             for _ in 0..=node_count {
                 row_offsets.push(read_uvarint(r)?);
             }
-            let col_bytes_len = if id_width == 1 { edge_count as usize * 4 } else { edge_count as usize * 8 };
+            let col_bytes_len = if id_width == 1 {
+                edge_count as usize * 4
+            } else {
+                edge_count as usize * 8
+            };
             let mut col_indices = vec![0u8; col_bytes_len];
             r.read_exact(&mut col_indices)?;
-            Ok(Value::AdjList { id_width, node_count, edge_count, row_offsets, col_indices })
+            Ok(Value::AdjList {
+                id_width,
+                node_count,
+                edge_count,
+                row_offsets,
+                col_indices,
+            })
         }
         tags::NODE_BATCH => {
             let count = read_uvarint(r)? as usize;

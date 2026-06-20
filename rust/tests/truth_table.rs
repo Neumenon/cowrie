@@ -3,8 +3,8 @@
 //! Each case in the "cowrie" section maps to a specific test action:
 //! roundtrip, decode_raw, trailing_garbage, truncated, roundtrip_depth.
 
-use std::collections::BTreeMap;
 use cowrie_rs::gen2::{decode, encode, Value};
+use std::collections::BTreeMap;
 
 fn truth_manifest() -> serde_json::Value {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -45,9 +45,9 @@ fn build_value(input: &serde_json::Value) -> Value {
                 "-Inf" => Value::Float(f64::NEG_INFINITY),
                 "-0.0" => Value::Float(-0.0_f64),
                 _ => {
-                    let f = raw.parse::<f64>().unwrap_or_else(|_| {
-                        input["value"].as_f64().unwrap()
-                    });
+                    let f = raw
+                        .parse::<f64>()
+                        .unwrap_or_else(|_| input["value"].as_f64().unwrap());
                     Value::Float(f)
                 }
             }
@@ -104,9 +104,7 @@ fn json_to_value(jv: &serde_json::Value) -> Value {
             }
         }
         serde_json::Value::String(s) => Value::String(s.clone()),
-        serde_json::Value::Array(arr) => {
-            Value::Array(arr.iter().map(json_to_value).collect())
-        }
+        serde_json::Value::Array(arr) => Value::Array(arr.iter().map(json_to_value).collect()),
         serde_json::Value::Object(map) => {
             let btree: BTreeMap<String, Value> = map
                 .iter()
@@ -300,21 +298,36 @@ fn run_roundtrip(id: &str, input: &serde_json::Value, expect: &serde_json::Value
     } else if expect.get("is_positive_inf") == Some(&serde_json::Value::Bool(true)) {
         match &decoded {
             Value::Float(f) => {
-                assert!(f.is_infinite() && f.is_sign_positive(), "{}: expected +Inf, got {}", id, f);
+                assert!(
+                    f.is_infinite() && f.is_sign_positive(),
+                    "{}: expected +Inf, got {}",
+                    id,
+                    f
+                );
             }
             other => panic!("{}: expected Float(+Inf), got {:?}", id, other),
         }
     } else if expect.get("is_negative_inf") == Some(&serde_json::Value::Bool(true)) {
         match &decoded {
             Value::Float(f) => {
-                assert!(f.is_infinite() && f.is_sign_negative(), "{}: expected -Inf, got {}", id, f);
+                assert!(
+                    f.is_infinite() && f.is_sign_negative(),
+                    "{}: expected -Inf, got {}",
+                    id,
+                    f
+                );
             }
             other => panic!("{}: expected Float(-Inf), got {:?}", id, other),
         }
     } else if expect.get("negative_zero") == Some(&serde_json::Value::Bool(true)) {
         match &decoded {
             Value::Float(f) => {
-                assert!(*f == 0.0 && f.is_sign_negative(), "{}: expected -0.0, got {}", id, f);
+                assert!(
+                    *f == 0.0 && f.is_sign_negative(),
+                    "{}: expected -0.0, got {}",
+                    id,
+                    f
+                );
             }
             other => panic!("{}: expected Float(-0.0), got {:?}", id, other),
         }
@@ -322,7 +335,9 @@ fn run_roundtrip(id: &str, input: &serde_json::Value, expect: &serde_json::Value
         assert!(
             values_equal(&val, &decoded),
             "{}: roundtrip mismatch.\n  input:   {:?}\n  decoded: {:?}",
-            id, val, decoded
+            id,
+            val,
+            decoded
         );
     }
 }
@@ -346,7 +361,10 @@ fn run_encode_decode(id: &str, input: &serde_json::Value, expect: &serde_json::V
                     assert!(
                         values_equal(actual_val.unwrap(), &expected_val),
                         "{}: key '{}' mismatch: {:?} vs {:?}",
-                        id, ek, actual_val, expected_val
+                        id,
+                        ek,
+                        actual_val,
+                        expected_val
                     );
                 }
             }
@@ -375,7 +393,12 @@ fn run_decode_raw(id: &str, input: &serde_json::Value, expect: &serde_json::Valu
     if ok {
         result.unwrap_or_else(|e| panic!("{}: expected ok but got: {}", id, e));
     } else {
-        assert!(result.is_err(), "{}: expected error on raw bytes {:?}", id, hex_str);
+        assert!(
+            result.is_err(),
+            "{}: expected error on raw bytes {:?}",
+            id,
+            hex_str
+        );
     }
 }
 
@@ -401,10 +424,7 @@ fn run_truncated(id: &str, expect: &serde_json::Value) {
     assert!(!ok, "{}: truncated must expect error", id);
 
     // Encode a non-trivial value so there are bytes to truncate
-    let val = Value::Array(vec![
-        Value::Int(42),
-        Value::String("hello".to_string()),
-    ]);
+    let val = Value::Array(vec![Value::Int(42), Value::String("hello".to_string())]);
     let encoded = encode(&val).expect("encode array");
     assert!(encoded.len() > 1, "encoded must have >1 byte to truncate");
 
@@ -437,11 +457,7 @@ fn run_roundtrip_depth(id: &str, input: &serde_json::Value, expect: &serde_json:
         match encoded {
             Err(_) => {} // encode rejected, ok
             Ok(enc) => {
-                assert!(
-                    decode(&enc).is_err(),
-                    "{}: expected depth limit error",
-                    id
-                );
+                assert!(decode(&enc).is_err(), "{}: expected depth limit error", id);
             }
         }
     }

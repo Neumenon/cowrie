@@ -87,16 +87,24 @@ func TestTensorShapeValidation_ZeroDim(t *testing.T) {
 	}
 }
 
-// TestTensorShapeValidation_Rank0 confirms that a rank-0 (scalar) tensor
-// with 0-byte payload decodes correctly.
+// TestTensorShapeValidation_Rank0 confirms a rank-0 tensor is a SCALAR: exactly
+// one element (elemSize bytes). A valid scalar round-trips; a rank-0 with the
+// wrong byte length is rejected on encode (symmetric with decode).
 func TestTensorShapeValidation_Rank0(t *testing.T) {
-	v := Tensor(DTypeFloat64, []uint64{}, nil)
-	encoded, err := Encode(v)
+	// Valid scalar: float64 rank-0 carries exactly 8 bytes (one element).
+	scalar := Tensor(DTypeFloat64, []uint64{}, make([]byte, 8))
+	encoded, err := Encode(scalar)
 	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
+		t.Fatalf("Encode of valid rank-0 scalar failed: %v", err)
 	}
 	if _, err := Decode(encoded); err != nil {
-		t.Fatalf("Decode of rank-0 tensor failed: %v", err)
+		t.Fatalf("Decode of valid rank-0 scalar failed: %v", err)
+	}
+
+	// Invalid: a rank-0 tensor with 0 payload bytes (the old "empty" contract)
+	// is now rejected on encode — a scalar must carry exactly one element.
+	if _, err := Encode(Tensor(DTypeFloat64, []uint64{}, nil)); err == nil {
+		t.Fatal("Encode of rank-0 tensor with 0 bytes should fail (scalar needs 8 bytes)")
 	}
 }
 

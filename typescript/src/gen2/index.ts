@@ -488,7 +488,8 @@ function dtypeElemSize(dtype: number): number | null {
     case 0x0a: return 4;  // UINT32
     case 0x0b: return 8;  // UINT64
     case 0x0c: return 8;  // FLOAT64
-    default:              // Sub-byte packed types: skip validation
+    case 0x0d: return 1;  // BOOL (one byte per element; Bitmask is the bit-packed type)
+    default:              // Sub-byte packed types (qint4/qint2/qint3/ternary/binary): skip
       return null;
   }
 }
@@ -497,12 +498,13 @@ function dtypeElemSize(dtype: number): number | null {
  * Computes the expected byte length for a tensor with the given shape and dtype.
  * Returns null when the dtype uses sub-byte packing or when the product overflows
  * Number.MAX_SAFE_INTEGER (skip the check rather than accept corrupt data silently).
- * Rank-0 tensors and tensors with any zero dimension produce 0 bytes.
+ * A rank-0 tensor (no dims) is a scalar — one element (elemSize bytes); a zero
+ * dimension yields an empty 0-byte tensor.
  */
 function tensorExpectedBytes(dtype: number, shape: number[]): number | null {
   const elemSize = dtypeElemSize(dtype);
   if (elemSize === null) return null;
-  if (shape.length === 0) return 0;
+  if (shape.length === 0) return elemSize;  // rank-0 scalar = one element
   let product = 1;
   for (const dim of shape) {
     if (dim === 0) return 0;
@@ -705,6 +707,12 @@ class Encoder {
         const rank = t.shape.length;
         if (rank > Limits.MAX_RANK || rank > 255) {
           throw new SecurityLimitExceeded(`Tensor rank too large: ${rank} > ${Limits.MAX_RANK}`);
+        }
+        // Validate dataLen against shape/dtype on encode too, so we never emit
+        // bytes the decoder would reject (symmetric with decode).
+        const expectedBytes = tensorExpectedBytes(t.dtype, t.shape);
+        if (expectedBytes !== null && t.data.length !== expectedBytes) {
+          throw new Error(`cowrie: tensor dataLen ${t.data.length} does not match shape/dtype (expected ${expectedBytes} bytes)`);
         }
         this.writeByte(Tag.TENSOR);
         this.writeByte(t.dtype);
@@ -1297,12 +1305,20 @@ function b64FieldFromObj(obj: Record<string, unknown>, key: string): Uint8Array 
   }
 }
 
-/** Helper: get an integer from a number or string field. */
-function intFieldFromObj(obj: Record<string, unknown>, key: string): number | null {
+/** Helper: get an integer from a number or string field.
+ * If max is provided, throws if the value is not an integer in [0, max]. */
+function intFieldFromObj(obj: Record<string, unknown>, key: string, max?: number): number | null {
   const v = obj[key];
-  if (typeof v === "number") return Math.trunc(v);
-  if (typeof v === "bigint") return Number(v);
-  return null;
+  let n: number | null = null;
+  if (typeof v === "number") n = Math.trunc(v);
+  else if (typeof v === "bigint") n = Number(v);
+  else return null;
+  if (max !== undefined) {
+    if (!Number.isInteger(n) || n < 0 || n > max) {
+      throw new RangeError(`cowrie: ${key} out of range for uint${max < 256 ? 8 : max < 65536 ? 16 : 32} (got ${v})`);
+    }
+  }
+  return n;
 }
 
 /**
@@ -1332,7 +1348,7 @@ function tryReconstructTyped(obj: Record<string, unknown>): Value | null {
     }
 
     case "tensor_ref": {
-      const store = intFieldFromObj(obj, "store");
+      const store = intFieldFromObj(obj, "store", 255);
       if (store === null) return null;
       const key = b64FieldFromObj(obj, "key");
       if (key === null) return null;
@@ -1344,8 +1360,8 @@ function tryReconstructTyped(obj: Record<string, unknown>): Value | null {
       if (typeof fmtStr !== "string") return null;
       const format = stringToImageFormat(fmtStr);
       if (format === null) return null;
-      const width = intFieldFromObj(obj, "width");
-      const height = intFieldFromObj(obj, "height");
+      const width = intFieldFromObj(obj, "width", 65535);
+      const height = intFieldFromObj(obj, "height", 65535);
       if (width === null || height === null) return null;
       const data = b64FieldFromObj(obj, "data");
       if (data === null) return null;
@@ -1357,8 +1373,8 @@ function tryReconstructTyped(obj: Record<string, unknown>): Value | null {
       if (typeof encStr !== "string") return null;
       const encoding = stringToAudioEncoding(encStr);
       if (encoding === null) return null;
-      const rate = intFieldFromObj(obj, "rate");
-      const channels = intFieldFromObj(obj, "channels");
+      const rate = intFieldFromObj(obj, "rate", 4294967295);
+      const channels = intFieldFromObj(obj, "channels", 255);
       if (rate === null || channels === null) return null;
       const data = b64FieldFromObj(obj, "data");
       if (data === null) return null;
@@ -1463,6 +1479,12 @@ function stringToDtype(s: string): DType | null {
     case "uint16":   return DType.UINT16;
     case "uint32":   return DType.UINT32;
     case "uint64":   return DType.UINT64;
+    case "bool":     return DType.BOOL;
+    case "qint4":    return DType.QINT4;
+    case "qint2":    return DType.QINT2;
+    case "qint3":    return DType.QINT3;
+    case "ternary":  return DType.TERNARY;
+    case "binary":   return DType.BINARY;
     default:         return null;
   }
 }
