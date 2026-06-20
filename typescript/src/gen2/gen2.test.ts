@@ -737,19 +737,29 @@ test("tensor decode: malformed float64 [3] with 16 bytes (expected 24) throws", 
   if (!threw) throw new Error("Expected tensor validation to throw for float64 mismatch");
 });
 
-test("tensor decode: sub-byte dtype (BOOL=0x0d) skips validation", () => {
-  // BOOL is sub-byte packed; we accept any length without checking
-  const data = new Uint8Array(3); // arbitrary size
-  const payload = buildTensorPayload(0x0d /* BOOL */, [10], data);
-  // Should not throw (validation skipped for sub-byte types)
-  decode(payload);
+test("tensor decode: sub-byte dtype (QINT4=0x10) skips validation", () => {
+  // QINT4 is genuinely sub-byte packed; any length is accepted (packing not validated).
+  const payload = buildTensorPayload(0x10 /* QINT4 */, [10], new Uint8Array(3));
+  decode(payload); // should not throw
 });
 
-test("tensor decode: rank-0 tensor with 0 bytes passes", () => {
-  const data = new Uint8Array(0);
-  const payload = buildTensorPayload(0x01 /* FLOAT32 */, [], data);
-  const v = decode(payload);
-  if (v.type !== Type.TENSOR) throw new Error("expected TENSOR");
+test("tensor decode: bool is validated (1 byte per element)", () => {
+  // BOOL stores one byte per element now (Bitmask is the bit-packed type).
+  let threw = false;
+  try { decode(buildTensorPayload(0x0d /* BOOL */, [4], new Uint8Array(2))); } catch { threw = true; }
+  if (!threw) throw new Error("bool[4] with 2 bytes should be rejected");
+  if (decode(buildTensorPayload(0x0d, [4], new Uint8Array(4))).type !== Type.TENSOR) {
+    throw new Error("bool[4] with 4 bytes should pass");
+  }
+});
+
+test("tensor decode: rank-0 is a scalar (elemSize bytes)", () => {
+  // Rank-0 FLOAT32 is a scalar: exactly 4 bytes; 0 bytes is rejected.
+  const scalar = decode(buildTensorPayload(0x01 /* FLOAT32 */, [], new Uint8Array(4)));
+  if (scalar.type !== Type.TENSOR) throw new Error("expected TENSOR");
+  let threw = false;
+  try { decode(buildTensorPayload(0x01, [], new Uint8Array(0))); } catch { threw = true; }
+  if (!threw) throw new Error("rank-0 float32 with 0 bytes should be rejected (scalar needs 4)");
 });
 
 // ============================================================

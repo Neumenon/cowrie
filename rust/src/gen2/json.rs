@@ -2,14 +2,14 @@
 //!
 //! Provides conversion between JSON strings and Cowrie Values.
 
-use super::types::{Value, CowrieError, DType, TensorData};
+use super::types::{CowrieError, DType, TensorData, Value};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use std::collections::BTreeMap;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 /// Parse a JSON string into an Cowrie Value.
 pub fn from_json(json: &str) -> Result<Value, CowrieError> {
-    let parsed: serde_json::Value = serde_json::from_str(json)
-        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(json).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     json_to_value(&parsed)
 }
 
@@ -75,8 +75,11 @@ fn json_to_value(json: &serde_json::Value) -> Result<Value, CowrieError> {
     }
 }
 
-fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let dtype_str = obj.get("dtype")
+fn parse_tensor_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let dtype_str = obj
+        .get("dtype")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("tensor missing dtype".into()))?;
 
@@ -99,21 +102,29 @@ fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> R
         "qint3" => DType::QINT3,
         "ternary" => DType::Ternary,
         "binary" => DType::Binary,
-        _ => return Err(CowrieError::InvalidData(format!("unknown dtype: {}", dtype_str))),
+        _ => {
+            return Err(CowrieError::InvalidData(format!(
+                "unknown dtype: {}",
+                dtype_str
+            )))
+        }
     };
 
-    let dims: Vec<u64> = obj.get("dims")
+    let dims: Vec<u64> = obj
+        .get("dims")
         .and_then(|v| v.as_array())
         .ok_or_else(|| CowrieError::InvalidData("tensor missing dims".into()))?
         .iter()
         .filter_map(|v| v.as_u64())
         .collect();
 
-    let data_b64 = obj.get("data")
+    let data_b64 = obj
+        .get("data")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("tensor missing data".into()))?;
 
-    let data = BASE64.decode(data_b64)
+    let data = BASE64
+        .decode(data_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::Tensor(TensorData {
@@ -123,62 +134,83 @@ fn parse_tensor_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> R
     }))
 }
 
-fn parse_bytes_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let data_b64 = obj.get("data")
+fn parse_bytes_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let data_b64 = obj
+        .get("data")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("bytes missing data".into()))?;
 
-    let data = BASE64.decode(data_b64)
+    let data = BASE64
+        .decode(data_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::Bytes(data))
 }
 
-fn parse_datetime_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let nanos = obj.get("nanos")
+fn parse_datetime_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let nanos = obj
+        .get("nanos")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| CowrieError::InvalidData("datetime missing nanos".into()))?;
 
     Ok(Value::DateTime(nanos))
 }
 
-fn parse_uuid_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let hex = obj.get("hex")
+fn parse_uuid_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let hex = obj
+        .get("hex")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("uuid missing hex".into()))?;
 
-    let clean: String = hex.chars().filter(|c: &char| c.is_ascii_hexdigit()).collect();
+    let clean: String = hex
+        .chars()
+        .filter(|c: &char| c.is_ascii_hexdigit())
+        .collect();
     if clean.len() != 32 {
         return Err(CowrieError::InvalidData("invalid uuid hex".into()));
     }
 
     let mut bytes = [0u8; 16];
     for i in 0..16 {
-        bytes[i] = u8::from_str_radix(&clean[i*2..i*2+2], 16)
+        bytes[i] = u8::from_str_radix(&clean[i * 2..i * 2 + 2], 16)
             .map_err(|_| CowrieError::InvalidData("invalid uuid hex".into()))?;
     }
 
     Ok(Value::Uuid(bytes))
 }
 
-fn parse_tensor_ref_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let store_id = obj.get("store")
+fn parse_tensor_ref_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let store_id = obj
+        .get("store")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| CowrieError::InvalidData("tensor_ref missing store".into()))?
         as u8;
 
-    let key_b64 = obj.get("key")
+    let key_b64 = obj
+        .get("key")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("tensor_ref missing key".into()))?;
 
-    let key = BASE64.decode(key_b64)
+    let key = BASE64
+        .decode(key_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::TensorRef(super::types::TensorRef { store_id, key }))
 }
 
-fn parse_image_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let format_str = obj.get("format")
+fn parse_image_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let format_str = obj
+        .get("format")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("image missing format".into()))?;
 
@@ -188,29 +220,46 @@ fn parse_image_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Re
         "webp" => super::types::ImageFormat::Webp,
         "avif" => super::types::ImageFormat::Avif,
         "bmp" => super::types::ImageFormat::Bmp,
-        _ => return Err(CowrieError::InvalidData(format!("unknown image format: {}", format_str))),
+        _ => {
+            return Err(CowrieError::InvalidData(format!(
+                "unknown image format: {}",
+                format_str
+            )))
+        }
     };
 
-    let width = obj.get("width")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| CowrieError::InvalidData("image missing width".into()))? as u16;
+    let width =
+        obj.get("width")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| CowrieError::InvalidData("image missing width".into()))? as u16;
 
-    let height = obj.get("height")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| CowrieError::InvalidData("image missing height".into()))? as u16;
+    let height =
+        obj.get("height")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| CowrieError::InvalidData("image missing height".into()))? as u16;
 
-    let data_b64 = obj.get("data")
+    let data_b64 = obj
+        .get("data")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("image missing data".into()))?;
 
-    let data = BASE64.decode(data_b64)
+    let data = BASE64
+        .decode(data_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
-    Ok(Value::Image(super::types::ImageData { format, width, height, data }))
+    Ok(Value::Image(super::types::ImageData {
+        format,
+        width,
+        height,
+        data,
+    }))
 }
 
-fn parse_audio_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let encoding_str = obj.get("encoding")
+fn parse_audio_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let encoding_str = obj
+        .get("encoding")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("audio missing encoding".into()))?;
 
@@ -219,56 +268,81 @@ fn parse_audio_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Re
         "pcm_float32" => super::types::AudioEncoding::PcmFloat32,
         "opus" => super::types::AudioEncoding::Opus,
         "aac" => super::types::AudioEncoding::Aac,
-        _ => return Err(CowrieError::InvalidData(format!("unknown audio encoding: {}", encoding_str))),
+        _ => {
+            return Err(CowrieError::InvalidData(format!(
+                "unknown audio encoding: {}",
+                encoding_str
+            )))
+        }
     };
 
-    let sample_rate = obj.get("rate")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| CowrieError::InvalidData("audio missing rate".into()))? as u32;
+    let sample_rate =
+        obj.get("rate")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| CowrieError::InvalidData("audio missing rate".into()))? as u32;
 
-    let channels = obj.get("channels")
+    let channels = obj
+        .get("channels")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| CowrieError::InvalidData("audio missing channels".into()))? as u8;
+        .ok_or_else(|| CowrieError::InvalidData("audio missing channels".into()))?
+        as u8;
 
-    let data_b64 = obj.get("data")
+    let data_b64 = obj
+        .get("data")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("audio missing data".into()))?;
 
-    let data = BASE64.decode(data_b64)
+    let data = BASE64
+        .decode(data_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
-    Ok(Value::Audio(super::types::AudioData { encoding, sample_rate, channels, data }))
+    Ok(Value::Audio(super::types::AudioData {
+        encoding,
+        sample_rate,
+        channels,
+        data,
+    }))
 }
 
-fn parse_unknown_ext_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let type_id = obj.get("ext_type")
+fn parse_unknown_ext_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let type_id = obj
+        .get("ext_type")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| CowrieError::InvalidData("unknown_ext missing ext_type".into()))?;
 
-    let payload_b64 = obj.get("payload")
+    let payload_b64 = obj
+        .get("payload")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("unknown_ext missing payload".into()))?;
 
-    let payload = BASE64.decode(payload_b64)
+    let payload = BASE64
+        .decode(payload_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::Ext(super::types::ExtData { type_id, payload }))
 }
 
-fn parse_node_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let id = obj.get("id")
+fn parse_node_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let id = obj
+        .get("id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("node missing id".into()))?
         .to_string();
 
-    let labels: Vec<String> = obj.get("labels")
+    let labels: Vec<String> = obj
+        .get("labels")
         .and_then(|v| v.as_array())
         .ok_or_else(|| CowrieError::InvalidData("node missing labels".into()))?
         .iter()
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
         .collect();
 
-    let props_obj = obj.get("props")
+    let props_obj = obj
+        .get("props")
         .and_then(|v| v.as_object())
         .ok_or_else(|| CowrieError::InvalidData("node missing props".into()))?;
 
@@ -280,23 +354,29 @@ fn parse_node_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Res
     Ok(Value::Node(super::types::NodeData { id, labels, props }))
 }
 
-fn parse_edge_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let from = obj.get("fromId")
+fn parse_edge_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let from = obj
+        .get("fromId")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("edge missing fromId".into()))?
         .to_string();
 
-    let to = obj.get("toId")
+    let to = obj
+        .get("toId")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("edge missing toId".into()))?
         .to_string();
 
-    let edge_type = obj.get("type")
+    let edge_type = obj
+        .get("type")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("edge missing type".into()))?
         .to_string();
 
-    let props_obj = obj.get("props")
+    let props_obj = obj
+        .get("props")
         .and_then(|v| v.as_object())
         .ok_or_else(|| CowrieError::InvalidData("edge missing props".into()))?;
 
@@ -305,51 +385,79 @@ fn parse_edge_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Res
         props.insert(k.clone(), json_to_value(v)?);
     }
 
-    Ok(Value::Edge(super::types::EdgeData { from, to, edge_type, props }))
+    Ok(Value::Edge(super::types::EdgeData {
+        from,
+        to,
+        edge_type,
+        props,
+    }))
 }
 
-fn parse_node_batch_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let arr = obj.get("nodes")
+fn parse_node_batch_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let arr = obj
+        .get("nodes")
         .and_then(|v| v.as_array())
         .ok_or_else(|| CowrieError::InvalidData("node_batch missing nodes".into()))?;
 
-    let nodes: Result<Vec<super::types::NodeData>, CowrieError> = arr.iter().map(|item| {
-        match parse_node_from_json(item.as_object()
-            .ok_or_else(|| CowrieError::InvalidData("node_batch: node is not an object".into()))?)? {
-            Value::Node(n) => Ok(n),
-            _ => Err(CowrieError::InvalidData("node_batch: expected node".into())),
-        }
-    }).collect();
+    let nodes: Result<Vec<super::types::NodeData>, CowrieError> = arr
+        .iter()
+        .map(|item| {
+            match parse_node_from_json(item.as_object().ok_or_else(|| {
+                CowrieError::InvalidData("node_batch: node is not an object".into())
+            })?)? {
+                Value::Node(n) => Ok(n),
+                _ => Err(CowrieError::InvalidData("node_batch: expected node".into())),
+            }
+        })
+        .collect();
 
-    Ok(Value::NodeBatch(super::types::NodeBatchData { nodes: nodes? }))
+    Ok(Value::NodeBatch(super::types::NodeBatchData {
+        nodes: nodes?,
+    }))
 }
 
-fn parse_edge_batch_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let arr = obj.get("edges")
+fn parse_edge_batch_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let arr = obj
+        .get("edges")
         .and_then(|v| v.as_array())
         .ok_or_else(|| CowrieError::InvalidData("edge_batch missing edges".into()))?;
 
-    let edges: Result<Vec<super::types::EdgeData>, CowrieError> = arr.iter().map(|item| {
-        match parse_edge_from_json(item.as_object()
-            .ok_or_else(|| CowrieError::InvalidData("edge_batch: edge is not an object".into()))?)? {
-            Value::Edge(e) => Ok(e),
-            _ => Err(CowrieError::InvalidData("edge_batch: expected edge".into())),
-        }
-    }).collect();
+    let edges: Result<Vec<super::types::EdgeData>, CowrieError> = arr
+        .iter()
+        .map(|item| {
+            match parse_edge_from_json(item.as_object().ok_or_else(|| {
+                CowrieError::InvalidData("edge_batch: edge is not an object".into())
+            })?)? {
+                Value::Edge(e) => Ok(e),
+                _ => Err(CowrieError::InvalidData("edge_batch: expected edge".into())),
+            }
+        })
+        .collect();
 
-    Ok(Value::EdgeBatch(super::types::EdgeBatchData { edges: edges? }))
+    Ok(Value::EdgeBatch(super::types::EdgeBatchData {
+        edges: edges?,
+    }))
 }
 
-fn parse_bitmask_from_json(obj: &serde_json::Map<String, serde_json::Value>) -> Result<Value, CowrieError> {
-    let count = obj.get("count")
+fn parse_bitmask_from_json(
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Value, CowrieError> {
+    let count = obj
+        .get("count")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| CowrieError::InvalidData("bitmask missing count".into()))?;
 
-    let bits_b64 = obj.get("bits")
+    let bits_b64 = obj
+        .get("bits")
         .and_then(|v| v.as_str())
         .ok_or_else(|| CowrieError::InvalidData("bitmask missing bits".into()))?;
 
-    let bits = BASE64.decode(bits_b64)
+    let bits = BASE64
+        .decode(bits_b64)
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
 
     Ok(Value::Bitmask { count, bits })
@@ -376,35 +484,33 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             }))
         }
         Value::String(s) => Ok(serde_json::Value::String(s.clone())),
-        Value::Bytes(b) => {
-            Ok(serde_json::json!({
-                "_type": "bytes",
-                "data": BASE64.encode(b)
-            }))
-        }
-        Value::DateTime(nanos) => {
-            Ok(serde_json::json!({
-                "_type": "datetime",
-                "nanos": *nanos
-            }))
-        }
+        Value::Bytes(b) => Ok(serde_json::json!({
+            "_type": "bytes",
+            "data": BASE64.encode(b)
+        })),
+        Value::DateTime(nanos) => Ok(serde_json::json!({
+            "_type": "datetime",
+            "nanos": *nanos
+        })),
         Value::Uuid(bytes) => {
             let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
             let formatted = format!(
                 "{}-{}-{}-{}-{}",
-                &hex[0..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..32]
+                &hex[0..8],
+                &hex[8..12],
+                &hex[12..16],
+                &hex[16..20],
+                &hex[20..32]
             );
             Ok(serde_json::json!({
                 "_type": "uuid",
                 "hex": formatted
             }))
         }
-        Value::BigInt(b) => {
-            Ok(serde_json::json!({
-                "_type": "bigint",
-                "data": BASE64.encode(b)
-            }))
-        }
+        Value::BigInt(b) => Ok(serde_json::json!({
+            "_type": "bigint",
+            "data": BASE64.encode(b)
+        })),
         Value::Array(arr) => {
             let items: Result<Vec<serde_json::Value>, CowrieError> =
                 arr.iter().map(value_to_json).collect();
@@ -445,13 +551,11 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
                 "data": BASE64.encode(&t.data)
             }))
         }
-        Value::TensorRef(r) => {
-            Ok(serde_json::json!({
-                "_type": "tensor_ref",
-                "store": r.store_id as u64,
-                "key": BASE64.encode(&r.key)
-            }))
-        }
+        Value::TensorRef(r) => Ok(serde_json::json!({
+            "_type": "tensor_ref",
+            "store": r.store_id as u64,
+            "key": BASE64.encode(&r.key)
+        })),
         Value::Image(img) => {
             let format_str = match img.format {
                 super::types::ImageFormat::Jpeg => "jpeg",
@@ -483,19 +587,18 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
                 "data": BASE64.encode(&aud.data)
             }))
         }
-        Value::Ext(ext) => {
-            Ok(serde_json::json!({
-                "_type": "unknown_ext",
-                "ext_type": ext.type_id,
-                "payload": BASE64.encode(&ext.payload)
-            }))
-        }
+        Value::Ext(ext) => Ok(serde_json::json!({
+            "_type": "unknown_ext",
+            "ext_type": ext.type_id,
+            "payload": BASE64.encode(&ext.payload)
+        })),
         // Graph types
         Value::Node(node) => {
-            let props: Result<serde_json::Map<String, serde_json::Value>, CowrieError> =
-                node.props.iter().map(|(k, v)| {
-                    Ok((k.clone(), value_to_json(v)?))
-                }).collect();
+            let props: Result<serde_json::Map<String, serde_json::Value>, CowrieError> = node
+                .props
+                .iter()
+                .map(|(k, v)| Ok((k.clone(), value_to_json(v)?)))
+                .collect();
             Ok(serde_json::json!({
                 "_type": "node",
                 "id": node.id,
@@ -504,10 +607,11 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             }))
         }
         Value::Edge(edge) => {
-            let props: Result<serde_json::Map<String, serde_json::Value>, CowrieError> =
-                edge.props.iter().map(|(k, v)| {
-                    Ok((k.clone(), value_to_json(v)?))
-                }).collect();
+            let props: Result<serde_json::Map<String, serde_json::Value>, CowrieError> = edge
+                .props
+                .iter()
+                .map(|(k, v)| Ok((k.clone(), value_to_json(v)?)))
+                .collect();
             Ok(serde_json::json!({
                 "_type": "edge",
                 "fromId": edge.from,
@@ -517,38 +621,42 @@ fn value_to_json(value: &Value) -> Result<serde_json::Value, CowrieError> {
             }))
         }
         Value::NodeBatch(batch) => {
-            let nodes: Result<Vec<serde_json::Value>, CowrieError> =
-                batch.nodes.iter().map(|n| value_to_json(&Value::Node(n.clone()))).collect();
+            let nodes: Result<Vec<serde_json::Value>, CowrieError> = batch
+                .nodes
+                .iter()
+                .map(|n| value_to_json(&Value::Node(n.clone())))
+                .collect();
             Ok(serde_json::json!({
                 "_type": "node_batch",
                 "nodes": nodes?
             }))
         }
         Value::EdgeBatch(batch) => {
-            let edges: Result<Vec<serde_json::Value>, CowrieError> =
-                batch.edges.iter().map(|e| value_to_json(&Value::Edge(e.clone()))).collect();
+            let edges: Result<Vec<serde_json::Value>, CowrieError> = batch
+                .edges
+                .iter()
+                .map(|e| value_to_json(&Value::Edge(e.clone())))
+                .collect();
             Ok(serde_json::json!({
                 "_type": "edge_batch",
                 "edges": edges?
             }))
         }
-        Value::Bitmask { count, bits } => {
-            Ok(serde_json::json!({
-                "_type": "bitmask",
-                "count": count,
-                "bits": BASE64.encode(bits)
-            }))
-        }
+        Value::Bitmask { count, bits } => Ok(serde_json::json!({
+            "_type": "bitmask",
+            "count": count,
+            "bits": BASE64.encode(bits)
+        })),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::types::{
-        AudioData, AudioEncoding, EdgeData, EdgeBatchData, ExtData, ImageData, ImageFormat,
+        AudioData, AudioEncoding, EdgeBatchData, EdgeData, ExtData, ImageData, ImageFormat,
         NodeBatchData, NodeData, TensorRef,
     };
+    use super::*;
     use std::collections::BTreeMap;
 
     #[test]
@@ -663,7 +771,10 @@ mod tests {
         // Canonical: "rate" not "sample_rate"
         assert_eq!(obj["_type"], "audio");
         assert_eq!(obj["rate"], 44100);
-        assert!(obj.get("sample_rate").is_none(), "must not emit sample_rate");
+        assert!(
+            obj.get("sample_rate").is_none(),
+            "must not emit sample_rate"
+        );
         assert_eq!(roundtrip(&v), v);
     }
 

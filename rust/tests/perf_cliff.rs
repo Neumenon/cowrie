@@ -3,9 +3,9 @@
 //! Time-bounded tests that fail if execution exceeds O(n) expectations.
 //! Detects quadratic/exponential blowups from pathological inputs.
 
+use cowrie_rs::gen2::{decode, encode, Value};
 use std::collections::BTreeMap;
 use std::time::Instant;
-use cowrie_rs::gen2::{encode, decode, Value};
 
 /// Build a deeply nested array of given depth.
 fn nested_array(depth: usize) -> Value {
@@ -71,7 +71,8 @@ fn perf_cliff_nesting_scaling() {
                 assert!(
                     ratio < 100.0,
                     "possible quadratic blowup at depth={}: ratio={:.1}x",
-                    depth, ratio
+                    depth,
+                    ratio
                 );
             }
             last_duration = Some(dur.as_nanos().max(1));
@@ -134,9 +135,7 @@ fn perf_cliff_wide_object_10k() {
 
 #[test]
 fn perf_cliff_many_empty_strings() {
-    let items: Vec<Value> = (0..100_000)
-        .map(|_| Value::String(String::new()))
-        .collect();
+    let items: Vec<Value> = (0..100_000).map(|_| Value::String(String::new())).collect();
     let v = Value::Array(items);
 
     let start = Instant::now();

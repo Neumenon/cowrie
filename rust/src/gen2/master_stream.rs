@@ -7,12 +7,12 @@
 //! - Metadata envelope
 //! - Legacy stream compatibility
 
-use std::io::Write;
-use super::types::{Value, CowrieError};
-use super::encode::encode;
 use super::decode::decode;
+use super::encode::encode;
 use super::schema::schema_fingerprint32;
+use super::types::{CowrieError, Value};
 use crate::MAGIC;
+use std::io::Write;
 
 /// Master Stream magic bytes: "SJST"
 pub const MASTER_MAGIC: &[u8; 4] = b"SJST";
@@ -219,7 +219,8 @@ pub fn read_frame(data: &[u8]) -> std::result::Result<(MasterFrame, usize), Mast
         if pos + 4 > data.len() {
             return Err(MasterStreamError::Truncated);
         }
-        let expected_crc = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+        let expected_crc =
+            u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
         let actual_crc = crc32(&data[0..pos]);
         if actual_crc != expected_crc {
             return Err(MasterStreamError::CrcMismatch);
@@ -240,7 +241,15 @@ pub fn read_frame(data: &[u8]) -> std::result::Result<(MasterFrame, usize), Mast
         meta_len: meta_len as u32,
     };
 
-    Ok((MasterFrame { header, meta, payload, type_id }, pos))
+    Ok((
+        MasterFrame {
+            header,
+            meta,
+            payload,
+            type_id,
+        },
+        pos,
+    ))
 }
 
 /// Check if data starts with master stream magic
@@ -315,9 +324,7 @@ mod tests {
     #[test]
     fn test_with_meta() {
         let value = Value::object(vec![("content", Value::String("data".into()))]);
-        let meta = Value::object(vec![
-            ("source", Value::String("test".into())),
-        ]);
+        let meta = Value::object(vec![("source", Value::String("test".into()))]);
 
         let mut buf = Vec::new();
         let opts = MasterWriterOptions::default();
@@ -336,7 +343,10 @@ mod tests {
         let value = Value::Int(42);
 
         let mut buf = Vec::new();
-        let opts = MasterWriterOptions { enable_crc: true, ..Default::default() };
+        let opts = MasterWriterOptions {
+            enable_crc: true,
+            ..Default::default()
+        };
         write_frame(&mut buf, &value, None, &opts).unwrap();
 
         // Corrupt the data

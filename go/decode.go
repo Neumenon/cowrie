@@ -131,10 +131,10 @@ func hexByte(b byte) string {
 	return string([]byte{hex[b>>4], hex[b&0x0F]})
 }
 
-// dtypeElemSize returns the element size in bytes for byte-aligned dtypes.
-// Returns (size, true) for known byte-aligned types, (0, false) for sub-byte
-// packed types (bool, qint4, qint2, qint3, ternary, binary) whose packing
-// formula is non-trivial and not validated here.
+// dtypeElemSize returns the element size in bytes for byte-aligned dtypes
+// (bool included: one byte per element). Returns (size, true) for those, and
+// (0, false) for sub-byte packed types (qint4, qint2, qint3, ternary, binary)
+// whose packing formula is non-trivial and not validated here.
 func dtypeElemSize(d DType) (uint64, bool) {
 	switch d {
 	case DTypeFloat32:
@@ -161,9 +161,13 @@ func dtypeElemSize(d DType) (uint64, bool) {
 		return 4, true
 	case DTypeUint64:
 		return 8, true
+	case DTypeBool:
+		// Bool tensors store one byte per element; bit-packed booleans use the
+		// separate Bitmask type. So shape validation applies (one byte/element).
+		return 1, true
 	default:
-		// Sub-byte packed types (DTypeBool, DTypeQINT4, DTypeQINT2, DTypeQINT3,
-		// DTypeTernary, DTypeBinary) use non-trivial packing; skip shape validation.
+		// Sub-byte packed types (DTypeQINT4, DTypeQINT2, DTypeQINT3, DTypeTernary,
+		// DTypeBinary) use non-trivial packing; skip shape validation.
 		return 0, false
 	}
 }
@@ -173,15 +177,17 @@ func dtypeElemSize(d DType) (uint64, bool) {
 // possible, or (0, false) when the dtype uses sub-byte packing.
 // Overflow in the product of dims is detected and causes (0, false) so the
 // caller skips the check rather than accepting a corrupt tensor silently.
-// Rank-0 tensors (no dims) and tensors with any zero dimension produce 0 bytes.
+// A rank-0 tensor (no dims) is a scalar — exactly one element; a zero dimension
+// (e.g. shape [0]) yields an empty 0-byte tensor.
 func tensorExpectedBytes(dtype DType, dims []uint64) (uint64, bool) {
 	elemSize, ok := dtypeElemSize(dtype)
 	if !ok {
 		return 0, false
 	}
-	// Rank-0 or any zero dimension → 0 bytes of payload.
+	// Rank-0 (no dims) is a scalar: one element (NumPy convention,
+	// np.array(5).shape == ()). A zero dimension is handled in the loop below.
 	if len(dims) == 0 {
-		return 0, true
+		return elemSize, true
 	}
 	product := uint64(1)
 	for _, d := range dims {

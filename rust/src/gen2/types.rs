@@ -32,9 +32,19 @@ impl fmt::Display for CowrieError {
             CowrieError::Io(e) => write!(f, "I/O error: {}", e),
             CowrieError::TooDeep => write!(f, "nesting too deep"),
             CowrieError::TooLarge => write!(f, "data too large"),
-            CowrieError::TrailingData { pos, remaining } => write!(f, "trailing data after root value: {} unconsumed bytes at position {}", remaining, pos),
-            CowrieError::InvalidDictIndex { index, dict_len } => write!(f, "dictionary index {} out of range (dict size: {})", index, dict_len),
-            CowrieError::RankExceeded { rank, max } => write!(f, "tensor rank {} exceeds maximum {}", rank, max),
+            CowrieError::TrailingData { pos, remaining } => write!(
+                f,
+                "trailing data after root value: {} unconsumed bytes at position {}",
+                remaining, pos
+            ),
+            CowrieError::InvalidDictIndex { index, dict_len } => write!(
+                f,
+                "dictionary index {} out of range (dict size: {})",
+                index, dict_len
+            ),
+            CowrieError::RankExceeded { rank, max } => {
+                write!(f, "tensor rank {} exceeds maximum {}", rank, max)
+            }
         }
     }
 }
@@ -65,11 +75,11 @@ pub enum DType {
     Float64 = 0x0C,
     Bool = 0x0D,
     // Quantized types
-    QINT4 = 0x10,    // 4-bit quantized integer
-    QINT2 = 0x11,    // 2-bit quantized integer
-    QINT3 = 0x12,    // 3-bit quantized integer
-    Ternary = 0x13,  // Ternary (-1, 0, 1)
-    Binary = 0x14,   // Binary (0, 1)
+    QINT4 = 0x10,   // 4-bit quantized integer
+    QINT2 = 0x11,   // 2-bit quantized integer
+    QINT3 = 0x12,   // 3-bit quantized integer
+    Ternary = 0x13, // Ternary (-1, 0, 1)
+    Binary = 0x14,  // Binary (0, 1)
 }
 
 impl TryFrom<u8> for DType {
@@ -698,8 +708,14 @@ mod tests {
 
     #[test]
     fn test_audio_encoding_try_from() {
-        assert_eq!(AudioEncoding::try_from(0x01).unwrap(), AudioEncoding::PcmInt16);
-        assert_eq!(AudioEncoding::try_from(0x02).unwrap(), AudioEncoding::PcmFloat32);
+        assert_eq!(
+            AudioEncoding::try_from(0x01).unwrap(),
+            AudioEncoding::PcmInt16
+        );
+        assert_eq!(
+            AudioEncoding::try_from(0x02).unwrap(),
+            AudioEncoding::PcmFloat32
+        );
         assert_eq!(AudioEncoding::try_from(0x03).unwrap(), AudioEncoding::Opus);
         assert_eq!(AudioEncoding::try_from(0x04).unwrap(), AudioEncoding::Aac);
         assert!(AudioEncoding::try_from(0x00).is_err());

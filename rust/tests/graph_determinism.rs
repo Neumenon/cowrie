@@ -7,21 +7,19 @@
 //! any future regression (e.g. props type changed to HashMap, or field-order
 //! drift in the wire format).
 
-use std::collections::BTreeMap;
 use cowrie_rs::gen2::{
     encode,
     types::{EdgeBatchData, EdgeData, NodeBatchData, NodeData, Value},
 };
+use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
 // Go canonical hex (ground truth)
 // ---------------------------------------------------------------------------
 
-const GO_NODE: &str =
-    "534a02000203616765046e616d6535026e310106506572736f6e02005e010505416c696365";
+const GO_NODE: &str = "534a02000203616765046e616d6535026e310106506572736f6e02005e010505416c696365";
 
-const GO_EDGE: &str =
-    "534a0200020573696e6365067765696768743601610162054b4e4f5753020003c81f0145";
+const GO_EDGE: &str = "534a0200020573696e6365067765696768743601610162054b4e4f5753020003c81f0145";
 
 const GO_NODE_BATCH: &str =
     "534a02000203616765046e616d653701026e310106506572736f6e02005e010505416c696365";

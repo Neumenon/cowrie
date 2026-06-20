@@ -1143,9 +1143,10 @@ def _tensor_expected_bytes(dtype: DType, shape: list[int]) -> tuple[int, bool]:
     elem_size, ok = _dtype_elem_size(dtype)
     if not ok:
         return 0, False
-    # Rank-0 or any zero dimension → 0 bytes
+    # Rank-0 (no dims) is a scalar: one element (elem_size bytes). A zero
+    # dimension yields an empty 0-byte tensor (handled in the loop below).
     if not shape:
-        return 0, True
+        return elem_size, True
     product = 1
     MAX_U64 = (1 << 64) - 1
     for d in shape:

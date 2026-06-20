@@ -1,7 +1,7 @@
 //! Cowrie encoder.
 
-use super::types::{Value, CowrieError, NodeData, EdgeData};
 use super::tags;
+use super::types::{CowrieError, EdgeData, NodeData, Value};
 use crate::{MAGIC, VERSION};
 use std::collections::{BTreeMap, HashMap};
 
@@ -58,7 +58,12 @@ fn build_dictionary(value: &Value, opts: &EncodeOptions) -> Vec<String> {
     keys
 }
 
-fn collect_keys(value: &Value, keys: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, opts: &EncodeOptions) {
+fn collect_keys(
+    value: &Value,
+    keys: &mut Vec<String>,
+    seen: &mut std::collections::HashSet<String>,
+    opts: &EncodeOptions,
+) {
     match value {
         Value::Array(arr) => {
             for item in arr {
@@ -118,7 +123,12 @@ fn collect_props_keys(
     }
 }
 
-fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, opts: &EncodeOptions) -> Result<(), CowrieError> {
+fn encode_value(
+    buf: &mut Vec<u8>,
+    value: &Value,
+    dict: &HashMap<&str, usize>,
+    opts: &EncodeOptions,
+) -> Result<(), CowrieError> {
     match value {
         Value::Null => {
             buf.push(tags::NULL);
@@ -206,13 +216,23 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
 
             for (key, val) in filtered {
                 // O(1) key index lookup
-                let idx = *dict.get(key.as_str())
-                    .expect("key should be in dictionary");
+                let idx = *dict.get(key.as_str()).expect("key should be in dictionary");
                 write_uvarint(buf, idx as u64);
                 encode_value(buf, val, dict, opts)?;
             }
         }
         Value::Tensor(t) => {
+            // Validate dataLen against shape/dtype on encode too, so we never emit
+            // bytes the decoder would reject (symmetric with decode).
+            if let Some(expected) = super::decode::tensor_expected_bytes(t.dtype, &t.shape) {
+                if t.data.len() != expected {
+                    return Err(CowrieError::InvalidData(format!(
+                        "tensor dataLen {} does not match shape/dtype (expected {} bytes)",
+                        t.data.len(),
+                        expected
+                    )));
+                }
+            }
             buf.push(tags::TENSOR);
             buf.push(t.dtype as u8);
             buf.push(t.shape.len() as u8);
@@ -222,6 +242,7 @@ fn encode_value(buf: &mut Vec<u8>, value: &Value, dict: &HashMap<&str, usize>, o
             write_uvarint(buf, t.data.len() as u64);
             buf.extend_from_slice(&t.data);
         }
+
         Value::TensorRef(r) => {
             buf.push(tags::TENSOR_REF);
             buf.push(r.store_id);
@@ -326,7 +347,10 @@ fn encode_props(
 ) -> Result<(), CowrieError> {
     // Filter nulls if needed
     let filtered: Vec<_> = if opts.omit_null {
-        props.iter().filter(|(_, v)| !matches!(v, Value::Null)).collect()
+        props
+            .iter()
+            .filter(|(_, v)| !matches!(v, Value::Null))
+            .collect()
     } else {
         props.iter().collect()
     };
@@ -334,8 +358,7 @@ fn encode_props(
     write_uvarint(buf, filtered.len() as u64);
     for (key, val) in filtered {
         // O(1) key index lookup
-        let idx = *dict.get(key.as_str())
-            .expect("key should be in dictionary");
+        let idx = *dict.get(key.as_str()).expect("key should be in dictionary");
         write_uvarint(buf, idx as u64);
         encode_value(buf, val, dict, opts)?;
     }
@@ -393,7 +416,10 @@ mod tests {
         ]);
 
         // With omit_null
-        let opts = EncodeOptions { omit_null: true, ..Default::default() };
+        let opts = EncodeOptions {
+            omit_null: true,
+            ..Default::default()
+        };
         let with_omit = encode_with_options(&val, &opts).unwrap();
 
         // Without omit_null

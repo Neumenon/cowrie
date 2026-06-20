@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn test_gen1_basic() {
-        use gen1::{encode, decode, Value};
+        use gen1::{decode, encode, Value};
 
         let val = Value::Object(vec![
             ("name".to_string(), Value::String("test".to_string())),
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn test_gen2_basic() {
-        use gen2::{encode, decode, Value};
+        use gen2::{decode, encode, Value};
 
         let val = Value::object(vec![
             ("name", Value::String("test".into())),

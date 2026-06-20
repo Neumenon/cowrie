@@ -2,14 +2,14 @@
 //!
 //! Provides framed encoding/decoding with optional gzip or zstd compression.
 
-use super::types::{Value, CowrieError};
-use super::encode::encode;
 use super::decode::decode;
+use super::encode::encode;
+use super::types::{CowrieError, Value};
 use crate::{MAGIC, VERSION};
-use std::io::{Read, Write};
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression as GzCompression;
+use std::io::{Read, Write};
 
 /// Compression type for framed encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,7 +137,9 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, C
     };
 
     if decompressed.len() != uncompressed_len as usize {
-        return Err(CowrieError::InvalidData("decompressed length mismatch".into()));
+        return Err(CowrieError::InvalidData(
+            "decompressed length mismatch".into(),
+        ));
     }
 
     // Reconstruct full Cowrie data with header
@@ -145,7 +147,7 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, C
     full.push(data[0]); // 'S'
     full.push(data[1]); // 'J'
     full.push(data[2]); // version
-    full.push(0);       // flags = 0 (no compression)
+    full.push(0); // flags = 0 (no compression)
     full.extend_from_slice(&decompressed);
 
     decode(&full)
@@ -153,21 +155,29 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, C
 
 fn compress_gzip(data: &[u8]) -> Result<Vec<u8>, CowrieError> {
     let mut encoder = GzEncoder::new(Vec::new(), GzCompression::default());
-    encoder.write_all(data).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
-    encoder.finish().map_err(|e| CowrieError::InvalidData(e.to_string()))
+    encoder
+        .write_all(data)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+    encoder
+        .finish()
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))
 }
 
 fn decompress_gzip(data: &[u8], max_size: usize) -> Result<Vec<u8>, CowrieError> {
     let mut decoder = GzDecoder::new(data);
     if max_size == 0 {
         let mut out = Vec::new();
-        decoder.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+        decoder
+            .read_to_end(&mut out)
+            .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
         return Ok(out);
     }
 
     let mut out = Vec::new();
     let mut limited = decoder.take((max_size as u64) + 1);
-    limited.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+    limited
+        .read_to_end(&mut out)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     if out.len() > max_size {
         return Err(CowrieError::TooLarge);
     }
@@ -190,13 +200,17 @@ fn decompress_zstd(data: &[u8], max_size: usize) -> Result<Vec<u8>, CowrieError>
         .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     if max_size == 0 {
         let mut out = Vec::new();
-        decoder.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+        decoder
+            .read_to_end(&mut out)
+            .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
         return Ok(out);
     }
 
     let mut out = Vec::new();
     let mut limited = decoder.take((max_size as u64) + 1);
-    limited.read_to_end(&mut out).map_err(|e| CowrieError::InvalidData(e.to_string()))?;
+    limited
+        .read_to_end(&mut out)
+        .map_err(|e| CowrieError::InvalidData(e.to_string()))?;
     if out.len() > max_size {
         return Err(CowrieError::TooLarge);
     }
@@ -224,7 +238,10 @@ mod tests {
         let decoded = decode_framed(&encoded).unwrap();
 
         if let Value::Object(dec_obj) = decoded {
-            assert_eq!(dec_obj.get("name"), Some(&Value::String("test".to_string())));
+            assert_eq!(
+                dec_obj.get("name"),
+                Some(&Value::String("test".to_string()))
+            );
         } else {
             panic!("expected object");
         }

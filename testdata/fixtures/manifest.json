@@ -57,6 +57,20 @@
       "expect": {"ok": true}
     },
     {
+      "id": "gen2_tensor_rank0_scalar",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/tensor_rank0_scalar.cowrie",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_tensor_bool",
+      "gen": 2,
+      "kind": "decode",
+      "input": "ml/tensor_bool.cowrie",
+      "expect": {"ok": true}
+    },
+    {
       "id": "gen2_ml_tensor_ref",
       "gen": 2,
       "kind": "decode",

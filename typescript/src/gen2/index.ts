@@ -488,7 +488,8 @@ function dtypeElemSize(dtype: number): number | null {
     case 0x0a: return 4;  // UINT32
     case 0x0b: return 8;  // UINT64
     case 0x0c: return 8;  // FLOAT64
-    default:              // Sub-byte packed types: skip validation
+    case 0x0d: return 1;  // BOOL (one byte per element; Bitmask is the bit-packed type)
+    default:              // Sub-byte packed types (qint4/qint2/qint3/ternary/binary): skip
       return null;
   }
 }
@@ -497,12 +498,13 @@ function dtypeElemSize(dtype: number): number | null {
  * Computes the expected byte length for a tensor with the given shape and dtype.
  * Returns null when the dtype uses sub-byte packing or when the product overflows
  * Number.MAX_SAFE_INTEGER (skip the check rather than accept corrupt data silently).
- * Rank-0 tensors and tensors with any zero dimension produce 0 bytes.
+ * A rank-0 tensor (no dims) is a scalar — one element (elemSize bytes); a zero
+ * dimension yields an empty 0-byte tensor.
  */
 function tensorExpectedBytes(dtype: number, shape: number[]): number | null {
   const elemSize = dtypeElemSize(dtype);
   if (elemSize === null) return null;
-  if (shape.length === 0) return 0;
+  if (shape.length === 0) return elemSize;  // rank-0 scalar = one element
   let product = 1;
   for (const dim of shape) {
     if (dim === 0) return 0;
@@ -705,6 +707,12 @@ class Encoder {
         const rank = t.shape.length;
         if (rank > Limits.MAX_RANK || rank > 255) {
           throw new SecurityLimitExceeded(`Tensor rank too large: ${rank} > ${Limits.MAX_RANK}`);
+        }
+        // Validate dataLen against shape/dtype on encode too, so we never emit
+        // bytes the decoder would reject (symmetric with decode).
+        const expectedBytes = tensorExpectedBytes(t.dtype, t.shape);
+        if (expectedBytes !== null && t.data.length !== expectedBytes) {
+          throw new Error(`cowrie: tensor dataLen ${t.data.length} does not match shape/dtype (expected ${expectedBytes} bytes)`);
         }
         this.writeByte(Tag.TENSOR);
         this.writeByte(t.dtype);

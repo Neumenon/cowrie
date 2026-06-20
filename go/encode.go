@@ -328,6 +328,13 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 
 	// v2.1 Extension Types
 	case TypeTensor:
+		// Validate dataLen against shape/dtype on encode too, so we never emit
+		// bytes the decoder would reject (symmetric with decode.go's check).
+		if expected, ok := tensorExpectedBytes(v.tensorVal.DType, v.tensorVal.Dims); ok {
+			if uint64(len(v.tensorVal.Data)) != expected {
+				return fmt.Errorf("cowrie: tensor dataLen %d does not match shape/dtype (expected %d bytes)", len(v.tensorVal.Data), expected)
+			}
+		}
 		buf.writeByte(TagTensor)
 		buf.writeByte(byte(v.tensorVal.DType))
 		buf.writeByte(byte(len(v.tensorVal.Dims))) // rank

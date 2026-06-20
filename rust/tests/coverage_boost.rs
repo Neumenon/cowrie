@@ -2,16 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use cowrie_rs::gen2::{
-    decode, encode, encode_with_options, decode_with_options,
-    Value, DType, TensorData, EncodeOptions, CowrieError,
-    encode_framed, decode_framed, Compression,
-    schema_fingerprint64,
-    from_json, to_json, to_json_pretty,
-    write_frame, read_frame, MasterWriterOptions,
-};
 use cowrie_rs::gen2::decode::DecodeOptions;
 use cowrie_rs::gen2::types::*;
+use cowrie_rs::gen2::{
+    decode, decode_framed, decode_with_options, encode, encode_framed, encode_with_options,
+    from_json, read_frame, schema_fingerprint64, to_json, to_json_pretty, write_frame, Compression,
+    CowrieError, DType, EncodeOptions, MasterWriterOptions, TensorData, Value,
+};
 
 // ============================================================
 // Gen2 encode/decode roundtrip — all value types
@@ -154,7 +151,8 @@ fn roundtrip_bigint() {
 fn roundtrip_decimal() {
     let mut data = vec![0u8; 17];
     data[0] = 2; // scale
-    data[1] = 0x39; data[2] = 0x30; // coef
+    data[1] = 0x39;
+    data[2] = 0x30; // coef
     let v = Value::Decimal(data.clone());
     let enc = encode(&v).unwrap();
     let dec = decode(&enc).unwrap();
@@ -219,13 +217,13 @@ fn roundtrip_large_map() {
 
 #[test]
 fn roundtrip_nested() {
-    let v = Value::object(vec![
-        ("outer", Value::object(vec![
-            ("inner", Value::Array(vec![
-                Value::Int(1), Value::Null, Value::Bool(false),
-            ])),
-        ])),
-    ]);
+    let v = Value::object(vec![(
+        "outer",
+        Value::object(vec![(
+            "inner",
+            Value::Array(vec![Value::Int(1), Value::Null, Value::Bool(false)]),
+        )]),
+    )]);
     let enc = encode(&v).unwrap();
     let dec = decode(&enc).unwrap();
     assert_eq!(dec, v);
@@ -237,7 +235,9 @@ fn roundtrip_nested() {
 
 #[test]
 fn roundtrip_tensor_float32() {
-    let data: Vec<u8> = 1.0f32.to_le_bytes().iter()
+    let data: Vec<u8> = 1.0f32
+        .to_le_bytes()
+        .iter()
         .chain(2.0f32.to_le_bytes().iter())
         .chain(3.0f32.to_le_bytes().iter())
         .copied()
@@ -254,7 +254,9 @@ fn roundtrip_tensor_float32() {
 
 #[test]
 fn roundtrip_tensor_float64() {
-    let data: Vec<u8> = 1.0f64.to_le_bytes().iter()
+    let data: Vec<u8> = 1.0f64
+        .to_le_bytes()
+        .iter()
         .chain(2.0f64.to_le_bytes().iter())
         .copied()
         .collect();
@@ -270,7 +272,9 @@ fn roundtrip_tensor_float64() {
 
 #[test]
 fn roundtrip_tensor_int32() {
-    let data: Vec<u8> = 42i32.to_le_bytes().iter()
+    let data: Vec<u8> = 42i32
+        .to_le_bytes()
+        .iter()
         .chain((-1i32).to_le_bytes().iter())
         .copied()
         .collect();
@@ -289,25 +293,25 @@ fn roundtrip_tensor_all_dtypes() {
     // Each (dtype, elem_size_bytes) pair. Sub-byte packed dtypes use 0 to indicate
     // "no byte-level validation" — we store 1 byte for shape [1] to keep it simple.
     let dtype_sizes: &[(DType, usize)] = &[
-        (DType::Float32,  4),
-        (DType::Float16,  2),
+        (DType::Float32, 4),
+        (DType::Float16, 2),
         (DType::BFloat16, 2),
-        (DType::Int8,     1),
-        (DType::Int16,    2),
-        (DType::Int32,    4),
-        (DType::Int64,    8),
-        (DType::Uint8,    1),
-        (DType::Uint16,   2),
-        (DType::Uint32,   4),
-        (DType::Uint64,   8),
-        (DType::Float64,  8),
+        (DType::Int8, 1),
+        (DType::Int16, 2),
+        (DType::Int32, 4),
+        (DType::Int64, 8),
+        (DType::Uint8, 1),
+        (DType::Uint16, 2),
+        (DType::Uint32, 4),
+        (DType::Uint64, 8),
+        (DType::Float64, 8),
         // Sub-byte: validation skipped; use shape [1] and 1 byte
-        (DType::Bool,     0),
-        (DType::QINT4,    0),
-        (DType::QINT2,    0),
-        (DType::QINT3,    0),
-        (DType::Ternary,  0),
-        (DType::Binary,   0),
+        (DType::Bool, 0),
+        (DType::QINT4, 0),
+        (DType::QINT2, 0),
+        (DType::QINT3, 0),
+        (DType::Ternary, 0),
+        (DType::Binary, 0),
     ];
     for &(dtype, elem_size) in dtype_sizes {
         let (shape, data) = if elem_size == 0 {
@@ -317,11 +321,7 @@ fn roundtrip_tensor_all_dtypes() {
             // 2 elements, exact byte count
             (vec![2u64], vec![0u8; 2 * elem_size])
         };
-        let v = Value::Tensor(TensorData {
-            dtype,
-            shape,
-            data,
-        });
+        let v = Value::Tensor(TensorData { dtype, shape, data });
         let enc = encode(&v).unwrap();
         let dec = decode(&enc).unwrap();
         assert_eq!(dec, v, "dtype roundtrip failed for {:?}", dtype);
@@ -346,8 +346,11 @@ fn roundtrip_tensor_ref() {
 #[test]
 fn roundtrip_image() {
     let formats = [
-        ImageFormat::Jpeg, ImageFormat::Png, ImageFormat::Webp,
-        ImageFormat::Avif, ImageFormat::Bmp,
+        ImageFormat::Jpeg,
+        ImageFormat::Png,
+        ImageFormat::Webp,
+        ImageFormat::Avif,
+        ImageFormat::Bmp,
     ];
     for fmt in formats {
         let v = Value::Image(ImageData {
@@ -365,8 +368,10 @@ fn roundtrip_image() {
 #[test]
 fn roundtrip_audio() {
     let encodings = [
-        AudioEncoding::PcmInt16, AudioEncoding::PcmFloat32,
-        AudioEncoding::Opus, AudioEncoding::Aac,
+        AudioEncoding::PcmInt16,
+        AudioEncoding::PcmFloat32,
+        AudioEncoding::Opus,
+        AudioEncoding::Aac,
     ];
     for ae in encodings {
         let v = Value::Audio(AudioData {
@@ -380,9 +385,6 @@ fn roundtrip_audio() {
         assert_eq!(dec, v, "audio encoding {:?}", ae);
     }
 }
-
-
-
 
 // ============================================================
 // Ext roundtrip
@@ -480,22 +482,18 @@ fn roundtrip_edge_batch() {
     assert_eq!(dec, v);
 }
 
-
 // ============================================================
 // Encode options: omit_null
 // ============================================================
 
 #[test]
 fn encode_omit_null_in_nested() {
-    let inner = Value::object(vec![
-        ("keep", Value::Int(1)),
-        ("drop", Value::Null),
-    ]);
-    let v = Value::object(vec![
-        ("child", inner),
-        ("gone", Value::Null),
-    ]);
-    let opts = EncodeOptions { omit_null: true, ..Default::default() };
+    let inner = Value::object(vec![("keep", Value::Int(1)), ("drop", Value::Null)]);
+    let v = Value::object(vec![("child", inner), ("gone", Value::Null)]);
+    let opts = EncodeOptions {
+        omit_null: true,
+        ..Default::default()
+    };
     let enc = encode_with_options(&v, &opts).unwrap();
     let dec = decode(&enc).unwrap();
     // "gone" and "drop" should be absent
@@ -516,7 +514,10 @@ fn encode_omit_null_in_node_props() {
         labels: vec![],
         props,
     });
-    let opts = EncodeOptions { omit_null: true, ..Default::default() };
+    let opts = EncodeOptions {
+        omit_null: true,
+        ..Default::default()
+    };
     let enc = encode_with_options(&v, &opts).unwrap();
     let dec = decode(&enc).unwrap();
     let node = dec.as_node().unwrap();
@@ -641,7 +642,10 @@ fn json_string() {
 #[test]
 fn json_array() {
     let v = from_json("[1,2,3]").unwrap();
-    assert_eq!(v, Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)]));
+    assert_eq!(
+        v,
+        Value::Array(vec![Value::Int(1), Value::Int(2), Value::Int(3)])
+    );
 }
 
 #[test]
@@ -667,16 +671,24 @@ fn json_tensor_roundtrip() {
 #[test]
 fn json_tensor_all_dtypes() {
     let dtypes_str = [
-        ("float32", DType::Float32), ("float64", DType::Float64),
-        ("float16", DType::Float16), ("bfloat16", DType::BFloat16),
-        ("int8", DType::Int8), ("int16", DType::Int16),
-        ("int32", DType::Int32), ("int64", DType::Int64),
-        ("uint8", DType::Uint8), ("uint16", DType::Uint16),
-        ("uint32", DType::Uint32), ("uint64", DType::Uint64),
+        ("float32", DType::Float32),
+        ("float64", DType::Float64),
+        ("float16", DType::Float16),
+        ("bfloat16", DType::BFloat16),
+        ("int8", DType::Int8),
+        ("int16", DType::Int16),
+        ("int32", DType::Int32),
+        ("int64", DType::Int64),
+        ("uint8", DType::Uint8),
+        ("uint16", DType::Uint16),
+        ("uint32", DType::Uint32),
+        ("uint64", DType::Uint64),
         ("bool", DType::Bool),
-        ("qint4", DType::QINT4), ("qint2", DType::QINT2),
+        ("qint4", DType::QINT4),
+        ("qint2", DType::QINT2),
         ("qint3", DType::QINT3),
-        ("ternary", DType::Ternary), ("binary", DType::Binary),
+        ("ternary", DType::Ternary),
+        ("binary", DType::Binary),
     ];
     for (name, dtype) in dtypes_str {
         let tensor = Value::Tensor(TensorData {
@@ -685,7 +697,11 @@ fn json_tensor_all_dtypes() {
             data: vec![0u8; 4],
         });
         let json_str = to_json(&tensor).unwrap();
-        assert!(json_str.contains(name), "JSON should contain dtype name {}", name);
+        assert!(
+            json_str.contains(name),
+            "JSON should contain dtype name {}",
+            name
+        );
         let back = from_json(&json_str).unwrap();
         assert_eq!(back, tensor, "roundtrip failed for {}", name);
     }
@@ -711,8 +727,10 @@ fn json_datetime_roundtrip() {
 
 #[test]
 fn json_uuid_roundtrip() {
-    let uuid = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0,
-                0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+    let uuid = [
+        0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
+        0x88,
+    ];
     let v = Value::Uuid(uuid);
     let json_str = to_json(&v).unwrap();
     assert!(json_str.contains("\"_type\":\"uuid\""));
@@ -736,7 +754,10 @@ fn json_bigint() {
 
 #[test]
 fn json_tensor_ref() {
-    let v = Value::TensorRef(TensorRef { store_id: 1, key: vec![0xAB] });
+    let v = Value::TensorRef(TensorRef {
+        store_id: 1,
+        key: vec![0xAB],
+    });
     let json_str = to_json(&v).unwrap();
     assert!(json_str.contains("\"_type\":\"tensor_ref\""));
 }
@@ -765,7 +786,10 @@ fn json_image_all_formats() {
     ];
     for (fmt, name) in formats {
         let v = Value::Image(ImageData {
-            format: fmt, width: 1, height: 1, data: vec![],
+            format: fmt,
+            width: 1,
+            height: 1,
+            data: vec![],
         });
         let json_str = to_json(&v).unwrap();
         assert!(json_str.contains(name));
@@ -795,19 +819,22 @@ fn json_audio_all_encodings() {
     ];
     for (enc, name) in encodings {
         let v = Value::Audio(AudioData {
-            encoding: enc, sample_rate: 44100, channels: 2, data: vec![],
+            encoding: enc,
+            sample_rate: 44100,
+            channels: 2,
+            data: vec![],
         });
         let json_str = to_json(&v).unwrap();
         assert!(json_str.contains(name));
     }
 }
 
-
-
-
 #[test]
 fn json_ext() {
-    let v = Value::Ext(ExtData { type_id: 99, payload: vec![1, 2, 3] });
+    let v = Value::Ext(ExtData {
+        type_id: 99,
+        payload: vec![1, 2, 3],
+    });
     let json_str = to_json(&v).unwrap();
     // Canonical schema: _type is "unknown_ext", fields are "ext_type" and "payload"
     assert!(json_str.contains("\"_type\":\"unknown_ext\""));
@@ -817,7 +844,10 @@ fn json_ext() {
 
 #[test]
 fn json_bitmask() {
-    let v = Value::Bitmask { count: 8, bits: vec![0xFF] };
+    let v = Value::Bitmask {
+        count: 8,
+        bits: vec![0xFF],
+    };
     let json_str = to_json(&v).unwrap();
     assert!(json_str.contains("\"_type\":\"bitmask\""));
 }
@@ -959,7 +989,6 @@ fn json_edge_batch() {
     assert!(json_str.contains("\"_type\":\"edge_batch\""));
 }
 
-
 // ============================================================
 // Schema fingerprint tests
 // ============================================================
@@ -982,47 +1011,90 @@ fn schema_scalar_types() {
     // All should produce different fingerprints
     let fps: Vec<u64> = types.iter().map(schema_fingerprint64).collect();
     for i in 0..fps.len() {
-        for j in (i+1)..fps.len() {
-            assert_ne!(fps[i], fps[j], "types {} and {} have same fingerprint", i, j);
+        for j in (i + 1)..fps.len() {
+            assert_ne!(
+                fps[i], fps[j],
+                "types {} and {} have same fingerprint",
+                i, j
+            );
         }
     }
 }
 
 #[test]
 fn schema_tensor_includes_dtype() {
-    let t1 = Value::Tensor(TensorData { dtype: DType::Float32, shape: vec![3], data: vec![0; 12] });
-    let t2 = Value::Tensor(TensorData { dtype: DType::Float64, shape: vec![3], data: vec![0; 24] });
+    let t1 = Value::Tensor(TensorData {
+        dtype: DType::Float32,
+        shape: vec![3],
+        data: vec![0; 12],
+    });
+    let t2 = Value::Tensor(TensorData {
+        dtype: DType::Float64,
+        shape: vec![3],
+        data: vec![0; 24],
+    });
     assert_ne!(schema_fingerprint64(&t1), schema_fingerprint64(&t2));
 }
 
 #[test]
 fn schema_tensor_includes_rank() {
-    let t1 = Value::Tensor(TensorData { dtype: DType::Float32, shape: vec![6], data: vec![0; 24] });
-    let t2 = Value::Tensor(TensorData { dtype: DType::Float32, shape: vec![2, 3], data: vec![0; 24] });
+    let t1 = Value::Tensor(TensorData {
+        dtype: DType::Float32,
+        shape: vec![6],
+        data: vec![0; 24],
+    });
+    let t2 = Value::Tensor(TensorData {
+        dtype: DType::Float32,
+        shape: vec![2, 3],
+        data: vec![0; 24],
+    });
     assert_ne!(schema_fingerprint64(&t1), schema_fingerprint64(&t2));
 }
 
 #[test]
 fn schema_image_includes_format() {
-    let i1 = Value::Image(ImageData { format: ImageFormat::Jpeg, width: 1, height: 1, data: vec![] });
-    let i2 = Value::Image(ImageData { format: ImageFormat::Png, width: 1, height: 1, data: vec![] });
+    let i1 = Value::Image(ImageData {
+        format: ImageFormat::Jpeg,
+        width: 1,
+        height: 1,
+        data: vec![],
+    });
+    let i2 = Value::Image(ImageData {
+        format: ImageFormat::Png,
+        width: 1,
+        height: 1,
+        data: vec![],
+    });
     assert_ne!(schema_fingerprint64(&i1), schema_fingerprint64(&i2));
 }
 
 #[test]
 fn schema_audio_includes_encoding_channels() {
-    let a1 = Value::Audio(AudioData { encoding: AudioEncoding::Opus, sample_rate: 48000, channels: 1, data: vec![] });
-    let a2 = Value::Audio(AudioData { encoding: AudioEncoding::Opus, sample_rate: 48000, channels: 2, data: vec![] });
+    let a1 = Value::Audio(AudioData {
+        encoding: AudioEncoding::Opus,
+        sample_rate: 48000,
+        channels: 1,
+        data: vec![],
+    });
+    let a2 = Value::Audio(AudioData {
+        encoding: AudioEncoding::Opus,
+        sample_rate: 48000,
+        channels: 2,
+        data: vec![],
+    });
     assert_ne!(schema_fingerprint64(&a1), schema_fingerprint64(&a2));
 }
 
-
-
-
 #[test]
 fn schema_ext_includes_type_id() {
-    let e1 = Value::Ext(ExtData { type_id: 1, payload: vec![] });
-    let e2 = Value::Ext(ExtData { type_id: 2, payload: vec![] });
+    let e1 = Value::Ext(ExtData {
+        type_id: 1,
+        payload: vec![],
+    });
+    let e2 = Value::Ext(ExtData {
+        type_id: 2,
+        payload: vec![],
+    });
     assert_ne!(schema_fingerprint64(&e1), schema_fingerprint64(&e2));
 }
 
@@ -1030,8 +1102,14 @@ fn schema_ext_includes_type_id() {
 fn schema_bitmask() {
     // Go parity: a bitmask's schema is the type ordinal alone; count/bits are
     // data, not schema, so two bitmasks of different sizes hash identically.
-    let b1 = Value::Bitmask { count: 8, bits: vec![0xFF] };
-    let b2 = Value::Bitmask { count: 16, bits: vec![0xFF, 0xFF] };
+    let b1 = Value::Bitmask {
+        count: 8,
+        bits: vec![0xFF],
+    };
+    let b2 = Value::Bitmask {
+        count: 16,
+        bits: vec![0xFF, 0xFF],
+    };
     assert_eq!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
 }
 
@@ -1039,8 +1117,12 @@ fn schema_bitmask() {
 fn schema_graph_types() {
     let node = Value::Node(NodeData::new("n", vec!["L".into()], BTreeMap::new()));
     let edge = Value::Edge(EdgeData::new("a", "b", "R", BTreeMap::new()));
-    let nb = Value::NodeBatch(NodeBatchData { nodes: vec![NodeData::new("n", vec![], BTreeMap::new())] });
-    let eb = Value::EdgeBatch(EdgeBatchData { edges: vec![EdgeData::new("a", "b", "R", BTreeMap::new())] });
+    let nb = Value::NodeBatch(NodeBatchData {
+        nodes: vec![NodeData::new("n", vec![], BTreeMap::new())],
+    });
+    let eb = Value::EdgeBatch(EdgeBatchData {
+        edges: vec![EdgeData::new("a", "b", "R", BTreeMap::new())],
+    });
 
     let fps = [
         schema_fingerprint64(&node),
@@ -1049,7 +1131,7 @@ fn schema_graph_types() {
         schema_fingerprint64(&eb),
     ];
     for i in 0..fps.len() {
-        for j in (i+1)..fps.len() {
+        for j in (i + 1)..fps.len() {
             assert_ne!(fps[i], fps[j], "graph types {} and {} collide", i, j);
         }
     }
@@ -1066,25 +1148,82 @@ fn schema_descriptor_all() {
     assert_eq!(schema_descriptor(&Value::Float(0.0)), "float64");
     assert_eq!(schema_descriptor(&Value::String("x".into())), "string");
     assert_eq!(schema_descriptor(&Value::Bytes(vec![])), "bytes");
-    assert_eq!(schema_descriptor(&Value::Decimal(vec![0;17])), "decimal128");
+    assert_eq!(
+        schema_descriptor(&Value::Decimal(vec![0; 17])),
+        "decimal128"
+    );
     assert_eq!(schema_descriptor(&Value::DateTime(0)), "datetime64");
-    assert_eq!(schema_descriptor(&Value::Uuid([0;16])), "uuid128");
+    assert_eq!(schema_descriptor(&Value::Uuid([0; 16])), "uuid128");
     assert_eq!(schema_descriptor(&Value::BigInt(vec![])), "bigint");
     assert_eq!(schema_descriptor(&Value::Array(vec![])), "[]");
-    assert_eq!(schema_descriptor(&Value::Array(vec![Value::Int(1)])), "[int64,...]");
+    assert_eq!(
+        schema_descriptor(&Value::Array(vec![Value::Int(1)])),
+        "[int64,...]"
+    );
     assert_eq!(schema_descriptor(&Value::Object(BTreeMap::new())), "{}");
     let v = Value::object(vec![("abc", Value::Int(1))]);
     assert_eq!(schema_descriptor(&v), "{abc,...}");
-    assert!(schema_descriptor(&Value::Tensor(TensorData { dtype: DType::Float32, shape: vec![1], data: vec![0;4] })).starts_with("tensor<"));
-    assert_eq!(schema_descriptor(&Value::TensorRef(TensorRef { store_id: 0, key: vec![] })), "tensor_ref");
-    assert_eq!(schema_descriptor(&Value::Image(ImageData { format: ImageFormat::Jpeg, width: 1, height: 1, data: vec![] })), "image");
-    assert_eq!(schema_descriptor(&Value::Audio(AudioData { encoding: AudioEncoding::Opus, sample_rate: 44100, channels: 1, data: vec![] })), "audio");
-    assert_eq!(schema_descriptor(&Value::Ext(ExtData { type_id: 0, payload: vec![] })), "ext");
-    assert_eq!(schema_descriptor(&Value::Node(NodeData::new("n", vec![], BTreeMap::new()))), "node");
-    assert_eq!(schema_descriptor(&Value::Edge(EdgeData::new("a", "b", "R", BTreeMap::new()))), "edge");
-    assert_eq!(schema_descriptor(&Value::NodeBatch(NodeBatchData { nodes: vec![] })), "node_batch");
-    assert_eq!(schema_descriptor(&Value::EdgeBatch(EdgeBatchData { edges: vec![] })), "edge_batch");
-    assert_eq!(schema_descriptor(&Value::Bitmask { count: 1, bits: vec![0] }), "bitmask");
+    assert!(schema_descriptor(&Value::Tensor(TensorData {
+        dtype: DType::Float32,
+        shape: vec![1],
+        data: vec![0; 4]
+    }))
+    .starts_with("tensor<"));
+    assert_eq!(
+        schema_descriptor(&Value::TensorRef(TensorRef {
+            store_id: 0,
+            key: vec![]
+        })),
+        "tensor_ref"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::Image(ImageData {
+            format: ImageFormat::Jpeg,
+            width: 1,
+            height: 1,
+            data: vec![]
+        })),
+        "image"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::Audio(AudioData {
+            encoding: AudioEncoding::Opus,
+            sample_rate: 44100,
+            channels: 1,
+            data: vec![]
+        })),
+        "audio"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::Ext(ExtData {
+            type_id: 0,
+            payload: vec![]
+        })),
+        "ext"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::Node(NodeData::new("n", vec![], BTreeMap::new()))),
+        "node"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::Edge(EdgeData::new("a", "b", "R", BTreeMap::new()))),
+        "edge"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::NodeBatch(NodeBatchData { nodes: vec![] })),
+        "node_batch"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::EdgeBatch(EdgeBatchData { edges: vec![] })),
+        "edge_batch"
+    );
+    assert_eq!(
+        schema_descriptor(&Value::Bitmask {
+            count: 1,
+            bits: vec![0]
+        }),
+        "bitmask"
+    );
 }
 
 // ============================================================
@@ -1150,7 +1289,7 @@ fn master_stream_no_crc() {
 
 #[test]
 fn master_stream_is_checks() {
-    use cowrie_rs::gen2::master_stream::{is_master_stream, is_cowrie_document};
+    use cowrie_rs::gen2::master_stream::{is_cowrie_document, is_master_stream};
 
     assert!(is_master_stream(b"SJST\x02\x00"));
     assert!(!is_master_stream(b"SJ\x02\x00"));
@@ -1214,7 +1353,7 @@ fn value_as_str() {
 
 #[test]
 fn value_as_bytes() {
-    assert_eq!(Value::Bytes(vec![1,2]).as_bytes(), Some(&[1u8, 2][..]));
+    assert_eq!(Value::Bytes(vec![1, 2]).as_bytes(), Some(&[1u8, 2][..]));
     assert_eq!(Value::Null.as_bytes(), None);
 }
 
@@ -1242,7 +1381,11 @@ fn value_get() {
 
 #[test]
 fn value_as_tensor() {
-    let t = TensorData { dtype: DType::Float32, shape: vec![1], data: vec![0;4] };
+    let t = TensorData {
+        dtype: DType::Float32,
+        shape: vec![1],
+        data: vec![0; 4],
+    };
     assert!(Value::Tensor(t.clone()).as_tensor().is_some());
     assert!(Value::Null.as_tensor().is_none());
 }
@@ -1274,7 +1417,6 @@ fn value_as_edge_batch() {
     assert!(v.as_edge_batch().is_some());
     assert!(Value::Null.as_edge_batch().is_none());
 }
-
 
 #[test]
 fn value_from_bool() {
@@ -1360,7 +1502,9 @@ fn tensor_view_float64_wrong_dtype() {
 
 #[test]
 fn tensor_copy_float64() {
-    let data: Vec<u8> = 1.0f64.to_le_bytes().iter()
+    let data: Vec<u8> = 1.0f64
+        .to_le_bytes()
+        .iter()
         .chain(2.0f64.to_le_bytes().iter())
         .copied()
         .collect();
@@ -1383,7 +1527,9 @@ fn tensor_copy_float32_wrong_dtype() {
 
 #[test]
 fn tensor_float32_slice() {
-    let data: Vec<u8> = 1.0f32.to_le_bytes().iter()
+    let data: Vec<u8> = 1.0f32
+        .to_le_bytes()
+        .iter()
         .chain(2.0f32.to_le_bytes().iter())
         .copied()
         .collect();
@@ -1438,13 +1584,24 @@ fn tensor_view_int64_wrong_dtype() {
 #[test]
 fn dtype_try_from_all_valid() {
     let pairs = [
-        (0x01, DType::Float32), (0x02, DType::Float16), (0x03, DType::BFloat16),
-        (0x04, DType::Int8), (0x05, DType::Int16), (0x06, DType::Int32),
-        (0x07, DType::Int64), (0x08, DType::Uint8), (0x09, DType::Uint16),
-        (0x0A, DType::Uint32), (0x0B, DType::Uint64), (0x0C, DType::Float64),
+        (0x01, DType::Float32),
+        (0x02, DType::Float16),
+        (0x03, DType::BFloat16),
+        (0x04, DType::Int8),
+        (0x05, DType::Int16),
+        (0x06, DType::Int32),
+        (0x07, DType::Int64),
+        (0x08, DType::Uint8),
+        (0x09, DType::Uint16),
+        (0x0A, DType::Uint32),
+        (0x0B, DType::Uint64),
+        (0x0C, DType::Float64),
         (0x0D, DType::Bool),
-        (0x10, DType::QINT4), (0x11, DType::QINT2), (0x12, DType::QINT3),
-        (0x13, DType::Ternary), (0x14, DType::Binary),
+        (0x10, DType::QINT4),
+        (0x11, DType::QINT2),
+        (0x12, DType::QINT3),
+        (0x13, DType::Ternary),
+        (0x14, DType::Binary),
     ];
     for (byte, expected) in pairs {
         assert_eq!(DType::try_from(byte).unwrap(), expected);
@@ -1476,8 +1633,14 @@ fn cowrie_error_display() {
         CowrieError::Io(std::io::Error::other("test")),
         CowrieError::TooDeep,
         CowrieError::TooLarge,
-        CowrieError::TrailingData { pos: 10, remaining: 5 },
-        CowrieError::InvalidDictIndex { index: 5, dict_len: 3 },
+        CowrieError::TrailingData {
+            pos: 10,
+            remaining: 5,
+        },
+        CowrieError::InvalidDictIndex {
+            index: 5,
+            dict_len: 3,
+        },
         CowrieError::RankExceeded { rank: 64, max: 32 },
     ];
     for err in errors {
@@ -1500,7 +1663,7 @@ fn cowrie_error_from_io() {
 
 #[test]
 fn gen1_roundtrip_all_scalars() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
 
     let values = vec![
         Value::Null,
@@ -1530,10 +1693,14 @@ fn gen1_roundtrip_all_scalars() {
 
 #[test]
 fn gen1_roundtrip_arrays() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
 
     let vals = vec![
-        Value::Array(vec![Value::Int64(1), Value::String("two".into()), Value::Bool(false)]),
+        Value::Array(vec![
+            Value::Int64(1),
+            Value::String("two".into()),
+            Value::Bool(false),
+        ]),
         Value::Array(vec![]),
         Value::Array(vec![Value::Array(vec![Value::Null])]),
     ];
@@ -1547,13 +1714,12 @@ fn gen1_roundtrip_arrays() {
 
 #[test]
 fn gen1_roundtrip_nested_object() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
 
-    let val = Value::Object(vec![
-        ("outer".into(), Value::Object(vec![
-            ("inner".into(), Value::Int64(42)),
-        ])),
-    ]);
+    let val = Value::Object(vec![(
+        "outer".into(),
+        Value::Object(vec![("inner".into(), Value::Int64(42))]),
+    )]);
     let enc = encode(&val).unwrap();
     let dec = decode(&enc).unwrap();
     assert_eq!(val, dec);
@@ -1561,7 +1727,7 @@ fn gen1_roundtrip_nested_object() {
 
 #[test]
 fn gen1_roundtrip_proto_tensors() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
 
     let vals = vec![
         Value::Int64Array(vec![]),
@@ -1581,12 +1747,16 @@ fn gen1_roundtrip_proto_tensors() {
 
 #[test]
 fn gen1_roundtrip_node() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
     use std::collections::HashMap;
 
     let mut props = HashMap::new();
     props.insert("weight".to_string(), Value::Float64(1.5));
-    let val = Value::Node { id: 42, label: "Person".into(), properties: props };
+    let val = Value::Node {
+        id: 42,
+        label: "Person".into(),
+        properties: props,
+    };
     let enc = encode(&val).unwrap();
     let dec = decode(&enc).unwrap();
     assert_eq!(val, dec);
@@ -1594,12 +1764,17 @@ fn gen1_roundtrip_node() {
 
 #[test]
 fn gen1_roundtrip_edge() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
     use std::collections::HashMap;
 
     let mut props = HashMap::new();
     props.insert("since".to_string(), Value::Int64(2020));
-    let val = Value::Edge { src: 1, dst: 2, label: "KNOWS".into(), properties: props };
+    let val = Value::Edge {
+        src: 1,
+        dst: 2,
+        label: "KNOWS".into(),
+        properties: props,
+    };
     let enc = encode(&val).unwrap();
     let dec = decode(&enc).unwrap();
     assert_eq!(val, dec);
@@ -1607,7 +1782,7 @@ fn gen1_roundtrip_edge() {
 
 #[test]
 fn gen1_roundtrip_adjlist() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
 
     let val = Value::AdjList {
         id_width: 1,
@@ -1623,11 +1798,19 @@ fn gen1_roundtrip_adjlist() {
 
 #[test]
 fn gen1_roundtrip_node_batch() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
     use std::collections::HashMap;
 
-    let node1 = Value::Node { id: 1, label: "A".into(), properties: HashMap::new() };
-    let node2 = Value::Node { id: 2, label: "B".into(), properties: HashMap::new() };
+    let node1 = Value::Node {
+        id: 1,
+        label: "A".into(),
+        properties: HashMap::new(),
+    };
+    let node2 = Value::Node {
+        id: 2,
+        label: "B".into(),
+        properties: HashMap::new(),
+    };
     let val = Value::NodeBatch(vec![node1, node2]);
     let enc = encode(&val).unwrap();
     let dec = decode(&enc).unwrap();
@@ -1636,10 +1819,15 @@ fn gen1_roundtrip_node_batch() {
 
 #[test]
 fn gen1_roundtrip_edge_batch() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
     use std::collections::HashMap;
 
-    let e1 = Value::Edge { src: 1, dst: 2, label: "R".into(), properties: HashMap::new() };
+    let e1 = Value::Edge {
+        src: 1,
+        dst: 2,
+        label: "R".into(),
+        properties: HashMap::new(),
+    };
     let val = Value::EdgeBatch(vec![e1]);
     let enc = encode(&val).unwrap();
     let dec = decode(&enc).unwrap();
@@ -1648,14 +1836,27 @@ fn gen1_roundtrip_edge_batch() {
 
 #[test]
 fn gen1_roundtrip_graph_shard() {
-    use cowrie_rs::gen1::{encode, decode, Value};
+    use cowrie_rs::gen1::{decode, encode, Value};
     use std::collections::HashMap;
 
-    let n = Value::Node { id: 1, label: "N".into(), properties: HashMap::new() };
-    let e = Value::Edge { src: 1, dst: 1, label: "SELF".into(), properties: HashMap::new() };
+    let n = Value::Node {
+        id: 1,
+        label: "N".into(),
+        properties: HashMap::new(),
+    };
+    let e = Value::Edge {
+        src: 1,
+        dst: 1,
+        label: "SELF".into(),
+        properties: HashMap::new(),
+    };
     let mut meta = HashMap::new();
     meta.insert("version".to_string(), Value::Int64(1));
-    let val = Value::GraphShard { nodes: vec![n], edges: vec![e], meta };
+    let val = Value::GraphShard {
+        nodes: vec![n],
+        edges: vec![e],
+        meta,
+    };
     let enc = encode(&val).unwrap();
     let dec = decode(&enc).unwrap();
     assert_eq!(val, dec);
@@ -1729,11 +1930,17 @@ fn test_encode_decode_encode_canonical() {
         // nested map-of-arrays
         Value::Object({
             let mut m = BTreeMap::new();
-            m.insert("x".into(), Value::Array(vec![Value::Int(10), Value::Int(20)]));
-            m.insert("y".into(), Value::Array(vec![
-                Value::String("nested".into()),
-                Value::String("map".into()),
-            ]));
+            m.insert(
+                "x".into(),
+                Value::Array(vec![Value::Int(10), Value::Int(20)]),
+            );
+            m.insert(
+                "y".into(),
+                Value::Array(vec![
+                    Value::String("nested".into()),
+                    Value::String("map".into()),
+                ]),
+            );
             m
         }),
     ];
@@ -1757,7 +1964,10 @@ fn test_decode_rejects_trailing_garbage() {
     let mut data = encode(&v).expect("encode should succeed");
     data.push(0xFF);
     let result = decode(&data);
-    assert!(result.is_err(), "expected error for trailing garbage, got Ok");
+    assert!(
+        result.is_err(),
+        "expected error for trailing garbage, got Ok"
+    );
     let err_msg = format!("{}", result.unwrap_err());
     assert!(
         err_msg.contains("trailing"),

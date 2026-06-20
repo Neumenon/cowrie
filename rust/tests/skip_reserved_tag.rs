@@ -61,14 +61,22 @@ fn skip_tag_0x30_in_array() {
 
     let stream = cowrie_bytes(&[], &value_bytes);
     let result = decode(&stream);
-    assert!(result.is_ok(), "should not error on reserved tag 0x30: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "should not error on reserved tag 0x30: {:?}",
+        result
+    );
 
     let val = result.unwrap();
     let arr = val.as_array().expect("expected Array");
     assert_eq!(arr.len(), 3, "array should have 3 elements");
     assert_eq!(arr[0], Value::Int(1), "first kept element should be Int(1)");
-    assert_eq!(arr[1], Value::Null,   "reserved tag should decode as Null");
-    assert_eq!(arr[2], Value::Int(2), "second kept element should be Int(2)");
+    assert_eq!(arr[1], Value::Null, "reserved tag should decode as Null");
+    assert_eq!(
+        arr[2],
+        Value::Int(2),
+        "second kept element should be Int(2)"
+    );
 }
 
 /// Reserved tag 0x39 (was GraphShard) — same skip behaviour.
@@ -87,7 +95,11 @@ fn skip_tag_0x39_in_array() {
 
     let stream = cowrie_bytes(&[], &value_bytes);
     let result = decode(&stream);
-    assert!(result.is_ok(), "should not error on reserved tag 0x39: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "should not error on reserved tag 0x39: {:?}",
+        result
+    );
 
     let val = result.unwrap();
     let arr = val.as_array().expect("expected Array");
@@ -111,7 +123,11 @@ fn skip_reserved_tag_kept_field_survives() {
 
     let stream = cowrie_bytes(&["score"], &value_bytes);
     let result = decode(&stream);
-    assert!(result.is_ok(), "object with kept field should decode: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "object with kept field should decode: {:?}",
+        result
+    );
 
     let val = result.unwrap();
     let obj = val.as_object().expect("expected Object");
@@ -139,11 +155,17 @@ fn all_reserved_tags_skip_with_empty_payload() {
         assert!(
             result.is_ok(),
             "reserved tag 0x{:02x} should skip cleanly: {:?}",
-            tag, result
+            tag,
+            result
         );
         let val = result.unwrap();
         let arr = val.as_array().expect("expected Array");
-        assert_eq!(arr[0], Value::Null,   "tag 0x{:02x} → Null", tag);
-        assert_eq!(arr[1], Value::Int(7), "kept element preserved after tag 0x{:02x}", tag);
+        assert_eq!(arr[0], Value::Null, "tag 0x{:02x} → Null", tag);
+        assert_eq!(
+            arr[1],
+            Value::Int(7),
+            "kept element preserved after tag 0x{:02x}",
+            tag
+        );
     }
 }

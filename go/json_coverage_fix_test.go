@@ -30,7 +30,9 @@ func TestJSONReconstruct_AllDtypes(t *testing.T) {
 		DTypeUint8, DTypeUint16, DTypeUint32, DTypeUint64,
 	}
 	for _, dt := range dtypes {
-		got := roundTripTyped(t, Tensor(dt, []uint64{}, nil))
+		// Rank-0 = scalar: one element, so give it elemSize bytes of payload.
+		sz, _ := dtypeElemSize(dt)
+		got := roundTripTyped(t, Tensor(dt, []uint64{}, make([]byte, sz)))
 		if got.typ != TypeTensor {
 			t.Fatalf("dtype %v: got type %v, want tensor", dt, got.typ)
 		}
