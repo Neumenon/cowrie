@@ -18,15 +18,15 @@ Two wire formats. Gen1 is a straightforward binary JSON (null, bool, int64, floa
 
 - **Single dependency**: `github.com/klauspost/compress` for zstd. Everything else is stdlib.
 - **Streaming decoder**: `gen1.NewStreamDecoder(reader)` for record-by-record decode from an `io.Reader`. Gen2 has `MasterFrame` with framed streaming and metadata.
-- **CLI tool**: `go install github.com/Neumenon/cowrie/cmd/cowrie@latest` gives you `cowrie encode/decode/info` for command-line use.
+- **CLI tool**: `go install github.com/Neumenon/cowrie/go/v2/cmd/cowrie@latest` gives you `cowrie encode/decode/info` for command-line use.
 - **Graph types**: Node, Edge, NodeBatch, EdgeBatch — first-class wire types, not application conventions. (GraphShard and AdjList are reserved/parked for now.)
 
 **Quick example:**
 
 ```go
 import (
-    "github.com/Neumenon/cowrie/gen1"
-    "github.com/Neumenon/cowrie/gen2"
+    "github.com/Neumenon/cowrie/go/v2/gen1"
+    "github.com/Neumenon/cowrie/go/v2/gen2"
 )
 
 // Gen1 — simple
@@ -51,7 +51,7 @@ data, _ = gen2.Encode(val)
 **Install:**
 
 ```bash
-go get github.com/Neumenon/cowrie@v0.1.1
+go get github.com/Neumenon/cowrie/go/v2@latest
 ```
 
 Source: https://github.com/Neumenon/cowrie
@@ -179,7 +179,7 @@ All 4 implementations pass the same cross-language test fixtures (core types, ML
 
 - **Need human readability?** Use JSON.
 - **Have stable schemas and want type safety?** Use Protobuf or FlatBuffers.
-- **Need maximum language support?** MessagePack and CBOR have implementations in 50+ languages. Cowrie has 5.
+- **Need maximum language support?** MessagePack and CBOR have implementations in 50+ languages. Cowrie has 4.
 - **Single small messages?** Gen2's header overhead makes it 93% of JSON for one object. Gen1 is 76%, but if you're sending single small messages, JSON is probably fine.
 - **Need production-proven maturity?** Cowrie is new. It has security tests (7 vulnerability fixes, 16 regression tests, 9 configurable limits) but hasn't been deployed at scale.
 - **Python hot paths?** The Python implementation is pure Python. It's correct but not fast.
@@ -198,11 +198,10 @@ result = gen1.decode(data)
 **Install:**
 
 ```
-Go:         go get github.com/Neumenon/cowrie@v0.1.1
+Go:         go get github.com/Neumenon/cowrie/go/v2@latest
 Rust:       cargo add cowrie-rs@0.1.1
 Python:     pip install cowrie-py==0.1.1
 TypeScript: npm install cowrie-codec@0.1.1
-C:          cmake (see repo)
 ```
 
 Source and spec: https://github.com/Neumenon/cowrie

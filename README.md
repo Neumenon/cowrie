@@ -36,8 +36,9 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 
 ## Cross-Language Parity
 
-Every implementation produces **byte-identical binary encodings** for the same
-value. This is enforced by:
+Cowrie's cross-language parity is enforced by a **representative conformance
+suite** plus **pinned deterministic parity tests** (not yet a full
+all-implementation encode matrix):
 
 - **47 cross-language fixtures** (`testdata/fixtures/`) validated by
   `validate_fixtures.py`, which runs the Go reference decoder and the Python

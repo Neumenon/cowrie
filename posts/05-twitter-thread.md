@@ -112,7 +112,7 @@ Honest trade-offs:
 
 If you need schemaless binary + ML types + graph types, give it a try:
 
-go get github.com/Neumenon/cowrie@v0.1.1
+go get github.com/Neumenon/cowrie/go/v2@latest
 pip install cowrie-py
 cargo add cowrie-rs
 

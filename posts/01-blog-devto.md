@@ -1,4 +1,4 @@
-# Cowrie: A Binary JSON Codec for 5 Languages, No Code Generation Required
+# Cowrie: A Binary JSON Codec for 4 Languages, No Code Generation Required
 
 *TL;DR: Cowrie is a binary JSON bridge — it round-trips JSON data with native ML types (tensors, images, audio), dictionary coding for ~50% size reduction, and graph types for GNN workloads. Implementations in Go, Rust, Python, and TypeScript. Apache 2.0 licensed, no code generation, no schema files.*
 
@@ -65,8 +65,8 @@ Cowrie works the same way in every language: encode a value, get bytes; decode b
 
 ```go
 import (
-    "github.com/Neumenon/cowrie/gen1"
-    "github.com/Neumenon/cowrie/gen2"
+    "github.com/Neumenon/cowrie/go/v2/gen1"
+    "github.com/Neumenon/cowrie/go/v2/gen2"
 )
 
 // Gen1
@@ -113,22 +113,6 @@ result = gen1.decode(data)
 # Gen2
 val = gen2.from_any({"name": "Alice"})
 data = gen2.encode(val)
-```
-
-### C
-
-```c
-#include "cowrie_gen1.h"
-
-cowrie_g1_value_t *obj = cowrie_g1_object(2);
-cowrie_g1_object_set(obj, "name", cowrie_g1_string("Alice", 5));
-cowrie_g1_object_set(obj, "count", cowrie_g1_int64(42));
-
-cowrie_g1_buf_t buf;
-cowrie_g1_encode(obj, &buf);
-
-cowrie_g1_value_t *decoded;
-cowrie_g1_decode(buf.data, buf.len, &decoded);
 ```
 
 ### TypeScript
@@ -282,7 +266,7 @@ In Gen2, graph property keys are dictionary-coded (shared with the main dictiona
 | Graph types (Node/Edge/Batch) | No | No | No | Manual | Manual | Yes | Yes |
 | Compression | No | No | No | No | No | No | gzip/zstd |
 | Streaming | No | Yes | Yes | Yes | No | Yes | Yes |
-| Language support | All | Many | Many | Many | Many | 5 | 5 |
+| Language support | All | Many | Many | Many | Many | 4 | 4 |
 
 ### Where Competitors Win
 
@@ -332,7 +316,7 @@ Binary decoders are attack surfaces. Cowrie addresses this directly:
 
 **Go:**
 ```bash
-go get github.com/Neumenon/cowrie@v0.1.1
+go get github.com/Neumenon/cowrie/go/v2@latest
 ```
 
 **Rust:**
