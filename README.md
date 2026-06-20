@@ -326,10 +326,11 @@ See [SPEC.md](SPEC.md) for the complete wire format specification.
 
 ## Glyph (text format)
 
-Cowrie ships with **Glyph**, a sibling *text* serialization that encodes the same
-values as token-efficient, human-readable text (a JSON bridge for LLM payloads).
-It is maintained in Go under [`go/glyph/`](go/glyph/); see
-[`docs/glyph/`](docs/glyph/) for the guide, quickstart, and specs.
+**Glyph** is a sibling *text* serialization that encodes the same values as
+token-efficient, human-readable text (a JSON bridge for LLM payloads), with a
+bridge to and from the cowrie binary format. It is maintained as a standalone
+project at [github.com/Neumenon/glyph](https://github.com/Neumenon/glyph) — its
+guide, quickstart, and specs live there.
 
 ## Benchmarks
 

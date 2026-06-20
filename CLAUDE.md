@@ -22,13 +22,11 @@
 - If a skill doesn't exist, say so immediately rather than searching the codebase.
 
 ## Testing
-- 5 language implementations must pass tests before publishing.
+- 4 language implementations (Go, Rust, Python, TS) must pass tests before publishing.
 - Cross-language fixtures live in `testdata/fixtures/`.
-- Go glyph cross-impl tests skip gracefully when `glyph-js` is not built.
 - **TS test runner**: `node --import tsx --test` (NOT jest). Coverage via `c8`.
 - **7 codec invariants** tested across all languages — see `cogs/docs/TESTING_STANDARDS.md`.
-- **NaN/Inf policy**: allowed in cowrie binary encoding, rejected in glyph text/JSON bridges.
-- **C build**: `mkdir -p build && cd build && cmake .. && make && ctest --output-on-failure`
+- **NaN/Inf policy**: allowed in cowrie binary encoding, rejected in the JSON bridge.
 - **Rust integration tests**: `cargo test --test coverage_boost` (157 tests incl. invariants).
 
 ## Session Management

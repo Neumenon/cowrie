@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Removed — Glyph pulled out into its own repository
+
+The embedded Glyph text format (`go/glyph/`, the `glyph` and `bench` CLIs, and
+`docs/glyph/`) is removed from cowrie. Glyph is maintained as a standalone project
+at github.com/Neumenon/glyph, which carries the full source, its own docs, and the
+glyph↔cowrie bridge. Cowrie's embedded copy had diverged from the canonical one
+(57 of 74 files differed), so keeping it risked silent skew. The cowrie binary
+codec has no dependency on Glyph — only the two removed CLIs and a
+`//go:build cogs`-tagged cross-format test did. Go source shrinks ~30.6k → ~11.4k LOC.
+
+To port: cowrie's copy carried a **BLOB_POOL** feature (`blob.go`, `pool.go`,
+`auto_pool.go`, `document.ResolvePoolRefs`, and `types.go` additions, wired into the
+old glyph CLI) that the standalone does not yet have. It is recoverable from git
+history at the pre-removal commit and should be ported to github.com/Neumenon/glyph
+if still wanted.
+
 ### Fixed — graph-type cross-language determinism; added Gen1 fixtures
 
 Graph types (Node/Edge/NodeBatch/EdgeBatch, 0x35-0x38) now encode prop keys in
