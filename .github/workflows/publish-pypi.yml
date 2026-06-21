@@ -142,6 +142,9 @@ jobs:
           # input) with the native Cython extension REQUIRED: it must build, load, and
           # produce conformant bytes (built against NumPy 2.x for a portable ABI).
           # {project} is the python/ dir because cibuildwheel runs working-directory: python.
+          # The native extension imports NumPy, so the isolated test venv needs it or
+          # _cext fails to load and COWRIE_REQUIRE_NATIVE=1 (correctly) fails the smoke.
+          CIBW_TEST_REQUIRES: 'numpy>=2.0'
           CIBW_TEST_COMMAND: >
             COWRIE_REQUIRE_NATIVE=1 python {project}/scripts/wheel_smoke.py
           # Build numpy for build-time headers

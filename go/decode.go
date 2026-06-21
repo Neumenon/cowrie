@@ -20,6 +20,8 @@ var (
 	ErrInvalidDType     = errors.New("cowrie: invalid tensor dtype")
 	ErrInvalidImgFormat = errors.New("cowrie: invalid image format")
 	ErrInvalidAudioEnc  = errors.New("cowrie: invalid audio encoding")
+	ErrInvalidAudioCh   = errors.New("cowrie: invalid audio channel count")
+	ErrInvalidAudioRate = errors.New("cowrie: audio sample rate out of range")
 	// Security limit errors
 	ErrMalformedLength = errors.New("cowrie: malformed length exceeds remaining data")
 	ErrDepthExceeded   = errors.New("cowrie: maximum nesting depth exceeded")
@@ -858,6 +860,10 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		channels, err := r.readByte()
 		if err != nil {
 			return nil, err
+		}
+		// channels is u8 on the wire but 0 is semantically invalid (no frames).
+		if channels < 1 {
+			return nil, ErrInvalidAudioCh
 		}
 		dataLen, err := r.readUvarint()
 		if err != nil {

@@ -706,6 +706,15 @@ class TestAudio:
             AudioData(encoding=AudioEncoding.PCM_INT16, sample_rate=-1, channels=1, data=b"")
         with pytest.raises(ValueError):
             AudioData(encoding=AudioEncoding.PCM_INT16, sample_rate=44100, channels=0, data=b"")
+        # sample_rate is a u32 on the wire — values above 2^32-1 must be rejected at
+        # construction, not silently passed through to crash later at struct.pack('<I').
+        with pytest.raises(ValueError):
+            AudioData(encoding=AudioEncoding.PCM_INT16, sample_rate=0x1_0000_0000, channels=1, data=b"")
+        with pytest.raises(ValueError):
+            AudioData(encoding=AudioEncoding.PCM_INT16, sample_rate=44100, channels=256, data=b"")
+        # Boundary values are valid.
+        AudioData(encoding=AudioEncoding.PCM_INT16, sample_rate=0xFFFF_FFFF, channels=255, data=b"")
+        AudioData(encoding=AudioEncoding.PCM_INT16, sample_rate=0, channels=1, data=b"")
 
 
 class TestTensorRef:

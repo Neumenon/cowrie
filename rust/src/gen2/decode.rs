@@ -284,6 +284,12 @@ impl<'a> Reader<'a> {
                 let encoding = AudioEncoding::try_from(encoding_byte)?;
                 let sample_rate = u32::from_le_bytes(self.read_bytes_fixed::<4>()?);
                 let channels = self.read_byte()?;
+                // channels is u8 on the wire but 0 is semantically invalid (no frames).
+                if channels == 0 {
+                    return Err(CowrieError::InvalidData(
+                        "audio channel count must be >= 1".into(),
+                    ));
+                }
                 let data_len = self.read_uvarint()? as usize;
                 if data_len > self.opts.max_bytes_len {
                     return Err(CowrieError::TooLarge);

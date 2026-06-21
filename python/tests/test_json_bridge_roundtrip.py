@@ -167,6 +167,21 @@ class TestAudioRoundtrip:
         assert aud.channels == 2
         assert aud.data == data
 
+    @pytest.mark.parametrize("rate,channels", [
+        (0x1_0000_0000, 1),  # rate > u32 — was accepted then crashed at encode
+        (44100, 300),        # channels > u8
+        (44100, 0),          # channels = 0 (no frames)
+    ])
+    def test_audio_range_rejected(self, rate, channels):
+        """The JSON bridge must reject out-of-range audio loudly, not silently
+        truncate or crash later. Parity with Go (error), Rust (Err), TS (throw)."""
+        bad = {"_type": "audio", "encoding": "pcm_int16", "rate": rate,
+               "channels": channels, "data": ""}
+        with pytest.raises(ValueError):
+            from_any(bad)
+        with pytest.raises(ValueError):
+            from_json(json.dumps(bad))
+
     def test_audio_encoding_strings(self):
         """All audio encoding strings match Go's audioEncodingToString."""
         cases = [

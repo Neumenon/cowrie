@@ -24,13 +24,20 @@ classifiers = [
     "Programming Language :: C",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+# NumPy is a runtime dependency: the native Cython accelerator (cowrie._cext)
+# imports NumPy at module-import time. Without it installed, `from ._cext import …`
+# raises and gen2 silently falls back to pure Python — so wheels ship native but
+# would not run native. Pinning it here makes native the default on a normal install.
+dependencies = [
+    "numpy>=2.0",
+]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "cython>=3.0",
-    "numpy>=1.21",
+    "numpy>=2.0",
 ]
 
 [project.urls]
@@ -47,6 +54,9 @@ testpaths = ["tests"]
 # Only build CPython (C extension uses CPython API)
 build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
 skip = "*-musllinux_i686"
+# The native extension imports NumPy, so the smoke test's isolated venv needs it
+# too — otherwise COWRIE_REQUIRE_NATIVE=1 fails because _cext can't import.
+test-requires = "numpy>=2.0"
 test-command = "COWRIE_REQUIRE_NATIVE=1 python {project}/scripts/wheel_smoke.py"
 
 [tool.cibuildwheel.linux]

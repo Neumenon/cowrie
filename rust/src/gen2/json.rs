@@ -276,16 +276,32 @@ fn parse_audio_from_json(
         }
     };
 
-    let sample_rate =
-        obj.get("rate")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| CowrieError::InvalidData("audio missing rate".into()))? as u32;
+    // sampleRate is a u32 on the wire and channels a u8 with >=1 frames. Range-check
+    // before narrowing so an out-of-range JSON value errors loudly instead of being
+    // silently truncated (rate 2^40 -> 0, channels 300 -> 44, channels 0 -> 0).
+    let rate_raw = obj
+        .get("rate")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| CowrieError::InvalidData("audio missing rate".into()))?;
+    if rate_raw > u32::MAX as u64 {
+        return Err(CowrieError::InvalidData(format!(
+            "audio sample rate out of range: {}",
+            rate_raw
+        )));
+    }
+    let sample_rate = rate_raw as u32;
 
-    let channels = obj
+    let channels_raw = obj
         .get("channels")
         .and_then(|v| v.as_u64())
-        .ok_or_else(|| CowrieError::InvalidData("audio missing channels".into()))?
-        as u8;
+        .ok_or_else(|| CowrieError::InvalidData("audio missing channels".into()))?;
+    if !(1..=255).contains(&channels_raw) {
+        return Err(CowrieError::InvalidData(format!(
+            "audio channel count out of range: {}",
+            channels_raw
+        )));
+    }
+    let channels = channels_raw as u8;
 
     let data_b64 = obj
         .get("data")

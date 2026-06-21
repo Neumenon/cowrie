@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use cowrie_rs::gen2::{decode, json::to_json, CowrieError};
+use cowrie_rs::gen2::{decode, from_json, json::to_json, CowrieError, Value};
 
 #[test]
 fn fixtures_core_decode() {
@@ -23,7 +23,7 @@ fn fixtures_core_decode() {
             .get("kind")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        if gen != 2 || kind != "decode" {
+        if gen != 2 || (kind != "decode" && kind != "from_json") {
             continue;
         }
 
@@ -33,7 +33,6 @@ fn fixtures_core_decode() {
             .unwrap_or("<unknown>");
         let input = case.get("input").and_then(|v| v.as_str()).unwrap_or("");
         let input_path = repo_root.join("testdata/fixtures").join(input);
-        let data = fs::read(&input_path).expect("read input");
 
         let expect = case
             .get("expect")
@@ -41,8 +40,15 @@ fn fixtures_core_decode() {
             .expect("expect object");
         let ok = expect.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
 
+        // decode = binary wire -> Value; from_json = JSON projection -> Value.
+        let result: Result<Value, CowrieError> = if kind == "from_json" {
+            from_json(&fs::read_to_string(&input_path).expect("read input"))
+        } else {
+            decode(&fs::read(&input_path).expect("read input"))
+        };
+
         if ok {
-            let value = decode(&data).expect("decode failed");
+            let value = result.unwrap_or_else(|e| panic!("{}: {} failed: {:?}", id, kind, e));
             // Rust has no native bignum, so it cannot emit the decimal-string JSON
             // that Go/Python/TS produce for large BigInt values; those fixtures set
             // rust_skip_json. The value is still decode-verified here and value-verified
@@ -67,8 +73,8 @@ fn fixtures_core_decode() {
                 }
             }
         } else {
-            match decode(&data) {
-                Ok(_) => panic!("{}: expected error but decode succeeded", id),
+            match result {
+                Ok(_) => panic!("{}: expected error but {} succeeded", id, kind),
                 Err(err) => {
                     let code = map_error_code(&err);
                     let expected = expect.get("error").and_then(|v| v.as_str()).unwrap_or("");
@@ -89,6 +95,8 @@ fn map_error_code(err: &CowrieError) -> &'static str {
         CowrieError::TooDeep => "ERR_TOO_DEEP",
         CowrieError::TooLarge => "ERR_TOO_LARGE",
         CowrieError::TrailingData { .. } => "ERR_TRAILING_DATA",
+        CowrieError::InvalidData(msg) if msg.contains("channel count") => "ERR_INVALID_AUDIO_CHANNELS",
+        CowrieError::InvalidData(msg) if msg.contains("sample rate") => "ERR_INVALID_AUDIO_RATE",
         _ => "",
     }
 }

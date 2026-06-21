@@ -53,7 +53,7 @@ The script runs a PREFLIGHT + TAG-ONLY sequence:
 On the `v*` tag, CI triggers automatically:
 
 - **`ci.yml`** → publishes `cowrie-codec` to npm and `cowrie-rs` to crates.io.
-- **`publish-pypi.yml`** → publishes `cowrie-py` to PyPI (pure-Python wheels; no native build step required).
+- **`publish-pypi.yml`** → publishes `cowrie-py` to PyPI as native wheels built with `cibuildwheel` (the Cython `_cext` accelerator, built against NumPy 2.x), plus an sdist fallback. Each wheel is smoke-tested with `COWRIE_REQUIRE_NATIVE=1`, so a tag cannot publish unless the native extension builds and loads. NumPy is a runtime dependency.
 
 No manual publish commands needed.
 

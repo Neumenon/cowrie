@@ -47,7 +47,7 @@ _fast_encode: Optional[Callable[..., bytes]] = None
 _fast_decode: Optional[Callable[..., Any]] = None
 if not _os.environ.get('COWRIE_PUREPYTHON'):
     try:
-        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode  # type: ignore[no-redef]
+        from ._cext import cython_encode as _fast_encode, cython_decode as _fast_decode  # type: ignore[no-redef, import-untyped]
         _HAS_NATIVE = True
     except Exception:
         _HAS_NATIVE = False
@@ -520,7 +520,11 @@ class AudioData:
 
     def __post_init__(self):
         """Validate audio data."""
-        if self.sample_rate < 0:
+        # sampleRate is a u32 on the wire; channels a u8 with >=1 frames.
+        # Enforce both bounds here so every path (constructor, binary decode,
+        # JSON bridge) rejects out-of-range values up front rather than
+        # truncating silently or crashing later at struct.pack('<I', ...).
+        if self.sample_rate < 0 or self.sample_rate > 0xFFFFFFFF:
             raise ValueError(f"Invalid sample rate: {self.sample_rate}")
         if self.channels < 1 or self.channels > 255:
             raise ValueError(f"Invalid channel count: {self.channels}")
