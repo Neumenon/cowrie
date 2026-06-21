@@ -35,12 +35,7 @@ func FromJSON(data []byte) (*Value, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	if m, ok := v.(map[string]any); ok {
-		if err := checkTypedRanges(m); err != nil {
-			return nil, err
-		}
-	}
-	return fromAnyStrictTyped(v), nil
+	return fromJSONTyped(v)
 }
 
 // FromJSONEnriched parses JSON bytes with automatic type inference.
@@ -59,12 +54,7 @@ func FromJSONEnriched(data []byte) (*Value, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
-	if m, ok := v.(map[string]any); ok {
-		if err := checkTypedRanges(m); err != nil {
-			return nil, err
-		}
-	}
-	return fromAnyEnrichedTyped(v, nil), nil
+	return fromAnyEnrichedTyped(v, nil)
 }
 
 // FromAny converts a Go value to an Cowrie value without type inference.
@@ -80,26 +70,63 @@ func FromAnyEnriched(v any) *Value {
 	return fromAnyEnriched(v, nil)
 }
 
-// fromAnyStrictTyped is like fromAnyStrict but also reconstructs typed values
-// from _type-tagged objects produced by ToAny.
-func fromAnyStrictTyped(v any) *Value {
-	if m, ok := v.(map[string]any); ok {
-		if typed := tryReconstructTyped(m, false); typed != nil {
-			return typed
+// fromJSONTyped converts decoded JSON to a Value, reconstructing typed projections
+// (_type-tagged objects produced by ToAny) at EVERY nesting depth — top level, array
+// elements, and nested object values — matching the Python/Rust/TS from_json bridges.
+// A recognized-but-out-of-range typed value (e.g. audio rate > uint32 or channels
+// outside 1..255) returns an error rather than being silently truncated or demoted to
+// a plain object. Strict mode keeps strings as strings; scalar leaves go to fromAnyStrict.
+func fromJSONTyped(v any) (*Value, error) {
+	switch x := v.(type) {
+	case map[string]any:
+		typed, err := tryReconstructTyped(x, false)
+		if err != nil {
+			return nil, err
 		}
+		if typed != nil {
+			return typed, nil
+		}
+		// Plain object: recurse so nested typed projections are reconstructed too.
+		members := make([]Member, 0, len(x))
+		for _, key := range sortedMapKeys(x) {
+			mv, err := fromJSONTyped(x[key])
+			if err != nil {
+				return nil, err
+			}
+			members = append(members, Member{Key: key, Value: mv})
+		}
+		return Object(members...), nil
+	case []any:
+		items := make([]*Value, len(x))
+		for i, item := range x {
+			iv, err := fromJSONTyped(item)
+			if err != nil {
+				return nil, err
+			}
+			items[i] = iv
+		}
+		return Array(items...), nil
+	default:
+		return fromAnyStrict(v), nil
 	}
-	return fromAnyStrict(v)
 }
 
-// fromAnyEnrichedTyped is like fromAnyEnriched but also reconstructs typed values
-// from _type-tagged objects produced by ToAny.
-func fromAnyEnrichedTyped(v any, hints map[string]Type) *Value {
+// fromAnyEnrichedTyped reconstructs a top-level typed projection (propagating
+// out-of-range errors) and otherwise applies enriched type inference. Unlike the
+// strict fromJSONTyped it does not recurse typed reconstruction into nested values:
+// enriched mode ingests raw external JSON (which carries no _type projections), and
+// its field-name inference is preserved by delegating to fromAnyEnriched.
+func fromAnyEnrichedTyped(v any, hints map[string]Type) (*Value, error) {
 	if m, ok := v.(map[string]any); ok {
-		if typed := tryReconstructTyped(m, true); typed != nil {
-			return typed
+		typed, err := tryReconstructTyped(m, true)
+		if err != nil {
+			return nil, err
+		}
+		if typed != nil {
+			return typed, nil
 		}
 	}
-	return fromAnyEnriched(v, hints)
+	return fromAnyEnriched(v, hints), nil
 }
 
 // jsonNumberToInt64 extracts an int64 from a value decoded by json.Decoder with
@@ -122,8 +149,8 @@ func jsonNumberToInt64(v any) (int64, bool) {
 
 // audioRangeError reports whether rate/channels fall outside the wire types'
 // valid ranges (rate: u32; channels: 1..255). Single source of truth for the
-// audio bounds, shared by checkTypedRanges (loud, for FromJSON) and the audio
-// reconstruction guard (silent fallback, so a bad value never truncates).
+// audio bounds, used by tryReconstructTyped's audio case to reject out-of-range
+// values loudly rather than silently truncating them.
 func audioRangeError(rate, channels int64) error {
 	if rate < 0 || rate > math.MaxUint32 {
 		return ErrInvalidAudioRate
@@ -134,39 +161,16 @@ func audioRangeError(rate, channels int64) error {
 	return nil
 }
 
-// checkTypedRanges returns an error when m is a typed projection whose numeric
-// fields would overflow/underflow the wire type. FromJSON/FromJSONEnriched call
-// this so malformed audio errors loudly instead of being silently truncated;
-// FromAny stays lenient (it never reconstructs typed objects). It fires only for
-// objects that tryReconstructTyped would actually reconstruct as audio (a known
-// _type and encoding), so an unrecognized projection still falls back to a plain
-// object rather than erroring.
-func checkTypedRanges(m map[string]any) error {
-	if t, _ := m["_type"].(string); t != "audio" {
-		return nil
-	}
-	encStr, ok := m["encoding"].(string)
-	if !ok {
-		return nil
-	}
-	if _, ok := stringToAudioEncoding(encStr); !ok {
-		return nil
-	}
-	rate, hasRate := jsonNumberToInt64(m["rate"])
-	ch, hasCh := jsonNumberToInt64(m["channels"])
-	if !hasRate || !hasCh {
-		return nil
-	}
-	return audioRangeError(rate, ch)
-}
-
 // tryReconstructTyped inspects a map[string]any for a "_type" key and, if the
 // value matches a known ToAny projection, reconstructs the original typed Value.
-// Returns nil if the map is not a typed projection (plain object path).
-func tryReconstructTyped(m map[string]any, enriched bool) *Value {
+// Returns (nil, nil) when the map is not a typed projection or is malformed (the
+// caller falls back to a plain object); returns (nil, err) when the map is a
+// recognized typed projection whose numeric fields are out of range (e.g. audio
+// rate/channels), so the loud-rejection contract holds at every nesting depth.
+func tryReconstructTyped(m map[string]any, enriched bool) (*Value, error) {
 	typeStr, ok := m["_type"].(string)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	// Helper to get a string field
@@ -197,15 +201,15 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 		dataBytes, ok2 := b64Field("data")
 		dimsRaw, ok3 := m["dims"]
 		if !ok1 || !ok2 || !ok3 {
-			return nil
+			return nil, nil
 		}
 		dtype, ok := stringToDtype(dtypeStr)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		dimsSlice, ok := dimsRaw.([]any)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		dims := make([]uint64, len(dimsSlice))
 		for i, d := range dimsSlice {
@@ -213,24 +217,24 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 			case json.Number:
 				i64, err := v.Int64()
 				if err != nil {
-					return nil
+					return nil, nil
 				}
 				dims[i] = uint64(i64)
 			case float64:
 				dims[i] = uint64(v)
 			default:
-				return nil
+				return nil, nil
 			}
 		}
-		return Tensor(dtype, dims, dataBytes)
+		return Tensor(dtype, dims, dataBytes), nil
 
 	case "tensor_ref":
 		storeRaw, ok1 := intField("store")
 		keyBytes, ok2 := b64Field("key")
 		if !ok1 || !ok2 {
-			return nil
+			return nil, nil
 		}
-		return TensorRef(uint8(storeRaw), keyBytes)
+		return TensorRef(uint8(storeRaw), keyBytes), nil
 
 	case "image":
 		fmtStr, ok1 := strField("format")
@@ -238,13 +242,13 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 		h, ok3 := intField("height")
 		dataBytes, ok4 := b64Field("data")
 		if !ok1 || !ok2 || !ok3 || !ok4 {
-			return nil
+			return nil, nil
 		}
 		format, ok := stringToImageFormat(fmtStr)
 		if !ok {
-			return nil
+			return nil, nil
 		}
-		return Image(format, uint16(w), uint16(h), dataBytes)
+		return Image(format, uint16(w), uint16(h), dataBytes), nil
 
 	case "audio":
 		encStr, ok1 := strField("encoding")
@@ -252,44 +256,44 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 		ch, ok3 := intField("channels")
 		dataBytes, ok4 := b64Field("data")
 		if !ok1 || !ok2 || !ok3 || !ok4 {
-			return nil
+			return nil, nil
 		}
 		enc, ok := stringToAudioEncoding(encStr)
 		if !ok {
-			return nil
+			return nil, nil
 		}
-		// Guard the narrowing casts: out-of-range rate/channels must never be
-		// silently truncated into a corrupt audio value. FromJSON surfaces the
-		// specific error via checkTypedRanges; here we simply refuse to build one.
-		if audioRangeError(rate, ch) != nil {
-			return nil
+		// Out-of-range rate/channels must never be silently truncated into a
+		// corrupt audio value — surface the specific error so the bridge rejects
+		// it loudly at any nesting depth.
+		if err := audioRangeError(rate, ch); err != nil {
+			return nil, err
 		}
-		return Audio(enc, uint32(rate), uint8(ch), dataBytes)
+		return Audio(enc, uint32(rate), uint8(ch), dataBytes), nil
 
 	case "unknown_ext":
 		extTypeRaw, ok1 := intField("ext_type")
 		payload, ok2 := b64Field("payload")
 		if !ok1 || !ok2 {
-			return nil
+			return nil, nil
 		}
-		return UnknownExtension(uint64(extTypeRaw), payload)
+		return UnknownExtension(uint64(extTypeRaw), payload), nil
 
 	case "node":
 		id, ok1 := strField("id")
 		labelsRaw, ok2 := m["labels"]
 		propsRaw := m["props"]
 		if !ok1 || !ok2 {
-			return nil
+			return nil, nil
 		}
 		labelsSlice, ok := labelsRaw.([]any)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		labels := make([]string, len(labelsSlice))
 		for i, l := range labelsSlice {
 			s, ok := l.(string)
 			if !ok {
-				return nil
+				return nil, nil
 			}
 			labels[i] = s
 		}
@@ -297,85 +301,91 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 		if propsRaw != nil {
 			pm, ok := propsRaw.(map[string]any)
 			if !ok {
-				return nil
+				return nil, nil
 			}
 			props = normalizePropsMap(pm)
 		}
-		return Node(id, labels, props)
+		return Node(id, labels, props), nil
 
 	case "edge":
 		fromID, ok1 := strField("fromId")
 		toID, ok2 := strField("toId")
 		edgeType, ok3 := strField("type")
 		if !ok1 || !ok2 || !ok3 {
-			return nil
+			return nil, nil
 		}
 		var props map[string]any
 		if propsRaw := m["props"]; propsRaw != nil {
 			pm, ok := propsRaw.(map[string]any)
 			if !ok {
-				return nil
+				return nil, nil
 			}
 			props = normalizePropsMap(pm)
 		}
-		return Edge(fromID, toID, edgeType, props)
+		return Edge(fromID, toID, edgeType, props), nil
 
 	case "node_batch":
 		nodesRaw, ok := m["nodes"]
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		nodesSlice, ok := nodesRaw.([]any)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		nodes := make([]NodeData, 0, len(nodesSlice))
 		for _, nr := range nodesSlice {
 			nm, ok := nr.(map[string]any)
 			if !ok {
-				return nil
+				return nil, nil
 			}
-			nv := tryReconstructTyped(nm, enriched)
+			nv, err := tryReconstructTyped(nm, enriched)
+			if err != nil {
+				return nil, err
+			}
 			if nv == nil || nv.typ != TypeNode {
-				return nil
+				return nil, nil
 			}
 			nodes = append(nodes, nv.nodeVal)
 		}
-		return NodeBatch(nodes)
+		return NodeBatch(nodes), nil
 
 	case "edge_batch":
 		edgesRaw, ok := m["edges"]
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		edgesSlice, ok := edgesRaw.([]any)
 		if !ok {
-			return nil
+			return nil, nil
 		}
 		edges := make([]EdgeData, 0, len(edgesSlice))
 		for _, er := range edgesSlice {
 			em, ok := er.(map[string]any)
 			if !ok {
-				return nil
+				return nil, nil
 			}
-			ev := tryReconstructTyped(em, enriched)
+			ev, err := tryReconstructTyped(em, enriched)
+			if err != nil {
+				return nil, err
+			}
 			if ev == nil || ev.typ != TypeEdge {
-				return nil
+				return nil, nil
 			}
 			edges = append(edges, ev.edgeVal)
 		}
-		return EdgeBatch(edges)
+		return EdgeBatch(edges), nil
 
 	case "bitmask":
 		count, ok1 := intField("count")
 		bits, ok2 := b64Field("bits")
 		if !ok1 || !ok2 {
-			return nil
+			return nil, nil
 		}
-		return Bitmask(uint64(count), bits)
+		return Bitmask(uint64(count), bits), nil
 	}
 
-	return nil
+	return nil, nil
 }
 
 // normalizePropsMap converts a map[string]any decoded by json.Decoder.UseNumber()
