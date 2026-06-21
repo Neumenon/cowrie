@@ -1,26 +1,26 @@
 [build-system]
-requires = ["setuptools>=61.0", "numpy>=2.0"]
+requires = ["setuptools>=77.0", "numpy>=2.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "cowrie-py"
 version = "2.1.2"
 description = "Cowrie - Structured JSON binary codec with an optional Cython accelerator (~10x faster encode/decode)"
+authors = [{name = "Neumenon"}]
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 keywords = ["json", "binary", "serialization", "codec", "tensor", "ml", "vllm"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Programming Language :: Python :: 3.14",
     "Programming Language :: C",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
@@ -43,6 +43,8 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/Neumenon/cowrie"
 Repository = "https://github.com/Neumenon/cowrie"
+Issues = "https://github.com/Neumenon/cowrie/issues"
+Changelog = "https://github.com/Neumenon/cowrie/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -51,17 +53,21 @@ where = ["."]
 testpaths = ["tests"]
 
 [tool.cibuildwheel]
-# Only build CPython (C extension uses CPython API)
+# Only build CPython (C extension uses CPython API).
+# Native wheels are validated for Linux/macOS in v2.1.2. Windows installs use the
+# sdist pure-Python fallback until MSVC/zlib wheel support is proven.
 build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
-skip = "*-musllinux_i686"
+skip = "*-win32 *-win_amd64 *-win_arm64 *-musllinux_i686"
 # The native extension imports NumPy, so the smoke test's isolated venv needs it
 # too — otherwise COWRIE_REQUIRE_NATIVE=1 fails because _cext can't import.
 test-requires = "numpy>=2.0"
-test-command = "COWRIE_REQUIRE_NATIVE=1 python {project}/scripts/wheel_smoke.py"
+test-environment = "COWRIE_REQUIRE_NATIVE=1"
+test-command = "python {project}/scripts/wheel_smoke.py"
 
 [tool.cibuildwheel.linux]
-before-build = "yum install -y zlib-devel 2>/dev/null || apk add zlib-dev 2>/dev/null || true"
-archs = "x86_64 aarch64"
+before-build = "yum install -y zlib-devel || apk add zlib-dev"
+# Keep Linux to native x86_64 for v2.1.2; aarch64 needs explicit QEMU/binfmt setup.
+archs = "x86_64"
 
 [tool.cibuildwheel.macos]
 archs = "x86_64 arm64"

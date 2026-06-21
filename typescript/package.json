@@ -18,14 +18,16 @@
     "tensor",
     "ml"
   ],
-  "author": "",
+  "author": "Neumenon",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/Neumenon/cowrie"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "optionalDependencies": {
     "fzstd": "^0.1.1"
@@ -37,5 +39,9 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "homepage": "https://github.com/Neumenon/cowrie#readme",
+  "bugs": {
+    "url": "https://github.com/Neumenon/cowrie/issues"
+  }
 }

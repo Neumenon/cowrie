@@ -19,7 +19,7 @@ python/ source tree) using COWRIE_PUREPYTHON=1 to force the pure-Python path
 (the Cython extension may not match the current NumPy ABI).
 
 Cross-language scope (per-decoder):
-  Go:     all 45 cases — the reference oracle.
+  Go:     all 55 cases — the reference oracle.
   Python: all gen2 cases + gen1 cases where Python gen1 supports the tag set.
           gen1 proto-float32 (tagArrayFloat32 / 0x18) is not implemented in
           Python gen1 and is silently skipped for the Python decoder only.

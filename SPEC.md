@@ -162,7 +162,14 @@ Flags are bit-packed in byte 3 of the header:
 |--------|------|---------|
 | 0 | Compressed | If set, payload is compressed and framed (see Compression Framing). |
 | 1-2 | Compression type | 0=none, 1=gzip, 2=zstd. Only valid if Compressed=1. |
-| 3 | (Reserved) | Bit 3 was FlagHasColumnHints in earlier drafts. Reserved — decoders MUST skip. |
+| 3 | (Reserved) | Bit 3 was FlagHasColumnHints in earlier drafts. Reserved — decoders MUST ignore. |
+
+### Column Hints
+
+Column hints were an earlier draft feature under header flag bit 3. They are not
+part of the v2.1 wire contract: encoders MUST NOT emit them, and decoders MUST
+ignore bit 3 without attempting to read any additional column-hint payload.
+Historical code for this experiment lives under `attic/`.
 
 ### Type Tags
 
@@ -314,6 +321,9 @@ their internal errors to these codes for fixture validation:
 - ERR_INVALID_VERSION
 - ERR_TRUNCATED
 - ERR_INVALID_TAG
+- ERR_TRAILING_DATA
+- ERR_INVALID_AUDIO_RATE
+- ERR_INVALID_AUDIO_CHANNELS
 - ERR_INVALID_FIELD_ID
 - ERR_INVALID_UTF8
 - ERR_INVALID_VARINT

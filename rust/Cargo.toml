@@ -8,6 +8,9 @@ edition = "2021"
 description = "Cowrie - Structured JSON binary format with Gen1 and Gen2 codecs"
 license = "MIT"
 repository = "https://github.com/Neumenon/cowrie"
+homepage = "https://github.com/Neumenon/cowrie"
+documentation = "https://docs.rs/cowrie-rs"
+readme = "README.md"
 keywords = ["json", "binary", "serialization", "codec", "tensor"]
 categories = ["encoding", "data-structures"]
 

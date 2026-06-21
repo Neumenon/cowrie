@@ -41,7 +41,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version: '1.21'
 
@@ -49,11 +49,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '20'
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
 
       - name: Go build + test
         run: cd go && go build ./... && go test -race ./...
@@ -92,6 +92,20 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Check PyPI version matches tag
+        working-directory: python
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$VERSION" python - <<'PY'
+          import os, pathlib, sys, tomllib
+          version = os.environ["VERSION"]
+          project = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]
+          if project["version"] != version:
+              print(f"Tag v{version} does not match python/pyproject.toml={project['version']}", file=sys.stderr)
+              sys.exit(1)
+          print(f"PyPI manifest matches v{version}")
+          PY
+
       - name: Build sdist
         working-directory: python
         run: |
@@ -104,7 +118,7 @@ jobs:
           path: python/dist/*.tar.gz
           if-no-files-found: error
 
-  # ─── Build wheels (Linux, macOS, Windows) ─────────────────────
+  # ─── Build wheels (Linux, macOS) ─────────────────────────────
   build-wheels:
     name: Wheels (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -113,7 +127,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Native wheels are currently validated for Linux/macOS. Windows installs
+        # use the sdist pure-Python fallback until MSVC/zlib wheel support is proven.
+        os: [ubuntu-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
@@ -133,11 +149,10 @@ jobs:
         env:
           # Build for CPython only (no PyPy — C extension uses CPython API)
           CIBW_BUILD: 'cp39-* cp310-* cp311-* cp312-* cp313-*'
-          CIBW_SKIP: '*-musllinux_i686'
+          CIBW_SKIP: '*-win32 *-win_amd64 *-win_arm64 *-musllinux_i686'
           # Install zlib (needed by gen2.c)
           CIBW_BEFORE_BUILD_LINUX: 'yum install -y zlib-devel || apk add zlib-dev'
           CIBW_BEFORE_BUILD_MACOS: 'brew install zlib || true'
-          # Windows: zlib bundled with Python, should work
           # Test the wheel — conformance smoke (round-trips + golden bytes + malformed
           # input) with the native Cython extension REQUIRED: it must build, load, and
           # produce conformant bytes (built against NumPy 2.x for a portable ABI).
@@ -145,13 +160,14 @@ jobs:
           # The native extension imports NumPy, so the isolated test venv needs it or
           # _cext fails to load and COWRIE_REQUIRE_NATIVE=1 (correctly) fails the smoke.
           CIBW_TEST_REQUIRES: 'numpy>=2.0'
-          CIBW_TEST_COMMAND: >
-            COWRIE_REQUIRE_NATIVE=1 python {project}/scripts/wheel_smoke.py
+          CIBW_TEST_ENVIRONMENT: 'COWRIE_REQUIRE_NATIVE=1'
+          CIBW_TEST_COMMAND: 'python {project}/scripts/wheel_smoke.py'
           # Build numpy for build-time headers
           CIBW_BUILD_FRONTEND: 'pip'
           # macOS: build universal2 (x86_64 + arm64)
           CIBW_ARCHS_MACOS: 'x86_64 arm64'
-          CIBW_ARCHS_LINUX: 'x86_64 aarch64'
+          # Keep Linux to native x86_64 for v2.1.2; aarch64 needs an explicit QEMU/binfmt setup.
+          CIBW_ARCHS_LINUX: 'x86_64'
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
         with:
@@ -181,7 +197,12 @@ jobs:
           echo "=== Artifacts to publish ==="
           ls -la dist/
           echo "=== Wheel count ==="
-          ls dist/*.whl 2>/dev/null | wc -l
+          wheel_count="$(ls dist/*.whl 2>/dev/null | wc -l)"
+          echo "$wheel_count"
+          if [ "$wheel_count" -lt 1 ]; then
+            echo "::error::No wheels were built"
+            exit 1
+          fi
           echo "=== Sdist ==="
           ls dist/*.tar.gz
 
