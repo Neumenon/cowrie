@@ -1289,9 +1289,13 @@ export function fromAny(v: unknown, fieldName = ""): Value {
     const obj = v as Record<string, unknown>;
     const typed = tryReconstructTyped(obj);
     if (typed !== null) return typed;
+    // Canonicalize object key order so the same object encodes to identical bytes
+    // across Go/Rust/Python/TS (cross-language content-addressing). Matches Go's
+    // from_json key sort and Rust's BTreeMap ordering; same comparator the codec
+    // uses elsewhere for deterministic key sorting.
     const members: Record<string, Value> = {};
-    for (const [key, val] of Object.entries(v)) {
-      members[key] = fromAny(val, key);
+    for (const key of Object.keys(obj).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+      members[key] = fromAny(obj[key], key);
     }
     return SJ.object(members);
   }

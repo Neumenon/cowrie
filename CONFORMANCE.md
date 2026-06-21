@@ -22,6 +22,22 @@ Correctness guarantees are built in four layers:
 
 ---
 
+## Determinism guarantees
+
+The same logical value encodes to **byte-identical** output across all four
+implementations, so the raw bytes work as a portable content-address / cache key:
+
+- Scalars, arrays, tensors, bytes, audio, and image values encode identically.
+- **Object key order is canonicalized.** `from_json` / `from_any` sorts object
+  keys in byte order (UTF-8 == code-point order) before encoding, so `{"b":1,"a":2}`
+  and `{"a":2,"b":1}` produce identical bytes in Go, Rust, Python, and TypeScript.
+  Go sorts in `from_json`, Rust orders via `BTreeMap`, and Python/TypeScript sort in
+  `from_any`. The binary format itself does not *require* sorted keys — decoders
+  accept any order — but every JSON bridge emits sorted keys for determinism.
+  (Pinned by the per-language `*object key order*` / `*canonicalize*` tests.)
+
+---
+
 ## Layer 1 — Fixture manifest (`testdata/fixtures/`)
 
 ### What is covered

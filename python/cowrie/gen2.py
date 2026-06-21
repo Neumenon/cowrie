@@ -1781,9 +1781,13 @@ def from_any(v: Any, field_name: str = "") -> Value:
         typed = _try_reconstruct_typed(v)
         if typed is not None:
             return typed
+        # Canonicalize object key order (sorted; UTF-8 byte order == code-point order)
+        # so the same object encodes to identical bytes across Go/Rust/Python/TS —
+        # required for cross-language content-addressing. Matches Go's from_json key
+        # sort and Rust's BTreeMap ordering.
         members = {}
-        for key, val in v.items():
-            members[key] = from_any(val, key)
+        for key in sorted(v.keys()):
+            members[key] = from_any(v[key], key)
         return Value.object(members)
     elif HAS_NUMPY and isinstance(v, np.ndarray):
         # Convert NumPy arrays to tensors

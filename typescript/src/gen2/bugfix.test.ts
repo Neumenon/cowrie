@@ -15,6 +15,7 @@ import {
   toAny,
   fromAny,
   decode,
+  encode,
 } from './index.ts';
 
 // ============================================================
@@ -180,6 +181,16 @@ describe('Bug #4 — fixed-width field range validation', () => {
   it('audio.channels=2 (uint8 valid) does not throw', () => {
     const v = fromAny({ _type: 'audio', encoding: 'pcm_int16', rate: 44100, channels: 2, data: '' });
     assert.strictEqual(v.type, Type.AUDIO);
+  });
+
+  it('fromAny canonicalizes object key order (cross-language determinism)', () => {
+    // Same object, different key order -> identical bytes, so a content hash on the
+    // raw bytes is portable across Go/Rust/Python/TS. Matches Go from_json + Rust BTreeMap.
+    const enc = (j: string) => Buffer.from(encode(fromAny(JSON.parse(j)))).toString('hex');
+    const a = enc('{"b":1,"a":2,"c":3}');
+    assert.strictEqual(a, enc('{"c":3,"a":2,"b":1}'));
+    assert.strictEqual(a, enc('{"a":2,"b":1,"c":3}'));
+    assert.strictEqual(enc('{"z":{"y":1,"x":2},"a":3}'), enc('{"a":3,"z":{"x":2,"y":1}}'));
   });
 
   it('binary decode rejects channels=0 on the wire', () => {
