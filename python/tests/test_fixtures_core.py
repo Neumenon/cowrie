@@ -49,10 +49,12 @@ def test_fixtures_core_decode():
 
         if case["expect"]["ok"]:
             value = produce()
+            # Exercise the projection path for every ok case (not just those with
+            # an expected JSON) so a to_any crash on any value type is caught here.
+            actual = gen2.to_any(value)
             expected_json = case["expect"].get("json")
             if expected_json:
                 expected = json.loads((fixtures / expected_json).read_text())
-                actual = gen2.to_any(value)
                 assert actual == expected, f"{case['id']}: expected {expected} got {actual}"
         else:
             try:

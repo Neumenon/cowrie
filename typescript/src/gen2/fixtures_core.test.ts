@@ -38,10 +38,13 @@ describe("gen2 core fixtures", () => {
 
       if (c.expect.ok) {
         const value = produce();
+        // Exercise the projection path for every ok case (not just those with an
+        // expected JSON) so a toAny crash on any value type is caught here.
+        const actual = toAny(value);
         if (c.expect.json) {
           const expectedPath = path.join(repoRoot, "testdata", "fixtures", c.expect.json);
           const expected = JSON.parse(fs.readFileSync(expectedPath, "utf8"));
-          assert.deepStrictEqual(toAny(value), expected);
+          assert.deepStrictEqual(actual, expected);
         }
       } else {
         try {

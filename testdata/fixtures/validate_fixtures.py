@@ -27,11 +27,15 @@ Cross-language scope (per-decoder):
 Rust/TS per-language parity is gated separately by pinned invariant tests in
 rust/ and typescript/ — not this harness.
 
-Semantics per case (all are kind="decode"):
-  * expect.ok == true  + expect.json  -> decode must succeed AND equal the JSON.
-  * expect.ok == true  (no json)      -> decode must succeed (ML/graph/bitmask
-                                          types with no canonical JSON projection).
-  * expect.ok == false                -> decode MUST fail (negative/error case).
+Semantics per case (kind="decode" decodes binary; kind="from_json" runs the JSON
+bridge — Go via `encode`+`decode`, Python via from_json):
+  * expect.ok == true  + expect.json  -> must succeed AND equal the JSON.
+  * expect.ok == true  (no json)      -> must succeed (ML/graph/bitmask types with
+                                          no canonical JSON projection).
+  * expect.ok == false                -> MUST fail (negative/error case). Note: the
+                                          per-language fixtures_core tests assert the
+                                          exact error code; this script only checks
+                                          that the case is rejected.
 
 Exit code is non-zero if any case fails.
 """
