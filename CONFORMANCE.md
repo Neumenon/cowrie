@@ -255,5 +255,11 @@ updating all language tests that consume it.
 - **Schema fingerprint cross-language parity** — fingerprint values are pinned
   per-language but not yet cross-checked between Go, Rust, and TypeScript in a
   single test. This is a known gap.
+- **Go `FromAny` typed reconstruction parity** — the cross-language guarantee
+  for typed JSON projections is `FromJSON` / `from_json` (the `kind ==
+  "from_json"` fixtures above). Go's lower-level `FromAny` helper intentionally
+  treats parsed `_type` dictionaries as ordinary objects today, while Python and
+  TypeScript reconstruct typed values from their `from_any` helpers. Use
+  `FromJSON` when typed reconstruction and range validation must be portable.
 - **glyph text format** — the glyph bridge (JSON ↔ `Value`) is tested in Go
   and TS independently. A cross-language glyph fixture suite is not yet built.
