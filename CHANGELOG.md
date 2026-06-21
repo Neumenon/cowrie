@@ -12,7 +12,10 @@ back to pure Python), and fixed an incomplete dtype map in the raw-tensor encode
 path that mis-encoded BOOL/INT16/UINT16/UINT32/UINT64 tensors as FLOAT32. The
 native path now passes the full test suite plus a 13-dtype conformance check and
 is ~10x faster than pure Python (measured: 11.7x encode, 9.2x decode). PyPI
-wheels again require and ship it (`COWRIE_REQUIRE_NATIVE=1`), built against NumPy 2.x.
+Linux/macOS wheels again require and ship it (`COWRIE_REQUIRE_NATIVE=1`), built
+against NumPy 2.x. Windows installs use the pure-Python sdist fallback until
+native MSVC/zlib wheels are validated; Linux aarch64 wheels are deferred until
+QEMU/binfmt wheel builds are explicitly wired into CI.
 
 ### Removed — Glyph pulled out into its own repository
 
@@ -38,11 +41,12 @@ byte-identical across Go, Rust, Python, and TypeScript. Previously Go assigned
 dictionary indices and emitted node/edge props in random map order; Python's and
 TypeScript's deterministic encoders had no graph arms and silently produced
 empty/zero-byte payloads. Each non-Go impl now pins a regression test to the Go
-canonical bytes. (Graph tags 0x35-0x38 remain active — see CUTLIST §6 D2.)
+canonical bytes. (Graph tags 0x35-0x38 remain active; the old review notes live under `attic/docs/review-notes/`.)
 
-Added the first Gen1 cross-language fixtures (`testdata/fixtures/gen1/`): core
+Added Gen1 cross-language fixtures (`testdata/fixtures/gen1/`) for core
 object/array/int/string plus Float64Array (0x17) and Float32Array (0x18)
-proto-tensors. The fixture manifest grows 34 → 40 cases.
+proto-tensors. The fixture manifest now has 55 cases, including JSON-bridge
+`from_json` fixtures and framed gzip/zstd decode fixtures.
 
 ### Dropped — C implementation; Glyph consolidated to Go-only
 

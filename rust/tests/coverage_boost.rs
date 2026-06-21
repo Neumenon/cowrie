@@ -386,6 +386,42 @@ fn roundtrip_audio() {
     }
 }
 
+#[test]
+fn audio_json_bridge_range_rejected() {
+    // The JSON bridge must reject out-of-range audio loudly instead of silently
+    // truncating (rate 2^40 -> 0, channels 300 -> 44) or accepting channels=0.
+    // Parity with Go (error), Python (ValueError), TS (RangeError).
+    let bad = [
+        r#"{"_type":"audio","encoding":"pcm_int16","rate":4294967296,"channels":1,"data":""}"#,
+        r#"{"_type":"audio","encoding":"pcm_int16","rate":44100,"channels":300,"data":""}"#,
+        r#"{"_type":"audio","encoding":"pcm_int16","rate":44100,"channels":0,"data":""}"#,
+    ];
+    for j in bad {
+        assert!(
+            matches!(from_json(j), Err(CowrieError::InvalidData(_))),
+            "expected InvalidData for {j}"
+        );
+    }
+    // Positive control: in-range audio still parses.
+    let ok = r#"{"_type":"audio","encoding":"pcm_int16","rate":4294967295,"channels":255,"data":""}"#;
+    assert!(matches!(from_json(ok), Ok(Value::Audio(_))));
+}
+
+#[test]
+fn audio_decode_channels_zero_rejected() {
+    // channels=0 is representable on the wire (u8) but semantically invalid; the
+    // binary decoder must reject it. We encode it directly (the struct literal and
+    // encoder don't validate) and assert decode fails.
+    let v = Value::Audio(AudioData {
+        encoding: AudioEncoding::PcmInt16,
+        sample_rate: 44100,
+        channels: 0,
+        data: vec![0, 0],
+    });
+    let enc = encode(&v).unwrap();
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidData(_))));
+}
+
 // ============================================================
 // Ext roundtrip
 // ============================================================

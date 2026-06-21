@@ -35,6 +35,11 @@ func FromJSON(data []byte) (*Value, error) {
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
 	}
+	if m, ok := v.(map[string]any); ok {
+		if err := checkTypedRanges(m); err != nil {
+			return nil, err
+		}
+	}
 	return fromAnyStrictTyped(v), nil
 }
 
@@ -53,6 +58,11 @@ func FromJSONEnriched(data []byte) (*Value, error) {
 	var v any
 	if err := dec.Decode(&v); err != nil {
 		return nil, err
+	}
+	if m, ok := v.(map[string]any); ok {
+		if err := checkTypedRanges(m); err != nil {
+			return nil, err
+		}
 	}
 	return fromAnyEnrichedTyped(v, nil), nil
 }
@@ -92,6 +102,64 @@ func fromAnyEnrichedTyped(v any, hints map[string]Type) *Value {
 	return fromAnyEnriched(v, hints)
 }
 
+// jsonNumberToInt64 extracts an int64 from a value decoded by json.Decoder with
+// UseNumber() (json.Number) or the plain Go numeric types. ok is false if v is
+// not an integer-valued number.
+func jsonNumberToInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		i, err := n.Int64()
+		return i, err == nil
+	case float64:
+		return int64(n), true
+	case int:
+		return int64(n), true
+	case int64:
+		return n, true
+	}
+	return 0, false
+}
+
+// audioRangeError reports whether rate/channels fall outside the wire types'
+// valid ranges (rate: u32; channels: 1..255). Single source of truth for the
+// audio bounds, shared by checkTypedRanges (loud, for FromJSON) and the audio
+// reconstruction guard (silent fallback, so a bad value never truncates).
+func audioRangeError(rate, channels int64) error {
+	if rate < 0 || rate > math.MaxUint32 {
+		return ErrInvalidAudioRate
+	}
+	if channels < 1 || channels > 255 {
+		return ErrInvalidAudioCh
+	}
+	return nil
+}
+
+// checkTypedRanges returns an error when m is a typed projection whose numeric
+// fields would overflow/underflow the wire type. FromJSON/FromJSONEnriched call
+// this so malformed audio errors loudly instead of being silently truncated;
+// FromAny stays lenient (it never reconstructs typed objects). It fires only for
+// objects that tryReconstructTyped would actually reconstruct as audio (a known
+// _type and encoding), so an unrecognized projection still falls back to a plain
+// object rather than erroring.
+func checkTypedRanges(m map[string]any) error {
+	if t, _ := m["_type"].(string); t != "audio" {
+		return nil
+	}
+	encStr, ok := m["encoding"].(string)
+	if !ok {
+		return nil
+	}
+	if _, ok := stringToAudioEncoding(encStr); !ok {
+		return nil
+	}
+	rate, hasRate := jsonNumberToInt64(m["rate"])
+	ch, hasCh := jsonNumberToInt64(m["channels"])
+	if !hasRate || !hasCh {
+		return nil
+	}
+	return audioRangeError(rate, ch)
+}
+
 // tryReconstructTyped inspects a map[string]any for a "_type" key and, if the
 // value matches a known ToAny projection, reconstructs the original typed Value.
 // Returns nil if the map is not a typed projection (plain object path).
@@ -120,18 +188,7 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 	}
 	// Helper to get an int from a json.Number or float64 field
 	intField := func(key string) (int64, bool) {
-		switch n := m[key].(type) {
-		case json.Number:
-			i, err := n.Int64()
-			return i, err == nil
-		case float64:
-			return int64(n), true
-		case int:
-			return int64(n), true
-		case int64:
-			return n, true
-		}
-		return 0, false
+		return jsonNumberToInt64(m[key])
 	}
 
 	switch typeStr {
@@ -199,6 +256,12 @@ func tryReconstructTyped(m map[string]any, enriched bool) *Value {
 		}
 		enc, ok := stringToAudioEncoding(encStr)
 		if !ok {
+			return nil
+		}
+		// Guard the narrowing casts: out-of-range rate/channels must never be
+		// silently truncated into a corrupt audio value. FromJSON surfaces the
+		// specific error via checkTypedRanges; here we simply refuse to build one.
+		if audioRangeError(rate, ch) != nil {
 			return nil
 		}
 		return Audio(enc, uint32(rate), uint8(ch), dataBytes)

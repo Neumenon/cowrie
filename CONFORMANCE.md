@@ -31,13 +31,14 @@ Correctness guarantees are built in four layers:
 | `core/` | 7 | decode + JSON check | null, bool, int, float, string, array, object |
 | `ml/` | 9 | decode (ok-only or ERR_TRAILING_DATA) | tensor, rank0_scalar, bool_tensor, tensor_ref, image, audio; adjlist/richtext/delta reserved |
 | `graph/` | 5 | decode (4 ok-only, 1 ERR_TRAILING_DATA) | node, edge, node_batch, edge_batch; graph_shard reserved |
-| `neg/` | 4 | decode + error check | bad_magic, bad_version, truncated, invalid_tag |
+| `neg/` | 5 | decode + error check | bad_magic, bad_version, truncated, invalid_tag, invalid audio channels |
 | `v3/` | 11 | decode (JSON or ok-only) | fixint, fixneg, fixarray, fixmap, bitmask variants |
 | `gen1/` | 6 | decode (4 JSON, 2 ok-only) | gen1 core types + proto-tensor float64/float32 |
 | `bigint/` | 3 | decode + JSON check | pos_large, neg_large, u64plus1 — all round-trip as JSON strings |
-| `compressed/` | 2 | decode + JSON check | gzip_framed, zstd_framed — verify `EncodeFramed` / `DecodeFramed` path |
+| `compressed/` | 2 | decode_framed + JSON check | gzip_framed, zstd_framed — verify `EncodeFramed` / `DecodeFramed` path |
+| `fromjson/` | 7 | from_json bridge | primitives, tensor, image, audio, and invalid audio bounds |
 
-**Total: 47 cases** as of 2026-06-19.
+**Total: 55 cases** as of 2026-06-21.
 
 ### Fixture format
 
@@ -58,7 +59,10 @@ each case to:
   projection must equal the expected file.
 - `expect.ok == true` (no `json`) — decode must succeed; no canonical JSON
   projection (ML / graph / bitmask types).
-- `expect.ok == false` — decode must fail (negative / error cases).
+- `expect.ok == false` — decode or JSON-bridge conversion must fail (negative / error cases).
+- `kind == "decode"` — decode a raw Gen1/Gen2 `.cowrie` binary.
+- `kind == "decode_framed"` — decode a framed/compressed Gen2 `.cowrie` binary.
+- `kind == "from_json"` — convert JSON projection to Cowrie (`FromJSON`/`from_json`) and round-trip accepted cases.
 - `python_skip` (string) — optional; if present, the Python cross-check is
   skipped for this case only. Currently used for `gen1_proto_float32`
   (tagArrayFloat32 / 0x18 is not implemented in the Python gen1 decoder).
@@ -92,7 +96,7 @@ header reveals the actual encoding: `0x00` = uncompressed, `0x03` = gzip,
 
 | Decoder | When used | How |
 |---|---|---|
-| Go (primary) | All 47 cases | subprocess `cowrie decode [--gen1]` |
+| Go (primary) | All 55 cases | subprocess `cowrie decode [--gen1]` or `cowrie encode` for `from_json` cases |
 | Python (secondary) | All gen2 cases + gen1 where tag is implemented | in-process `COWRIE_PUREPYTHON=1` |
 
 The Python decoder is loaded from the sibling `python/` source tree (or
@@ -124,7 +128,7 @@ Expected output:
   OK   gen2_compressed_gzip
   OK   gen2_compressed_zstd
 
-Results: 47 passed, 0 skipped, 0 failed, 1 py-skipped
+Results: 55 passed, 0 skipped, 0 failed, 1 py-skipped
 ```
 
 Exit code is non-zero on any failure.
@@ -251,5 +255,11 @@ updating all language tests that consume it.
 - **Schema fingerprint cross-language parity** — fingerprint values are pinned
   per-language but not yet cross-checked between Go, Rust, and TypeScript in a
   single test. This is a known gap.
+- **Go `FromAny` typed reconstruction parity** — the cross-language guarantee
+  for typed JSON projections is `FromJSON` / `from_json` (the `kind ==
+  "from_json"` fixtures above). Go's lower-level `FromAny` helper intentionally
+  treats parsed `_type` dictionaries as ordinary objects today, while Python and
+  TypeScript reconstruct typed values from their `from_any` helpers. Use
+  `FromJSON` when typed reconstruction and range validation must be portable.
 - **glyph text format** — the glyph bridge (JSON ↔ `Value`) is tested in Go
   and TS independently. A cross-language glyph fixture suite is not yet built.

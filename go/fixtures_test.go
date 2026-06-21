@@ -41,7 +41,7 @@ func TestFixturesCore(t *testing.T) {
 	}
 
 	for _, c := range manifest.Cases {
-		if c.Gen != 2 || c.Kind != "decode" {
+		if c.Gen != 2 || (c.Kind != "decode" && c.Kind != "from_json") {
 			continue
 		}
 
@@ -51,10 +51,16 @@ func TestFixturesCore(t *testing.T) {
 			t.Fatalf("%s: read input: %v", c.ID, err)
 		}
 
-		val, err := Decode(data)
+		// decode = binary wire -> Value; from_json = JSON projection -> Value.
+		var val *Value
+		if c.Kind == "from_json" {
+			val, err = FromJSON(data)
+		} else {
+			val, err = Decode(data)
+		}
 		if c.Expect.OK {
 			if err != nil {
-				t.Fatalf("%s: decode failed: %v", c.ID, err)
+				t.Fatalf("%s: %s failed: %v", c.ID, c.Kind, err)
 			}
 			if c.Expect.JSON == "" {
 				continue
@@ -130,6 +136,10 @@ func mapErrorCode(err error) string {
 		return "ERR_TOO_LARGE"
 	case errors.Is(err, ErrTrailingData):
 		return "ERR_TRAILING_DATA"
+	case errors.Is(err, ErrInvalidAudioCh):
+		return "ERR_INVALID_AUDIO_CHANNELS"
+	case errors.Is(err, ErrInvalidAudioRate):
+		return "ERR_INVALID_AUDIO_RATE"
 	default:
 		return ""
 	}

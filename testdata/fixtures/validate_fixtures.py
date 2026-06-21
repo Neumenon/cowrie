@@ -19,7 +19,7 @@ python/ source tree) using COWRIE_PUREPYTHON=1 to force the pure-Python path
 (the Cython extension may not match the current NumPy ABI).
 
 Cross-language scope (per-decoder):
-  Go:     all 45 cases — the reference oracle.
+  Go:     all 55 cases — the reference oracle.
   Python: all gen2 cases + gen1 cases where Python gen1 supports the tag set.
           gen1 proto-float32 (tagArrayFloat32 / 0x18) is not implemented in
           Python gen1 and is silently skipped for the Python decoder only.
@@ -27,11 +27,15 @@ Cross-language scope (per-decoder):
 Rust/TS per-language parity is gated separately by pinned invariant tests in
 rust/ and typescript/ — not this harness.
 
-Semantics per case (all are kind="decode"):
-  * expect.ok == true  + expect.json  -> decode must succeed AND equal the JSON.
-  * expect.ok == true  (no json)      -> decode must succeed (ML/graph/bitmask
-                                          types with no canonical JSON projection).
-  * expect.ok == false                -> decode MUST fail (negative/error case).
+Semantics per case (kind="decode" decodes binary; kind="from_json" runs the JSON
+bridge — Go via `encode`+`decode`, Python via from_json):
+  * expect.ok == true  + expect.json  -> must succeed AND equal the JSON.
+  * expect.ok == true  (no json)      -> must succeed (ML/graph/bitmask types with
+                                          no canonical JSON projection).
+  * expect.ok == false                -> MUST fail (negative/error case). Note: the
+                                          per-language fixtures_core tests assert the
+                                          exact error code; this script only checks
+                                          that the case is rejected.
 
 Exit code is non-zero if any case fails.
 """
@@ -152,6 +156,51 @@ def python_decode(path, gen=2):
 
 
 # ---------------------------------------------------------------------------
+# from_json bridge (JSON projection -> Value), exercised cross-language
+# ---------------------------------------------------------------------------
+
+def go_from_json(path):
+    """Return (ok, parsed_json_or_None, stderr).
+
+    `cowrie encode` runs FromJSON internally, so a non-zero exit means the bridge
+    rejected the input. For accepted input we round-trip back through `decode` so
+    positive cases can be value-compared.
+    """
+    with open(path, "rb") as fh:
+        text = fh.read()
+    enc = subprocess.run([GO_CLI, "encode"], input=text, capture_output=True)
+    if enc.returncode != 0:
+        return False, None, enc.stderr.decode("utf-8", "replace")
+    dec = subprocess.run([GO_CLI, "decode"], input=enc.stdout, capture_output=True)
+    if dec.returncode != 0:
+        return True, None, f"encode ok but decode failed: {dec.stderr.decode('utf-8', 'replace')}"
+    try:
+        return True, json.loads(dec.stdout), ""
+    except json.JSONDecodeError as exc:
+        return (dec.stdout != b""), None, f"non-json output ({exc})"
+
+
+def python_from_json(path):
+    """Return (ok, parsed_json_or_None, stderr, skipped). Mirrors python_decode."""
+    if not _load_python_decoders():
+        return None, None, "Python decoders not loaded", True
+    with open(path, "r") as fh:
+        text = fh.read()
+    try:
+        val = _py_gen2.from_json(text)
+        decoded_str = _py_gen2.to_json(val)
+        try:
+            return True, json.loads(decoded_str), "", False
+        except json.JSONDecodeError:
+            return (decoded_str != ""), None, "non-json output", False
+    except Exception as exc:
+        msg = str(exc)
+        if "not available" in msg.lower() or "not installed" in msg.lower():
+            return None, None, f"optional codec unavailable: {msg}", True
+        return False, None, msg, False
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -173,6 +222,7 @@ def main():
         inp = os.path.join(ROOT, case["input"])
         expect = case["expect"]
         gen = case.get("gen", 2)
+        kind = case.get("kind", "decode")
 
         if not os.path.exists(inp):
             print(f"  SKIP {cid}: input file missing")
@@ -180,7 +230,10 @@ def main():
             continue
 
         # ---- Go (primary) ----
-        ok, got, err = go_decode(inp, gen=gen)
+        if kind == "from_json":
+            ok, got, err = go_from_json(inp)
+        else:
+            ok, got, err = go_decode(inp, gen=gen)
         go_pass = False
 
         if expect.get("ok"):
@@ -221,7 +274,10 @@ def main():
                 passed += 1
                 continue
 
-            py_ok, py_got, py_err, py_skip = python_decode(inp, gen=gen)
+            if kind == "from_json":
+                py_ok, py_got, py_err, py_skip = python_from_json(inp)
+            else:
+                py_ok, py_got, py_err, py_skip = python_decode(inp, gen=gen)
 
             if py_skip:
                 py_label = " [py:skip]"

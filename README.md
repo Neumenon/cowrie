@@ -29,21 +29,25 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 
 | Language | Gen1 | Gen2 | Status |
 |----------|------|------|--------|
-| Go | Yes | Yes | Complete |
-| Rust | Yes | Yes | Complete |
-| Python | Yes | Yes | Complete |
-| TypeScript | Yes | Yes | Complete |
+| Go | Yes | Yes | Supported |
+| Rust | Yes | Yes | Supported |
+| Python | Yes | Yes | Supported |
+| TypeScript | Yes | Yes | Supported |
 
 ## Cross-Language Parity
+
+Cowrie is **beta** software: the wire format is intentionally small and pinned by
+fixtures, but the project is new and not yet production-proven at large scale.
 
 Cowrie's cross-language parity is enforced by a **representative conformance
 suite** plus **pinned deterministic parity tests** (not yet a full
 all-implementation encode matrix):
 
-- **47 cross-language fixtures** (`testdata/fixtures/`) validated by
-  `validate_fixtures.py`, which runs the Go reference decoder and the Python
-  decoder against every case. Rust and TypeScript parity is gated by pinned
-  per-language invariant/parity tests rather than this harness.
+- **55 cross-language fixture cases** (`testdata/fixtures/`) validated by
+  `validate_fixtures.py`: 46 binary decode cases, 7 JSON-bridge encode cases,
+  and 2 framed-compression decode cases. The harness runs the Go reference CLI
+  plus the Python decoder for in-scope cases. Rust and TypeScript parity is gated
+  by pinned per-language invariant/parity tests rather than this harness.
 - **Pinned regression tests** in each language asserting identical *deterministic
   encodings* and *schema fingerprints* — including ML types and graph
   (Node/Edge/NodeBatch/EdgeBatch) types.
@@ -169,7 +173,9 @@ pytest tests/
 
 The optional Cython fast-path extension needs `zlib` development headers (and
 `libzstd` + `pkg-config` for zstd support); without them, the pure-Python path is
-used automatically.
+used automatically. Published v2.1.2 wheels require and smoke-test the native
+accelerator on Linux/macOS; Windows installs use the pure-Python sdist fallback
+until native MSVC/zlib wheels are validated.
 
 ### TypeScript
 

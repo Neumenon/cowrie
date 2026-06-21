@@ -313,6 +313,16 @@ export const SJ = {
     return { type: Type.IMAGE, data: { format, width, height, data } as ImageData };
   },
   audio(encoding: AudioEncoding, sampleRate: number, channels: number, data: Uint8Array): Value {
+    // sampleRate is a u32 on the wire, channels a u8 with >=1 frames. Validate at
+    // this single choke point so every path (direct construction, binary decode,
+    // JSON bridge) rejects out-of-range values instead of accepting channels=0 or
+    // silently truncating.
+    if (!Number.isInteger(sampleRate) || sampleRate < 0 || sampleRate > 0xffffffff) {
+      throw new RangeError(`cowrie: audio sampleRate out of range [0, 4294967295] (got ${sampleRate})`);
+    }
+    if (!Number.isInteger(channels) || channels < 1 || channels > 255) {
+      throw new RangeError(`cowrie: audio channels out of range [1, 255] (got ${channels})`);
+    }
     return { type: Type.AUDIO, data: { encoding, sampleRate, channels, data } as AudioData };
   },
   tensorRef(storeId: number, key: Uint8Array): Value {

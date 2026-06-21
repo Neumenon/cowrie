@@ -176,6 +176,62 @@
       "expect": {"ok": false, "error": "ERR_INVALID_TAG"}
     },
     {
+      "id": "gen2_neg_audio_channels_zero",
+      "gen": 2,
+      "kind": "decode",
+      "input": "neg/audio_channels_zero.cowrie",
+      "expect": {"ok": false, "error": "ERR_INVALID_AUDIO_CHANNELS"}
+    },
+    {
+      "id": "gen2_fromjson_primitives",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/primitives.json",
+      "expect": {"ok": true, "json": "fromjson/primitives.json"}
+    },
+    {
+      "id": "gen2_fromjson_audio",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/audio.json",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_fromjson_tensor",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/tensor.json",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_fromjson_image",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/image.json",
+      "expect": {"ok": true}
+    },
+    {
+      "id": "gen2_fromjson_neg_audio_rate_u32_overflow",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/neg/audio_rate_u32_overflow.json",
+      "expect": {"ok": false, "error": "ERR_INVALID_AUDIO_RATE"}
+    },
+    {
+      "id": "gen2_fromjson_neg_audio_channels_u8_overflow",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/neg/audio_channels_u8_overflow.json",
+      "expect": {"ok": false, "error": "ERR_INVALID_AUDIO_CHANNELS"}
+    },
+    {
+      "id": "gen2_fromjson_neg_audio_channels_zero",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/neg/audio_channels_zero.json",
+      "expect": {"ok": false, "error": "ERR_INVALID_AUDIO_CHANNELS"}
+    },
+    {
       "id": "v3_fixint_zero",
       "gen": 2,
       "kind": "decode",

@@ -2,6 +2,7 @@ package cowrie
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 )
 
@@ -116,6 +117,51 @@ func TestJSONReconstruct_Malformed(t *testing.T) {
 		}
 		if got.typ != TypeObject {
 			t.Errorf("malformed case %d (%v): expected plain object, got %v", i, m["_type"], got.typ)
+		}
+	}
+}
+
+// TestJSONReconstruct_AudioRange covers the loud-rejection path: a recognized
+// audio projection whose rate/channels fall outside the wire types must make
+// FromJSON return a specific error rather than silently truncating
+// (rate 2^40 -> 0, channels 300 -> 44) or accepting channels=0. This is the
+// cross-language parity contract — Python raises, Rust returns Err, TS throws.
+func TestJSONReconstruct_AudioRange(t *testing.T) {
+	cases := []struct {
+		name string
+		m    map[string]any
+		want error
+	}{
+		{"rate_over_u32", map[string]any{"_type": "audio", "encoding": "pcm_int16", "rate": 4294967296, "channels": 1, "data": ""}, ErrInvalidAudioRate},
+		{"channels_over_u8", map[string]any{"_type": "audio", "encoding": "pcm_int16", "rate": 44100, "channels": 300, "data": ""}, ErrInvalidAudioCh},
+		{"channels_zero", map[string]any{"_type": "audio", "encoding": "pcm_int16", "rate": 44100, "channels": 0, "data": ""}, ErrInvalidAudioCh},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b, _ := json.Marshal(c.m)
+			got, err := FromJSON(b)
+			if !errors.Is(err, c.want) {
+				t.Fatalf("FromJSON err = %v, want %v (value=%v)", err, c.want, got)
+			}
+			if got != nil {
+				t.Errorf("expected nil value on rejection, got %v", got.typ)
+			}
+		})
+	}
+}
+
+// TestJSONReconstruct_AudioValid is the positive control: in-range audio still
+// reconstructs cleanly through FromJSON (guards against over-eager rejection).
+func TestJSONReconstruct_AudioValid(t *testing.T) {
+	for _, ch := range []int{1, 255} {
+		m := map[string]any{"_type": "audio", "encoding": "pcm_int16", "rate": 4294967295, "channels": ch, "data": ""}
+		b, _ := json.Marshal(m)
+		got, err := FromJSON(b)
+		if err != nil {
+			t.Fatalf("channels=%d: unexpected err %v", ch, err)
+		}
+		if got.typ != TypeAudio {
+			t.Errorf("channels=%d: expected audio, got %v", ch, got.typ)
 		}
 	}
 }

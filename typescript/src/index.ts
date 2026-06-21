@@ -9,12 +9,12 @@
  * @example
  * ```typescript
  * // Gen1 (Lightweight)
- * import { gen1 } from 'cowrie';
+ * import { gen1 } from 'cowrie-codec';
  * const data = gen1.encode({ name: 'Alice', scores: [1.0, 2.0, 3.0] });
  * const decoded = gen1.decode(data);
  *
  * // Gen2 (Full)
- * import { gen2 } from 'cowrie';
+ * import { gen2 } from 'cowrie-codec';
  * const val = gen2.Value.object([
  *   ['name', gen2.Value.string('Alice')],
  *   ['embedding', gen2.Value.tensor(new Float32Array([0.1, 0.2, 0.3]))],

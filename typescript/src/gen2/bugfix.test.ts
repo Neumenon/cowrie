@@ -14,6 +14,7 @@ import {
   DType,
   toAny,
   fromAny,
+  decode,
 } from './index.ts';
 
 // ============================================================
@@ -163,8 +164,33 @@ describe('Bug #4 — fixed-width field range validation', () => {
     );
   });
 
+  it('audio.channels=0 (no frames) throws RangeError', () => {
+    // Regression: channels=0 was accepted (n < 0 was the only check), unlike
+    // Python which rejected it. Zero channels is semantically invalid.
+    assert.throws(
+      () => fromAny({ _type: 'audio', encoding: 'pcm_int16', rate: 44100, channels: 0, data: '' }),
+      (err: unknown) => {
+        assert.ok(err instanceof RangeError, `Expected RangeError, got ${(err as Error).constructor.name}`);
+        assert.ok((err as Error).message.includes('channels'), `Expected message to mention 'channels': ${(err as Error).message}`);
+        return true;
+      }
+    );
+  });
+
   it('audio.channels=2 (uint8 valid) does not throw', () => {
     const v = fromAny({ _type: 'audio', encoding: 'pcm_int16', rate: 44100, channels: 2, data: '' });
     assert.strictEqual(v.type, Type.AUDIO);
+  });
+
+  it('binary decode rejects channels=0 on the wire', () => {
+    // Wire: 'SJ' 02 00 00 | TAG_AUDIO 23 | enc 01 | sampleRate 44100 LE | channels 00 | len 02 | data
+    const bytes = new Uint8Array([
+      0x53, 0x4a, 0x02, 0x00, 0x00, 0x23, 0x01, 0x44, 0xac, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+    ]);
+    assert.throws(() => decode(bytes), RangeError);
+    // channels=1 sibling decodes cleanly (proves the framing is otherwise valid).
+    const ok = bytes.slice();
+    ok[11] = 0x01;
+    assert.strictEqual(decode(ok).type, Type.AUDIO);
   });
 });

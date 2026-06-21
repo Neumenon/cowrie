@@ -11,6 +11,9 @@ ALLOWED_ERROR_CODES = {
     "ERR_INVALID_VERSION",
     "ERR_TRUNCATED",
     "ERR_INVALID_TAG",
+    "ERR_TRAILING_DATA",
+    "ERR_INVALID_AUDIO_RATE",
+    "ERR_INVALID_AUDIO_CHANNELS",
     "ERR_INVALID_FIELD_ID",
     "ERR_INVALID_UTF8",
     "ERR_INVALID_VARINT",
@@ -27,7 +30,7 @@ ALLOWED_ERROR_CODES = {
     "ERR_UNKNOWN_EXTENSION",
 }
 
-ALLOWED_KINDS = {"decode", "encode", "roundtrip"}
+ALLOWED_KINDS = {"decode", "decode_framed", "from_json", "encode", "roundtrip"}
 ALLOWED_GENS = {1, 2}
 
 

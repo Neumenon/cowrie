@@ -22,36 +22,46 @@ def _map_error_code(err: Exception) -> str:
         return "ERR_INVALID_TAG"
     if "trailing" in msg.lower():
         return "ERR_TRAILING_DATA"
+    if "Invalid channel count" in msg:
+        return "ERR_INVALID_AUDIO_CHANNELS"
+    if "Invalid sample rate" in msg:
+        return "ERR_INVALID_AUDIO_RATE"
     return ""
 
 
 def test_fixtures_core_decode():
     repo = _repo_root()
-    manifest_path = repo / "testdata" / "fixtures" / "manifest.json"
-    manifest = json.loads(manifest_path.read_text())
+    fixtures = repo / "testdata" / "fixtures"
+    manifest = json.loads((fixtures / "manifest.json").read_text())
 
     for case in manifest.get("cases", []):
-        if case.get("gen") != 2 or case.get("kind") != "decode":
+        kind = case.get("kind")
+        if case.get("gen") != 2 or kind not in ("decode", "from_json"):
             continue
 
-        input_path = repo / "testdata" / "fixtures" / case["input"]
-        data = input_path.read_bytes()
+        input_path = fixtures / case["input"]
+
+        # decode = binary wire -> Value; from_json = JSON projection -> Value.
+        def produce():
+            if kind == "from_json":
+                return gen2.from_json(input_path.read_text())
+            return gen2.decode(input_path.read_bytes())
 
         if case["expect"]["ok"]:
-            value = gen2.decode(data)
+            value = produce()
+            # Exercise the projection path for every ok case (not just those with
+            # an expected JSON) so a to_any crash on any value type is caught here.
             actual = gen2.to_any(value)
-
             expected_json = case["expect"].get("json")
             if expected_json:
-                expected_path = repo / "testdata" / "fixtures" / expected_json
-                expected = json.loads(expected_path.read_text())
+                expected = json.loads((fixtures / expected_json).read_text())
                 assert actual == expected, f"{case['id']}: expected {expected} got {actual}"
         else:
             try:
-                gen2.decode(data)
+                produce()
             except Exception as exc:
                 code = _map_error_code(exc)
                 expected = case["expect"].get("error")
                 assert code == expected, f"{case['id']}: expected {expected}, got {code} ({exc})"
                 continue
-            raise AssertionError(f"{case['id']}: expected error but decode succeeded")
+            raise AssertionError(f"{case['id']}: expected error but {kind} succeeded")
