@@ -165,3 +165,38 @@ func TestJSONReconstruct_AudioValid(t *testing.T) {
 		}
 	}
 }
+
+// TestJSONReconstruct_Nested verifies typed reconstruction happens at every depth
+// (parity with Python/Rust/TS), not just the top level: a nested out-of-range audio
+// must make FromJSON error, and a nested valid audio must reconstruct as a typed
+// value (so ToAny->FromJSON round-trips it instead of degrading it to a plain map).
+func TestJSONReconstruct_Nested(t *testing.T) {
+	bad := []struct {
+		name string
+		json string
+		want error
+	}{
+		{"object_rate", `{"wrap":{"_type":"audio","encoding":"pcm_int16","rate":4294967296,"channels":1,"data":""}}`, ErrInvalidAudioRate},
+		{"array_channels_zero", `[{"_type":"audio","encoding":"pcm_int16","rate":44100,"channels":0,"data":""}]`, ErrInvalidAudioCh},
+		{"deep_channels_over", `{"a":{"b":[{"_type":"audio","encoding":"pcm_int16","rate":44100,"channels":300,"data":""}]}}`, ErrInvalidAudioCh},
+	}
+	for _, c := range bad {
+		t.Run("reject_"+c.name, func(t *testing.T) {
+			if _, err := FromJSON([]byte(c.json)); !errors.Is(err, c.want) {
+				t.Fatalf("FromJSON(%s) err = %v, want %v", c.json, err, c.want)
+			}
+		})
+	}
+
+	// Nested valid audio reconstructs as a typed Audio value, not a plain object.
+	got, err := FromJSON([]byte(`{"wrap":{"_type":"audio","encoding":"pcm_int16","rate":44100,"channels":2,"data":"AAAA"}}`))
+	if err != nil {
+		t.Fatalf("nested valid audio: unexpected err %v", err)
+	}
+	if got.typ != TypeObject {
+		t.Fatalf("expected outer object, got %v", got.typ)
+	}
+	if wrap := got.objectVal[0].Value; wrap.typ != TypeAudio {
+		t.Errorf("nested value should reconstruct as TypeAudio, got %v", wrap.typ)
+	}
+}

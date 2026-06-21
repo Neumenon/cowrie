@@ -232,6 +232,20 @@
       "expect": {"ok": false, "error": "ERR_INVALID_AUDIO_CHANNELS"}
     },
     {
+      "id": "gen2_fromjson_nested_audio",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/nested_audio.json",
+      "expect": {"ok": true, "json": "fromjson/nested_audio.json"}
+    },
+    {
+      "id": "gen2_fromjson_neg_audio_nested_rate_overflow",
+      "gen": 2,
+      "kind": "from_json",
+      "input": "fromjson/neg/audio_nested_rate_overflow.json",
+      "expect": {"ok": false, "error": "ERR_INVALID_AUDIO_RATE"}
+    },
+    {
       "id": "v3_fixint_zero",
       "gen": 2,
       "kind": "decode",
