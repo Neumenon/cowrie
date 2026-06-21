@@ -412,3 +412,16 @@ class TestJsonSchemaFieldNames:
         v = Value.bitmask(1, b"\x01")
         d = to_any(v)
         assert isinstance(d["bits"], str)
+
+
+def test_from_json_canonicalizes_object_key_order():
+    """from_json sorts object keys (byte order) so the same object encodes to
+    identical bytes regardless of input key order — the cross-language
+    content-addressing guarantee (matches Go's from_json and Rust's BTreeMap)."""
+    from cowrie.gen2 import encode
+    a = encode(from_json('{"b": 1, "a": 2, "c": 3}'))
+    assert a == encode(from_json('{"c": 3, "a": 2, "b": 1}'))
+    assert a == encode(from_json('{"a": 2, "b": 1, "c": 3}'))  # already-sorted
+    # nested objects are canonicalized too
+    n = encode(from_json('{"z": {"y": 1, "x": 2}, "a": 3}'))
+    assert n == encode(from_json('{"a": 3, "z": {"x": 2, "y": 1}}'))
