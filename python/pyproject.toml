@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.0", "numpy>=2.0"]
+requires = ["setuptools>=77.0", "numpy>=2.0.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -29,7 +29,7 @@ classifiers = [
 # raises and gen2 silently falls back to pure Python — so wheels ship native but
 # would not run native. Pinning it here makes native the default on a normal install.
 dependencies = [
-    "numpy>=2.0",
+    "numpy>=2.0.2",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +37,7 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "cython>=3.0",
-    "numpy>=2.0",
+    "numpy>=2.0.2",
 ]
 
 [project.urls]
@@ -60,7 +60,7 @@ build = "cp39-* cp310-* cp311-* cp312-* cp313-*"
 skip = "*-win32 *-win_amd64 *-win_arm64 *-musllinux_i686"
 # The native extension imports NumPy, so the smoke test's isolated venv needs it
 # too — otherwise COWRIE_REQUIRE_NATIVE=1 fails because _cext can't import.
-test-requires = "numpy>=2.0"
+test-requires = "numpy>=2.0.2"
 test-environment = "COWRIE_REQUIRE_NATIVE=1"
 test-command = "python {project}/scripts/wheel_smoke.py"
 
