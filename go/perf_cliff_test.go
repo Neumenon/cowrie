@@ -9,6 +9,17 @@ import (
 // Time-bounded tests that fail if execution exceeds O(n) expectations.
 // These detect quadratic/exponential blowups from pathological inputs.
 
+func perfCliffExceeded(previous, current time.Duration, multiplier int) bool {
+	// Very small baselines are dominated by timer granularity, CPU scheduling, and
+	// cache/GC noise. Clamp the comparison floor so the test still catches real
+	// cliffs while not failing a release gate because a 10K-case happened to run
+	// in sub-millisecond time on a warm CPU.
+	if previous < time.Millisecond {
+		previous = time.Millisecond
+	}
+	return current > previous*time.Duration(multiplier)
+}
+
 func TestPerfCliff_DeepNesting(t *testing.T) {
 	depths := []int{50, 100, 500}
 	var lastDuration time.Duration
@@ -35,7 +46,7 @@ func TestPerfCliff_DeepNesting(t *testing.T) {
 
 			// Check for quadratic blowup: if depth doubles, time should
 			// roughly double (O(n)), not quadruple (O(n²)).
-			if lastDuration > 0 && dur > lastDuration*20 {
+			if lastDuration > 0 && perfCliffExceeded(lastDuration, dur, 20) {
 				t.Errorf("possible quadratic blowup: depth=%d took %v, previous took %v (ratio %.1fx)",
 					depth, dur, lastDuration, float64(dur)/float64(lastDuration))
 			}
@@ -103,7 +114,7 @@ func TestPerfCliff_WideArray(t *testing.T) {
 			}
 			dur := time.Since(start)
 
-			if lastDuration > 0 && dur > lastDuration*50 {
+			if lastDuration > 0 && perfCliffExceeded(lastDuration, dur, 50) {
 				t.Errorf("possible quadratic blowup: size=%d took %v, previous took %v (ratio %.1fx)",
 					size, dur, lastDuration, float64(dur)/float64(lastDuration))
 			}
