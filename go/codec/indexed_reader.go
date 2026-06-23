@@ -141,6 +141,12 @@ func (r *IndexedReader) SeekRecord(n uint64) ([]byte, error) {
 	}
 	g := r.groups[idx]
 
+	// Columnar groups have no Level-2 record_offsets table; per-record gather is
+	// deferred in v2. Callers must use OpenColumnarGroup for column-wise access.
+	if g.LayoutID == LayoutColumnarV1 {
+		return nil, ErrRecordIsColumnar
+	}
+
 	// Level-2: the record_offsets table (LE u32 array) sits at the end of the
 	// group: byte_len bytes from group start, RecordCount*4 of which are table.
 	localN := n - g.OrdinalFirst

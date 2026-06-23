@@ -317,35 +317,9 @@ func (mw *MasterWriter) WriteWithMeta(v any, meta *cowrie.Value) error {
 		}
 	}
 
-	// Header length (fixed at 24 bytes for v2):
-	// magic(4) + frame_kind(1) + flags(1) + hdrLen(2) + typeID(4) +
-	// payloadLen(4) + rawLen(4) + metaLen(4) = 24
-	hdrLen := uint16(FrameHeaderLen)
-
-	// Build frame
-	frame := make([]byte, 0, int(hdrLen)+len(metaBytes)+len(payload)+4)
-
-	// Write header
-	frame = append(frame, MasterMagic0, MasterMagic1, MasterMagic2, MasterMagic3)
-	frame = append(frame, FrameKindData) // frame_kind (was per-frame version)
-	frame = append(frame, flags)
-	frame = binary.LittleEndian.AppendUint16(frame, hdrLen)
-	frame = binary.LittleEndian.AppendUint32(frame, typeID)
-	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(payload)))
-	frame = binary.LittleEndian.AppendUint32(frame, rawLen)
-	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(metaBytes)))
-
-	// Write metadata
-	frame = append(frame, metaBytes...)
-
-	// Write payload
-	frame = append(frame, payload...)
-
-	// Write CRC if enabled
-	if mw.opts.EnableCRC {
-		checksum := crc32.ChecksumIEEE(frame)
-		frame = binary.LittleEndian.AppendUint32(frame, checksum)
-	}
+	// Assemble the frame bytes (header + meta + payload + optional CRC) via the
+	// shared emitter so the columnar path produces byte-identical headers.
+	frame := buildFrame(typeID, flags, rawLen, metaBytes, payload, mw.opts.EnableCRC)
 
 	// --- Random-access index management (Phase 1) ---
 
@@ -376,6 +350,32 @@ func (mw *MasterWriter) WriteWithMeta(v any, meta *cowrie.Value) error {
 	mw.globalOrdinal++
 
 	return mw.writeTracked(frame)
+}
+
+// buildFrame assembles a complete master-stream frame: the fixed 24-byte header,
+// optional metadata, the payload, and (when enableCRC) a trailing CRC32 over
+// header+meta+payload. The payload here is opaque/already-final (already
+// compressed if applicable, with rawLen carrying the uncompressed length or 0).
+// It is shared by WriteWithMeta and the columnar writer so the header bytes are
+// produced in exactly one place.
+func buildFrame(typeID uint32, flags uint8, rawLen uint32, metaBytes, payload []byte, enableCRC bool) []byte {
+	hdrLen := uint16(FrameHeaderLen)
+	frame := make([]byte, 0, int(hdrLen)+len(metaBytes)+len(payload)+4)
+	frame = append(frame, MasterMagic0, MasterMagic1, MasterMagic2, MasterMagic3)
+	frame = append(frame, FrameKindData)
+	frame = append(frame, flags)
+	frame = binary.LittleEndian.AppendUint16(frame, hdrLen)
+	frame = binary.LittleEndian.AppendUint32(frame, typeID)
+	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(payload)))
+	frame = binary.LittleEndian.AppendUint32(frame, rawLen)
+	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(metaBytes)))
+	frame = append(frame, metaBytes...)
+	frame = append(frame, payload...)
+	if enableCRC {
+		checksum := crc32.ChecksumIEEE(frame)
+		frame = binary.LittleEndian.AppendUint32(frame, checksum)
+	}
+	return frame
 }
 
 // Close flushes the final partial row-group, writes the Level-1 RowGroupEntry
