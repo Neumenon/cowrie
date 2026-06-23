@@ -60,15 +60,14 @@ func fixtureExists(name string) bool {
 	return err == nil
 }
 
-// buildLegacyStreamFrame builds a legacy length-prefixed Cowrie stream frame.
-func buildLegacyStreamFrame(payload []byte) []byte {
-	buf := make([]byte, 4+len(payload))
-	binary.BigEndian.PutUint32(buf[:4], uint32(len(payload)))
-	copy(buf[4:], payload)
-	return buf
+// writePreambleBytes appends the 8-byte file preamble to buf.
+func writePreambleBytes(buf *bytes.Buffer) {
+	buf.WriteString("SJST")
+	binary.Write(buf, binary.LittleEndian, uint16(FormatVersion))
+	binary.Write(buf, binary.LittleEndian, uint16(0)) // file_flags
 }
 
-// buildMasterFrame builds a master stream frame with given parameters.
+// buildMasterFrame builds a master stream stream (preamble + one frame).
 func buildMasterFrame(typeID uint32, flags uint8, meta, payload []byte, compress Compression, enableCRC bool) []byte {
 	rawLen := uint32(0)
 	if compress != CompressionNone {
@@ -81,11 +80,18 @@ func buildMasterFrame(typeID uint32, flags uint8, meta, payload []byte, compress
 func buildMasterFrameWithRawLen(typeID uint32, flags uint8, meta, payload []byte, rawLen uint32, compress Compression, enableCRC bool) []byte {
 	var buf bytes.Buffer
 
+	// File preamble (written once at stream start)
+	writePreambleBytes(&buf)
+
+	// crcStart marks the first byte of the frame (CRC covers the frame only,
+	// not the preamble).
+	crcStart := buf.Len()
+
 	// Magic "SJST"
 	buf.WriteString("SJST")
 
-	// Version
-	buf.WriteByte(0x02)
+	// frame_kind (0 = data)
+	buf.WriteByte(FrameKindData)
 
 	// Flags
 	var frameFlags uint8 = flags
@@ -122,10 +128,9 @@ func buildMasterFrameWithRawLen(typeID uint32, flags uint8, meta, payload []byte
 	// Payload
 	buf.Write(payload)
 
-	// CRC32 if enabled
+	// CRC32 if enabled (covers the frame bytes only, not the preamble)
 	if enableCRC {
-		data := buf.Bytes()
-		crc := crc32IEEE(data)
+		crc := crc32IEEE(buf.Bytes()[crcStart:])
 		binary.Write(&buf, binary.LittleEndian, crc)
 	}
 

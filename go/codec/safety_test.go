@@ -101,7 +101,7 @@ func TestSafety_TruncatedPayload(t *testing.T) {
 	validFrame := buf.Bytes()
 
 	// Truncate at various points in the payload
-	headerEnd := 24 // After header
+	headerEnd := PreambleLen + FrameHeaderLen // After preamble + header
 	for i := headerEnd; i < len(validFrame); i++ {
 		truncated := validFrame[:i]
 		mr := NewMasterReader(truncated, MasterReaderOptions{})
@@ -162,54 +162,55 @@ func TestSafety_CompressedFlagWithoutAlgorithmBits(t *testing.T) {
 	}
 }
 
-// TestSafety_InvalidMagic tests handling of invalid magic bytes.
+// TestSafety_InvalidMagic tests that a bad preamble magic is reported as a
+// typed not-a-cowrie-file error (greenfield: no legacy fallback).
 func TestSafety_InvalidMagic(t *testing.T) {
 	tests := []struct {
 		name string
 		data []byte
 	}{
-		{"wrong_magic", []byte("XXXX\x02\x00")},
+		{"wrong_magic", []byte("XXXX\x01\x00\x00\x00")},
 		{"partial_magic", []byte("SJS")},
-		{"null_magic", []byte{0, 0, 0, 0, 0x02, 0x00}},
+		{"null_magic", []byte{0, 0, 0, 0, 0x01, 0x00, 0x00, 0x00}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			mr := NewMasterReader(tt.data, MasterReaderOptions{})
 			_, err := mr.Next()
-			// Should either error or return legacy frame (with AllowLegacy)
-			if err == nil {
-				// If no error, it should have been detected as non-master-stream
-				// and handled appropriately
+			if err != ErrMasterNotCowrieFile {
+				t.Errorf("got %v, want ErrMasterNotCowrieFile", err)
 			}
 		})
 	}
 }
 
-// TestSafety_InvalidVersion tests handling of unsupported versions.
-func TestSafety_InvalidVersion(t *testing.T) {
+// TestSafety_InvalidFormatVersion tests that an unsupported preamble
+// format_version is rejected cleanly.
+func TestSafety_InvalidFormatVersion(t *testing.T) {
 	tests := []struct {
 		name    string
-		version byte
+		version uint16
 	}{
-		{"version_0", 0x00},
-		{"version_255", 0xFF},
-		{"version_3", 0x03},
+		{"version_0", 0x0000},
+		{"version_255", 0x00FF},
+		{"version_3", 0x0003},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
 			buf.WriteString("SJST")
-			buf.WriteByte(tt.version)
-			buf.WriteByte(0x00)
-			// Rest of header
-			buf.Write(make([]byte, 18))
+			binary.Write(&buf, binary.LittleEndian, tt.version)
+			binary.Write(&buf, binary.LittleEndian, uint16(0)) // file_flags
+			// Some frame-shaped padding (never reached: preamble fails first).
+			buf.Write(make([]byte, 24))
 
 			mr := NewMasterReader(buf.Bytes(), MasterReaderOptions{})
 			_, err := mr.Next()
-			// Might succeed for some versions or error - shouldn't panic
-			_ = err
+			if err != ErrMasterUnsupportedFormat {
+				t.Errorf("got %v, want ErrMasterUnsupportedFormat", err)
+			}
 		})
 	}
 }

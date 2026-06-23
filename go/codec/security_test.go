@@ -30,11 +30,14 @@ func TestSecurity_GzipDecompressionBomb(t *testing.T) {
 	}
 	frameData := frameBuf.Bytes()
 
-	// Verify that compression was actually applied
-	if len(frameData) < 6 {
+	// Verify that compression was actually applied. The first frame is padded
+	// to AlignK, so locate the frame start by skipping 0x00 pad after the
+	// preamble; the flags byte is at frameStart+5.
+	fs := frameStart(frameData)
+	if len(frameData) < fs+6 {
 		t.Fatalf("frame too small: %d bytes", len(frameData))
 	}
-	flags := frameData[5]
+	flags := frameData[fs+5]
 	if flags&FlagMasterCompressed == 0 {
 		t.Fatal("frame was NOT compressed -- test is invalid (payload too small?)")
 	}
@@ -66,10 +69,11 @@ func TestSecurity_ZstdDecompressionBomb(t *testing.T) {
 	}
 	frameData := frameBuf.Bytes()
 
-	if len(frameData) < 6 {
+	fs := frameStart(frameData)
+	if len(frameData) < fs+6 {
 		t.Fatalf("frame too small: %d bytes", len(frameData))
 	}
-	flags := frameData[5]
+	flags := frameData[fs+5]
 	if flags&FlagMasterCompressed == 0 {
 		t.Fatal("frame was NOT compressed -- test is invalid (payload too small?)")
 	}
@@ -83,6 +87,16 @@ func TestSecurity_ZstdDecompressionBomb(t *testing.T) {
 	if !errors.Is(err, cowrie.ErrDecompressedTooLarge) {
 		t.Fatalf("expected ErrDecompressedTooLarge for oversized zstd payload, got %v", err)
 	}
+}
+
+// frameStart returns the offset of the first frame header in a written stream,
+// skipping the 8-byte preamble and any 0x00 AlignK pad bytes before the frame.
+func frameStart(data []byte) int {
+	fs := PreambleLen
+	for fs < len(data) && data[fs] == 0x00 {
+		fs++
+	}
+	return fs
 }
 
 func TestSecurity_PerReaderDecompressionLimitAppliedDuringDecompression(t *testing.T) {

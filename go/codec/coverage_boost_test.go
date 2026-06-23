@@ -61,36 +61,6 @@ func TestDecompressZstdInvalidData(t *testing.T) {
 }
 
 // ============================================================
-// cowrie_master_stream.go: IsLegacyStream
-// ============================================================
-
-func TestIsLegacyStream(t *testing.T) {
-	// Too short
-	if IsLegacyStream(nil) {
-		t.Fatal("nil should not be legacy stream")
-	}
-	if IsLegacyStream([]byte{1, 2}) {
-		t.Fatal("short data should not be legacy stream")
-	}
-
-	// Valid legacy: first 4 bytes = length < total
-	data := make([]byte, 20)
-	data[0] = 10 // length = 10
-	if !IsLegacyStream(data) {
-		t.Fatal("expected legacy stream detection")
-	}
-
-	// Zero length = not legacy
-	data[0] = 0
-	data[1] = 0
-	data[2] = 0
-	data[3] = 0
-	if IsLegacyStream(data) {
-		t.Fatal("zero length should not be legacy stream")
-	}
-}
-
-// ============================================================
 // encode_fast.go: FastEncodeBytes, encodeUint, encodeFloat32,
 // getBuffer, putBuffer, isEmptyValue, encodeAny, fastToCowrieValue
 // ============================================================
