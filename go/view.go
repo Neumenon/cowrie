@@ -132,6 +132,34 @@ func viewInt64(data []byte) ([]int64, bool) {
 	return unsafe.Slice((*int64)(unsafe.Pointer(&data[0])), count), true
 }
 
+// ViewBytesFloat32 returns a zero-copy view of a raw byte slice as []float32,
+// reusing the alignment-gated, endianness-aware viewFloat32 helper. It exists so
+// that the codec package (columnar reader) can reinterpret column chunk bytes in
+// place without duplicating the unsafe.Slice + big-endian fallback logic. Returns
+// (nil, false) if the slice cannot be viewed (wrong length multiple, misaligned
+// base pointer on a LE host). On a BE host it returns a byte-swapped copy with ok=true.
+func ViewBytesFloat32(b []byte) ([]float32, bool) { return viewFloat32(b) }
+
+// ViewBytesFloat64 returns a zero-copy view of raw bytes as []float64.
+func ViewBytesFloat64(b []byte) ([]float64, bool) { return viewFloat64(b) }
+
+// ViewBytesInt32 returns a zero-copy view of raw bytes as []int32.
+func ViewBytesInt32(b []byte) ([]int32, bool) { return viewInt32(b) }
+
+// ViewBytesInt64 returns a zero-copy view of raw bytes as []int64.
+func ViewBytesInt64(b []byte) ([]int64, bool) { return viewInt64(b) }
+
+// ViewBytesUint8 returns the byte slice itself as []uint8 (identity passthrough).
+// It always succeeds (uint8 has elem size 1 and no alignment constraint), and the
+// returned slice aliases the input bytes — true zero-copy.
+func ViewBytesUint8(b []byte) ([]uint8, bool) { return b, true }
+
+// DTypeElemSize returns the in-memory element size in bytes for a fixed-width
+// DType, and whether the dtype is fixed-width. Sub-byte packed dtypes return
+// (0, false). It is the exported form of the internal dtypeElemSize helper so the
+// columnar codec can validate values length == rows*prod(shape_tail)*elemsize.
+func DTypeElemSize(d DType) (uint64, bool) { return dtypeElemSize(d) }
+
 // CopyFloat32 decodes tensor data as []float32 with a copy.
 // This is the safe fallback when zero-copy view fails.
 func CopyFloat32(td *TensorData) []float32 {

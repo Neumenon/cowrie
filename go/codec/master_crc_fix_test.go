@@ -55,14 +55,14 @@ func TestMasterCRCVerifiedBeforeMetaDecode(t *testing.T) {
 	})
 
 	// Flip a byte inside the metadata region of the frame.
-	// Header is 24 bytes; the metadata bytes begin immediately after.
-	// Flipping byte 25 (0-indexed: byte 24) corrupts the metadata bytes while
+	// The metadata bytes begin after the 8-byte preamble + 24-byte frame
+	// header. Flipping the first metadata byte corrupts the metadata while
 	// leaving the header intact so the reader can still parse lengths.
 	t.Run("tampered_meta_region_returns_crc_error", func(t *testing.T) {
 		corrupted := make([]byte, buf.Len())
 		copy(corrupted, buf.Bytes())
 
-		const metaByteOffset = 24 // first byte of metadata (after 24-byte header)
+		const metaByteOffset = PreambleLen + FrameHeaderLen // first byte of metadata
 		if len(corrupted) <= metaByteOffset {
 			t.Skip("frame too short to corrupt metadata region")
 		}

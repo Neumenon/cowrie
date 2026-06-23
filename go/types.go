@@ -33,7 +33,8 @@ const (
 	FlagCompressed       = 0x01 // bit0: data is compressed
 	FlagCompressionType1 = 0x02 // bit1: compression type bit 1
 	FlagCompressionType2 = 0x04 // bit2: compression type bit 2
-	FlagHasColumnHints   = 0x08 // bit3: column hints present after flags
+	// bit3 (0x08) is unused in Phase 0. The former FlagHasColumnHints relic
+	// is removed; the slot returns as layout_id in Phase 1.
 )
 
 // Compression types

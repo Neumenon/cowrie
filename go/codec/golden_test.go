@@ -2,6 +2,7 @@ package codec
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"os"
 	"path/filepath"
@@ -241,8 +242,9 @@ func TestMasterFrame_GoldenEncode(t *testing.T) {
 	}
 }
 
-// TestMasterFrame_VersionStability ensures version byte is stable.
-func TestMasterFrame_VersionStability(t *testing.T) {
+// TestMasterFrame_PreambleAndFrameKindStability ensures the preamble magic +
+// format_version and the per-frame frame_kind byte are stable.
+func TestMasterFrame_PreambleAndFrameKindStability(t *testing.T) {
 	var buf bytes.Buffer
 	mw := NewMasterWriter(&buf, MasterWriterOptions{})
 	if err := mw.Write(cowrie.Int64(42)); err != nil {
@@ -251,14 +253,27 @@ func TestMasterFrame_VersionStability(t *testing.T) {
 
 	data := buf.Bytes()
 
-	// Check magic
+	// Preamble magic
 	if string(data[0:4]) != "SJST" {
-		t.Errorf("magic = %q, want SJST", string(data[0:4]))
+		t.Errorf("preamble magic = %q, want SJST", string(data[0:4]))
 	}
 
-	// Check version
-	if data[4] != 0x02 {
-		t.Errorf("version = %#x, want 0x02", data[4])
+	// Preamble format_version (LE u16) lives once at the file start.
+	if got := binary.LittleEndian.Uint16(data[4:6]); got != FormatVersion {
+		t.Errorf("format_version = %d, want %d", got, FormatVersion)
+	}
+
+	// The first frame is zero-padded so its abs_offset ≡ 0 mod AlignK; skip the
+	// 0x00 pad after the preamble to find the per-frame magic + frame_kind byte.
+	fs := PreambleLen
+	for fs < len(data) && data[fs] == 0x00 {
+		fs++
+	}
+	if string(data[fs:fs+4]) != "SJST" {
+		t.Errorf("frame magic = %q, want SJST", string(data[fs:fs+4]))
+	}
+	if data[fs+4] != FrameKindData {
+		t.Errorf("frame_kind = %#x, want %#x", data[fs+4], FrameKindData)
 	}
 }
 

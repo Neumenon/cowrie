@@ -2,6 +2,7 @@ package codec
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"testing"
 
@@ -143,10 +144,12 @@ func TestMasterStreamCRCVerification(t *testing.T) {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	// Corrupt the data
+	// Corrupt a byte in the payload region (past the 8-byte preamble and the
+	// 24-byte frame header) so the CRC check is reached and fails.
 	rawData := buf.Bytes()
-	if len(rawData) > 20 {
-		rawData[20] ^= 0xFF // Flip some bits
+	payloadByte := PreambleLen + FrameHeaderLen
+	if len(rawData) > payloadByte+4 { // leave room before the 4-byte CRC trailer
+		rawData[payloadByte] ^= 0xFF // Flip some bits
 	}
 
 	reader := NewMasterReader(rawData, DefaultMasterReaderOptions())
@@ -260,36 +263,6 @@ func TestMasterStreamDifferentTypeID(t *testing.T) {
 	}
 }
 
-func TestMasterStreamLegacyDetection(t *testing.T) {
-	// Create a legacy stream format [u32 len][payload]
-	data := map[string]any{"legacy": "data"}
-	encoded, err := EncodeBytes(data)
-	if err != nil {
-		t.Fatalf("EncodeBytes failed: %v", err)
-	}
-
-	// Build legacy format
-	legacy := make([]byte, 4+len(encoded))
-	legacy[0] = byte(len(encoded))
-	legacy[1] = byte(len(encoded) >> 8)
-	legacy[2] = byte(len(encoded) >> 16)
-	legacy[3] = byte(len(encoded) >> 24)
-	copy(legacy[4:], encoded)
-
-	opts := DefaultMasterReaderOptions()
-	opts.AllowLegacy = true
-
-	reader := NewMasterReader(legacy, opts)
-	frame, err := reader.Next()
-	if err != nil {
-		t.Fatalf("Next failed for legacy: %v", err)
-	}
-
-	if frame.Payload.Get("legacy").String() != "data" {
-		t.Error("Failed to read legacy payload")
-	}
-}
-
 func TestMasterStreamNoCompression(t *testing.T) {
 	data := map[string]any{"small": "data"}
 
@@ -316,8 +289,8 @@ func TestMasterStreamNoCompression(t *testing.T) {
 }
 
 func TestIsMasterStream(t *testing.T) {
-	// Valid master stream
-	valid := []byte{'S', 'J', 'S', 'T', 0x02, 0x00}
+	// Valid master stream preamble
+	valid := []byte{'S', 'J', 'S', 'T', 0x01, 0x00, 0x00, 0x00}
 	if !IsMasterStream(valid) {
 		t.Error("IsMasterStream should return true for valid magic")
 	}
@@ -335,17 +308,51 @@ func TestIsMasterStream(t *testing.T) {
 	}
 }
 
-func TestIsCowrieDocument(t *testing.T) {
-	// Valid Cowrie document
-	valid := []byte{'S', 'J', 0x02, 0x00}
-	if !IsCowrieDocument(valid) {
-		t.Error("IsCowrieDocument should return true for valid document")
+func TestMasterStreamPreamble(t *testing.T) {
+	var buf bytes.Buffer
+	writer := NewMasterWriter(&buf, DefaultMasterWriterOptions())
+	if err := writer.Write(map[string]any{"x": int64(1)}); err != nil {
+		t.Fatalf("Write failed: %v", err)
 	}
 
-	// Master stream (should be false)
-	master := []byte{'S', 'J', 'S', 'T'}
-	if IsCowrieDocument(master) {
-		t.Error("IsCowrieDocument should return false for master stream")
+	data := buf.Bytes()
+	if len(data) < PreambleLen {
+		t.Fatalf("output shorter than preamble: %d", len(data))
+	}
+	if string(data[0:4]) != "SJST" {
+		t.Errorf("preamble magic = %q, want SJST", string(data[0:4]))
+	}
+	if got := binary.LittleEndian.Uint16(data[4:6]); got != FormatVersion {
+		t.Errorf("format_version = %d, want %d", got, FormatVersion)
+	}
+	if got := binary.LittleEndian.Uint16(data[6:8]); got != 0 {
+		t.Errorf("file_flags = %d, want 0", got)
+	}
+	// frame_kind is the byte immediately after the per-frame magic.
+	if data[PreambleLen+4] != FrameKindData {
+		t.Errorf("frame_kind = %#x, want %#x", data[PreambleLen+4], FrameKindData)
+	}
+}
+
+func TestMasterStreamBadPreamble(t *testing.T) {
+	// Empty / too-short input is a typed not-a-cowrie-file error.
+	reader := NewMasterReader([]byte{'S', 'J'}, DefaultMasterReaderOptions())
+	if _, err := reader.Next(); err != ErrMasterNotCowrieFile {
+		t.Errorf("short preamble: got %v, want ErrMasterNotCowrieFile", err)
+	}
+
+	// Wrong magic.
+	bad := []byte{'X', 'X', 'X', 'X', 0x01, 0x00, 0x00, 0x00}
+	reader = NewMasterReader(bad, DefaultMasterReaderOptions())
+	if _, err := reader.Next(); err != ErrMasterNotCowrieFile {
+		t.Errorf("bad magic: got %v, want ErrMasterNotCowrieFile", err)
+	}
+
+	// Unsupported format version.
+	badVer := []byte{'S', 'J', 'S', 'T', 0x99, 0x00, 0x00, 0x00}
+	reader = NewMasterReader(badVer, DefaultMasterReaderOptions())
+	if _, err := reader.Next(); err != ErrMasterUnsupportedFormat {
+		t.Errorf("bad version: got %v, want ErrMasterUnsupportedFormat", err)
 	}
 }
 

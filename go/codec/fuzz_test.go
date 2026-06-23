@@ -36,7 +36,6 @@ func FuzzMasterStreamReader_Next(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		mr := NewMasterReader(data, MasterReaderOptions{
 			MaxDecompressedSize: 1 << 20, // 1MB cap
-			AllowLegacy:         true,
 		})
 
 		// Try reading up to 10 frames to catch infinite loops
@@ -119,41 +118,6 @@ func FuzzFastEncode(f *testing.F) {
 			var decoded any
 			if err := DecodeBytes(encoded, &decoded); err != nil {
 				t.Errorf("encode succeeded but decode failed: %v", err)
-			}
-		}
-	})
-}
-
-// FuzzLegacyStreamFrame fuzzes legacy length-prefixed frames.
-// Run with: go test -fuzz=FuzzLegacyStreamFrame -fuzztime=30s
-func FuzzLegacyStreamFrame(f *testing.F) {
-	seeds := [][]byte{
-		// Valid frame: length=4, payload=SJSJ
-		{0x00, 0x00, 0x00, 0x04, 'S', 'J', 0x02, 0x00},
-		// Zero length
-		{0x00, 0x00, 0x00, 0x00},
-		// Huge length (bomb attempt)
-		{0xFF, 0xFF, 0xFF, 0xFF},
-		// Truncated length
-		{0x00, 0x00},
-		// Empty
-		{},
-	}
-
-	for _, seed := range seeds {
-		f.Add(seed)
-	}
-
-	f.Fuzz(func(t *testing.T, data []byte) {
-		mr := NewMasterReader(data, MasterReaderOptions{
-			AllowLegacy:         true,
-			MaxDecompressedSize: 1 << 20,
-		})
-
-		for i := 0; i < 5; i++ {
-			_, err := mr.Next()
-			if err != nil {
-				break
 			}
 		}
 	})
@@ -268,7 +232,6 @@ func TestFuzz_NoInfiniteLoop(t *testing.T) {
 			go func() {
 				defer close(done)
 				mr := NewMasterReader(input, MasterReaderOptions{
-					AllowLegacy:         true,
 					MaxDecompressedSize: 1 << 20,
 				})
 				for j := 0; j < 100; j++ {
