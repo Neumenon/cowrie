@@ -212,10 +212,10 @@ func TestColumnarPerChunkZstd(t *testing.T) {
 }
 
 // TestColumnDescGolden — encodeInto then decodeColumnDesc round-trips all fields;
-// ColumnDescLen==56; each field at its pinned offset via a byte-level golden.
+// ColumnDescLen==64 (stats_off@56, _pad2@60); each field at its pinned offset via a byte-level golden.
 func TestColumnDescGolden(t *testing.T) {
-	if ColumnDescLen != 56 {
-		t.Fatalf("ColumnDescLen must be 56, got %d", ColumnDescLen)
+	if ColumnDescLen != 64 {
+		t.Fatalf("ColumnDescLen must be 64, got %d", ColumnDescLen)
 	}
 	d := ColumnDesc{
 		PathID:       0x11223344,
@@ -228,7 +228,7 @@ func TestColumnDescGolden(t *testing.T) {
 		ChunkLen:     0x0102030405060708,
 		RawLen:       0xA1A2A3A4A5A6A7A8,
 		ChunkDigest:  [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-		StatsOff:     0,
+		StatsOff:     0xDEADBEEF,
 	}
 	var buf [ColumnDescLen]byte
 	d.encodeInto(buf[:])
@@ -266,6 +266,12 @@ func TestColumnDescGolden(t *testing.T) {
 	}
 	if !bytes.Equal(buf[40:56], d.ChunkDigest[:]) {
 		t.Fatalf("chunk_digest @40")
+	}
+	if got := binary.LittleEndian.Uint32(buf[56:60]); got != d.StatsOff {
+		t.Fatalf("stats_off @56: %x want %x", got, d.StatsOff)
+	}
+	if buf[60] != 0 || buf[61] != 0 || buf[62] != 0 || buf[63] != 0 {
+		t.Fatalf("pad2 bytes @60..64 not zero: %v", buf[60:64])
 	}
 
 	back := decodeColumnDesc(buf[:])

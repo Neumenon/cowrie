@@ -147,12 +147,35 @@ func EncodeColumnarBatchV1(b *ColumnarTensorBatch) (payload []byte, dir []Column
 		descs[i].ChunkLen = uint64(len(onDisk[i]))
 	}
 
+	// --- per-chunk stats for the numeric tensor.values column (Phase 3) ---
+	// Compute over the RAW values bytes BEFORE optional compression. Only the
+	// values column (index 0) carries a StatsBlock in Phase 3; all other columns
+	// keep StatsOff=0. Stats are skipped (no block) for dtypes we cannot stat.
+	var valuesStats StatsBlock
+	haveValuesStats := false
+	{
+		const valuesIdx = 0
+		sb, ok := computeValuesStats(b.DType, b.Values, b.Validity, b.NumRows, prodU64(b.ShapeTail))
+		if ok {
+			valuesStats = sb
+			haveValuesStats = true
+		}
+		_ = valuesIdx
+	}
+
 	// --- compute layout offsets ---
-	// header (16) + directory (56*numColumns) + path blob, then pad to K, then
-	// each chunk K-aligned with 0x00 padding between.
+	// header (16) + directory (64*numColumns) + path blob | STATS_REGION, then
+	// pad to K, then each chunk K-aligned with 0x00 padding between. The stats
+	// region (one 48B block) sits UNCOMPRESSED immediately after the path blob so
+	// a skip pass reads only [payloadStart .. statsEnd], never a chunk byte.
 	dirEnd := uint64(ColumnarHeaderLen) + uint64(ColumnDescLen)*uint64(numColumns)
 	blobEnd := dirEnd + uint64(len(pathBlob))
-	cursor := align16(blobEnd)
+	statsEnd := blobEnd
+	if haveValuesStats {
+		descs[0].StatsOff = uint32(blobEnd) // values column is index 0
+		statsEnd = blobEnd + uint64(ColumnStatsLen)
+	}
+	cursor := align16(statsEnd)
 	for i := range cols {
 		descs[i].ChunkOff = cursor
 		cursor += descs[i].ChunkLen
@@ -162,7 +185,7 @@ func EncodeColumnarBatchV1(b *ColumnarTensorBatch) (payload []byte, dir []Column
 	// but cursor already rounds up; trim to exact end of last chunk).
 	var payloadLen uint64
 	if len(cols) == 0 {
-		payloadLen = blobEnd
+		payloadLen = statsEnd
 	} else {
 		last := descs[len(descs)-1]
 		payloadLen = last.ChunkOff + last.ChunkLen
@@ -181,6 +204,10 @@ func EncodeColumnarBatchV1(b *ColumnarTensorBatch) (payload []byte, dir []Column
 	}
 	// path blob
 	copy(buf[dirEnd:blobEnd], pathBlob)
+	// stats region (one 48B uncompressed block for the values column, if any)
+	if haveValuesStats {
+		valuesStats.encodeInto(buf[blobEnd:statsEnd])
+	}
 	// chunks
 	for i := range cols {
 		off := descs[i].ChunkOff

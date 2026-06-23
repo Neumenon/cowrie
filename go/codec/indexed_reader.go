@@ -177,6 +177,72 @@ func (r *IndexedReader) FilterByType(typeID uint32) []uint32 {
 	return out
 }
 
+// openColumnarDirectory parses ONLY the columnar header + ColumnDesc directory +
+// path blob + stats region for group g, touching NO chunk bytes. It is the
+// chunk-free entry point for the stateless skip path. It returns the same
+// *ColumnarGroupView as OpenColumnarGroup (which is already lazy: chunk bytes are
+// resolved only on an explicit Column()/ColumnAt() call).
+func (r *IndexedReader) openColumnarDirectory(g uint32) (*ColumnarGroupView, error) {
+	return r.OpenColumnarGroup(g)
+}
+
+// SelectColumnarGroups returns the indices (ascending) of the COLUMNAR groups
+// whose column `path` MIGHT contain a value in the inclusive numeric range
+// [lo, hi]. It is a stateless, declarative skip-before-decode selector: for each
+// group it reads ONLY the columnar header + directory + path blob + the 48B
+// StatsBlock (all in the uncompressed payload FRONT, before the first chunk_off)
+// and NEVER decodes — or even slices — a chunk byte.
+//
+// Policy (conservative — INCLUDE whenever absence cannot be proven):
+//   - non-columnar group                -> EXCLUDE (this selector is columnar-only;
+//     callers must FilterByType/route first).
+//   - group fails to open / parse        -> EXCLUDE (cannot range-test).
+//   - column `path` absent in the group  -> EXCLUDE (column not present).
+//   - column present, stats_off == 0     -> INCLUDE (no stats => cannot prove absence).
+//   - column present, has StatsBlock     -> INCLUDE iff MightContainRange(lo,hi).
+//
+// Because MightContainRange returns true for !HasMinMax / NaN query / unknown
+// stats dtype, skipping can never drop a group that might contain a match.
+func (r *IndexedReader) SelectColumnarGroups(path string, lo, hi float64) []uint32 {
+	var out []uint32
+	for i := range r.groups {
+		gi := uint32(i)
+		if r.groups[i].LayoutID != LayoutColumnarV1 {
+			continue // EXCLUDE non-columnar groups.
+		}
+		cv, err := r.openColumnarDirectory(gi)
+		if err != nil {
+			continue // EXCLUDE unparseable groups.
+		}
+		// Locate the column without resolving any chunk.
+		found := false
+		idx := -1
+		for j := range cv.paths {
+			if cv.paths[j] == path {
+				found = true
+				idx = j
+				break
+			}
+		}
+		if !found {
+			continue // EXCLUDE: column not present.
+		}
+		if cv.dir[idx].StatsOff == 0 {
+			out = append(out, gi) // INCLUDE: no stats => candidate.
+			continue
+		}
+		sb, ok := cv.StatsAt(idx)
+		if !ok {
+			out = append(out, gi) // INCLUDE: malformed/absent stats => candidate.
+			continue
+		}
+		if sb.MightContainRange(lo, hi) {
+			out = append(out, gi)
+		}
+	}
+	return out
+}
+
 // readFramePayload parses the frame at absolute offset start in data and returns
 // its decompressed payload bytes. It verifies the per-frame magic and (when
 // present) does NOT re-verify CRC here — Phase 1 random access trusts the footer

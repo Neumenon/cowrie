@@ -20,7 +20,7 @@ const (
 
 	// ColumnDescLen is the fixed on-disk size of one ColumnDesc, in bytes.
 	//
-	// CANONICAL (authoritative) layout — stride 56, every u64 naturally aligned,
+	// CANONICAL (authoritative) layout — stride 64, every u64 naturally aligned,
 	// digest[16] lands 4-aligned, encoded/decoded field-by-field with
 	// binary.LittleEndian (NEVER unsafe.Slice — alignment-safe on ARM mmap):
 	//
@@ -37,14 +37,32 @@ const (
 	//	 24    8   chunk_len      u64    on-disk (maybe zstd) chunk length
 	//	 32    8   raw_len        u64    uncompressed chunk length
 	//	 40   16   chunk_digest   [16]   BLAKE3-128 over RAW bytes (may be zero)
-	//	 56  = END.
+	//	 56    4   stats_off      u32    payload-relative offset of this column's
+	//	                                 48B StatsBlock; 0 = no stats block
+	//	 60    4   _pad2          u32    0x00 (rounds stride to 64)
+	//	 64  = END.
 	//
-	// stats_off is RESERVED for Phase 3 and is ALWAYS 0 in v2. Because the
-	// 16-byte digest occupies bytes 40..56 there is no free slot for a separate
-	// stats_off word; v2 therefore folds it away (it is implicitly 0). The
-	// ColumnDesc.StatsOff field is retained in the Go struct for API forward-room
-	// and is hard-asserted 0 at write; the reader never reads or gates on it.
-	ColumnDescLen = 56
+	// Phase 3 extends the stride 56 -> 64 (greenfield re-pin, zero users): every
+	// pre-existing field keeps its byte offset (chunk_off@16 .. chunk_digest ends
+	// @56), and a naturally-aligned stats_off u32 lands at 56 with 4 reserved pad
+	// bytes at 60. stats_off is payload-relative and points at this column's 48B
+	// uncompressed StatsBlock (ColumnStatsLen); 0 means the column carries no
+	// stats. In Phase 3 only the tensor.values column ever gets a non-zero
+	// stats_off; shape_tail / validity always encode 0. The stride is a power of
+	// two and a multiple of AlignK(16), keeping the directory K-aligned.
+	ColumnDescLen = 64
+
+	// ColumnStatsLen is the fixed on-disk size of one StatsBlock, in bytes. It is
+	// dtype-INDEPENDENT (always 48): ver/dtype/flags/pad (8) + null_count (8) +
+	// nan_count (8) + min_cell (8) + max_cell (8) + pad_tail (8). The min/max
+	// cells are raw 8-byte LE slots reinterpreted per stats_dtype, which is why
+	// the block is fixed-width regardless of the values dtype. The block is
+	// UNCOMPRESSED and lives in the payload front (before the first chunk_off).
+	ColumnStatsLen = 48
+
+	// StatsVersion1 is the only recognized StatsBlock.stats_ver; any other value
+	// at read time is reported as ErrColumnarMalformed.
+	StatsVersion1 uint8 = 1
 
 	// ColumnarHeaderLen is the fixed ColumnarBatchV1 payload header size:
 	//   num_columns u32 | num_rows u64 | path_blob_len u32  => 16 bytes.
@@ -131,8 +149,12 @@ func (d *ColumnDesc) encodeInto(dst []byte) {
 	binary.LittleEndian.PutUint64(dst[24:32], d.ChunkLen)
 	binary.LittleEndian.PutUint64(dst[32:40], d.RawLen)
 	copy(dst[40:56], d.ChunkDigest[:])
-	// stats_off is reserved (always 0 in v2) and occupies no encoded slot — the
-	// 16-byte digest fills bytes 40..56. d.StatsOff is asserted 0 at write time.
+	// stats_off @56: payload-relative offset of this column's 48B StatsBlock, or 0.
+	binary.LittleEndian.PutUint32(dst[56:60], d.StatsOff)
+	dst[60] = 0 // _pad2
+	dst[61] = 0
+	dst[62] = 0
+	dst[63] = 0
 }
 
 // decodeColumnDesc decodes a fixed ColumnDescLen little-endian record from src
@@ -152,8 +174,8 @@ func decodeColumnDesc(src []byte) ColumnDesc {
 	d.ChunkLen = binary.LittleEndian.Uint64(src[24:32])
 	d.RawLen = binary.LittleEndian.Uint64(src[32:40])
 	copy(d.ChunkDigest[:], src[40:56])
-	// stats_off is reserved (always 0 in v2); the reader never reads it.
-	d.StatsOff = 0
+	// stats_off @56 (src[60:64] are _pad2 — ignored).
+	d.StatsOff = binary.LittleEndian.Uint32(src[56:60])
 	return d
 }
 

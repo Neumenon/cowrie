@@ -26,6 +26,10 @@ type ColumnView struct {
 	DType      cowrie.DType
 	raw        []byte
 	compressed bool
+	// statsRaw is the 48B StatsBlock slice (aliasing the payload) for this column,
+	// or nil when the column has no stats (stats_off == 0). It is set WITHOUT
+	// decoding the chunk so Stats() is a pure directory/stats read.
+	statsRaw []byte
 }
 
 // IsColumnarGroup reports whether group g uses the COLUMNAR_V1 physical layout.
@@ -132,7 +136,39 @@ func parseColumnarPayload(payload []byte) (*ColumnarGroupView, error) {
 		if d.ChunkOff+d.ChunkLen > uint64(len(payload)) {
 			return nil, ErrColumnarMalformed
 		}
+		// Validate the stats region: 0 (none) OR a 48B block inside the payload
+		// that lies entirely in the front region (before the path blob? no —
+		// after the directory, AT/after the blob, and BEFORE the first chunk so a
+		// skip pass never overlaps chunk bytes). We require:
+		//   stats_off+48 <= len(payload)  AND  stats_off >= dirEnd.
+		// Overlap-into-chunk is rejected below once firstChunkOff is known.
+		if d.StatsOff != 0 {
+			so := uint64(d.StatsOff)
+			if so < dirEnd || so+uint64(ColumnStatsLen) > uint64(len(payload)) {
+				return nil, ErrColumnarMalformed
+			}
+		}
 		dir[i] = d
+	}
+
+	// Second pass: reject any stats region that overlaps a chunk. The first chunk
+	// begins at the smallest non-zero ChunkOff; stats must end at or before it.
+	var firstChunkOff uint64 = ^uint64(0)
+	for i := range dir {
+		if dir[i].ChunkLen > 0 || dir[i].ChunkOff > 0 {
+			if dir[i].ChunkOff < firstChunkOff {
+				firstChunkOff = dir[i].ChunkOff
+			}
+		}
+	}
+	if firstChunkOff != ^uint64(0) {
+		for i := range dir {
+			if dir[i].StatsOff != 0 {
+				if uint64(dir[i].StatsOff)+uint64(ColumnStatsLen) > firstChunkOff {
+					return nil, ErrColumnarMalformed
+				}
+			}
+		}
 	}
 
 	return &ColumnarGroupView{
@@ -178,7 +214,66 @@ func (cv *ColumnarGroupView) resolveColumn(i int) (*ColumnView, error) {
 		DType:      cowrie.DType(d.LogicalDType),
 		raw:        raw,
 		compressed: compressed,
+		statsRaw:   cv.statsSlice(i),
 	}, nil
+}
+
+// statsSlice returns the 48B StatsBlock slice (aliasing the payload) for
+// directory index i, or nil when the column has no stats (validated bounds in
+// parseColumnarPayload). It decodes NO chunk bytes.
+func (cv *ColumnarGroupView) statsSlice(i int) []byte {
+	so := uint64(cv.dir[i].StatsOff)
+	if so == 0 {
+		return nil
+	}
+	if so+uint64(ColumnStatsLen) > uint64(len(cv.payload)) {
+		return nil
+	}
+	return cv.payload[so : so+uint64(ColumnStatsLen)]
+}
+
+// Stats decodes and returns this column's StatsBlock, or (nil,false) when the
+// column carries no stats. It is a pure directory/stats read on the convenience
+// ColumnView; the DECODE-FREE skip path uses ColumnarGroupView.StatsAt/StatsFor
+// and IndexedReader.SelectColumnarGroups, which never resolve a chunk.
+func (c *ColumnView) Stats() (*StatsBlock, bool) {
+	if c.statsRaw == nil {
+		return nil, false
+	}
+	sb, err := decodeStatsBlock(c.statsRaw)
+	if err != nil {
+		return nil, false
+	}
+	return &sb, true
+}
+
+// StatsAt decodes the StatsBlock for directory index i WITHOUT resolving (or
+// decompressing) the column's chunk. Returns (nil,false) when absent/malformed.
+func (cv *ColumnarGroupView) StatsAt(i int) (*StatsBlock, bool) {
+	if i < 0 || i >= len(cv.dir) {
+		return nil, false
+	}
+	raw := cv.statsSlice(i)
+	if raw == nil {
+		return nil, false
+	}
+	sb, err := decodeStatsBlock(raw)
+	if err != nil {
+		return nil, false
+	}
+	return &sb, true
+}
+
+// StatsFor decodes the StatsBlock for the column with the given canonical path
+// WITHOUT resolving its chunk. Returns (nil,false) when the column or its stats
+// are absent.
+func (cv *ColumnarGroupView) StatsFor(path string) (*StatsBlock, bool) {
+	for i := range cv.paths {
+		if cv.paths[i] == path {
+			return cv.StatsAt(i)
+		}
+	}
+	return nil, false
 }
 
 // ColumnAt returns the column view at directory index i, or nil if out of range.
