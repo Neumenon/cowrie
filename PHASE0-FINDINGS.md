@@ -65,5 +65,14 @@ The Canonical Encoding Profile was a good start but the SPEC is **not yet clean-
 
 → Phase 1a is therefore a deliberate **SPEC rewrite to one clean-room-complete greenfield canonical format**, ideally panel-vetted, not piecemeal patches.
 
+## Lean-doctrine review — FINAL design decisions (oracle GPT-5.5 **Pro** browser + Gemini + DeepSeek, unanimous)
+A "lean version" doctrine was proposed (small composing primitives + Profiles + emergence; Tesla/von-Neumann passes; physics/chemistry/biology). Reviewed against locked decisions. Outcome:
+1. **Scalar Float32 stays DROPPED** — lean's "float32 in Core" is aspirational; two scalar float widths reintroduce K10. f32 is a Tensor dtype only.
+2. **TensorRef → Profile, not Core wire tag** — `Object{hash, dtype, shape, byteLen, store?}`; identity = hash of referenced tensor's canonical bytes; `store` is a hint; no resolution at decode. (Pro: a naive ref "recreates the exact nondeterminism Cowrie was built to eliminate.")
+3. **Core = 16 types, locked** (SPEC-v1 §1). Governed by the new **Core-admission rule** (§0.1): a type enters Core only if its domain/equality/canonical-encoding/errors/fixtures are fully specified WITHOUT external state.
+4. **Sequencing = lean's LAYERS × determinism-first GATING** — a layer is done only when its canonical spec is frozen AND the cross-language gate is green. Spec §3–§5 + green gate BEFORE tensor/stream/profile layers. (Reject lean's implicit feature-first ordering.)
+5. **Adopt lean as FRAMING/doctrine** (physics/chemistry/biology; reduce-resistance; clean machine; "no impl-is-spec") — changes zero wire decisions, gives the positive growth path + clean Core/Profile boundary.
+**Folded into SPEC-v1:** §0.1 admission rule, §0.2 doctrine, §6 Profiles (TensorRef + Embedding + stubs), §6.4 **profile-simulation gate** (Embeddings/Media/Trace must be schemas over Core before 1.0 freeze — de-risks the emergence bet).
+
 ## Status
 Go+Rust round-trip gate built & run (Phase-0 core ✓). Finding F1 + review captured. **Next (Phase 1a): author the Canonical Encoding Profile in SPEC.md, then conform Go/Rust + add strict-mode negative fixtures.** TS + Python recode and CI wiring still pending. Held before drop-C (correct — canonical form must be pinned first).
