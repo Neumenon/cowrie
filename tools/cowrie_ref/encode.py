@@ -1,0 +1,79 @@
+"""Canonical encoder (SPEC-v1 §2, §3).
+
+Produces the one canonical byte-string for a value: smallest int/array/map form, byte-sorted
+dictionary, dict-coded object fields. ``encode`` emits a full headered stream; ``encode_value``
+emits just the value body (used by the round-trip checks).
+"""
+from __future__ import annotations
+
+import struct
+
+from . import model as m
+from .varint import encode_svarint, encode_uvarint
+
+
+def _collect_keys(value: object, acc: set[str]) -> None:
+    if isinstance(value, dict):
+        for key, sub in value.items():
+            acc.add(key)
+            _collect_keys(sub, acc)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_keys(item, acc)
+
+
+def encode_value(value: object, dict_index: dict[str, int]) -> bytes:
+    # bool must precede int (bool is an int subclass in Python).
+    if value is None:
+        return bytes([m.T_NULL])
+    if value is True:
+        return bytes([m.T_TRUE])
+    if value is False:
+        return bytes([m.T_FALSE])
+    if isinstance(value, int):
+        domain = m.number_domain(value)
+        if 0 <= value <= 127:
+            return bytes([m.FIXINT + value])
+        if -16 <= value <= -1:
+            return bytes([m.FIXNEG + (-1 - value)])
+        if domain == "int":
+            return bytes([m.T_INT]) + encode_svarint(value)
+        if domain == "uint":
+            return bytes([m.T_UINT]) + encode_uvarint(value)
+        raise ValueError("BigInt is outside the current reference subset")
+    if isinstance(value, float):
+        if value == 0.0:
+            value = 0.0  # normalize -0.0 -> +0.0 (§3)
+        return bytes([m.T_FLOAT]) + struct.pack("<d", value)
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        return bytes([m.T_STRING]) + encode_uvarint(len(raw)) + raw
+    if isinstance(value, (bytes, bytearray)):
+        return bytes([m.T_BYTES]) + encode_uvarint(len(value)) + bytes(value)
+    if isinstance(value, list):
+        body = b"".join(encode_value(item, dict_index) for item in value)
+        head = bytes([m.FIXARRAY + len(value)]) if len(value) <= 15 else bytes([m.T_ARRAY]) + encode_uvarint(len(value))
+        return head + body
+    if isinstance(value, dict):
+        keys = m.sorted_keys(value)
+        body = b"".join(encode_uvarint(dict_index[k]) + encode_value(value[k], dict_index) for k in keys)
+        head = bytes([m.FIXMAP + len(keys)]) if len(keys) <= 15 else bytes([m.T_OBJECT]) + encode_uvarint(len(keys))
+        return head + body
+    raise TypeError(f"unsupported value type: {type(value).__name__}")
+
+
+def encode(value: object) -> bytes:
+    """Encode ``value`` to a full canonical, uncompressed Cowrie v1 stream (§2.2)."""
+    keys: set[str] = set()
+    _collect_keys(value, keys)
+    dict_keys = sorted(keys, key=lambda k: k.encode("utf-8"))
+    dict_index = {k: i for i, k in enumerate(dict_keys)}
+
+    header = bytearray(m.MAGIC)
+    header.append(m.VERSION)
+    header.append(m.COMPRESSION_NONE)
+    header += encode_uvarint(len(dict_keys))
+    for key in dict_keys:
+        raw = key.encode("utf-8")
+        header += encode_uvarint(len(raw)) + raw
+    return bytes(header) + encode_value(value, dict_index)

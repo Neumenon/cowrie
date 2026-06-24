@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cowrie-ref"
+version = "0.1.0"
+description = "Cowrie v1 clean-room reference implementation — the spec's executable form."
+readme = "cowrie_ref/README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Neumenon" }]
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+cowrie-ref = "cowrie_ref.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cowrie_ref"]

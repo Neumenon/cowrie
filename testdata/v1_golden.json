@@ -83,6 +83,12 @@
     "fingerprint64": 12638149817160282822,
     "fingerprint32": 2248258246
   },
+  "str_unicode": {
+    "value": "h\u00e9llo",
+    "canonical_hex": "434f5752010000050668c3a96c6c6f",
+    "fingerprint64": 12638149817160282822,
+    "fingerprint32": 2248258246
+  },
   "arr_123": {
     "value": [
       1,
@@ -92,6 +98,18 @@
     "canonical_hex": "434f5752010000c3414243",
     "fingerprint64": 11929433220588446507,
     "fingerprint32": 753607467
+  },
+  "arr_empty": {
+    "value": [],
+    "canonical_hex": "434f5752010000c0",
+    "fingerprint64": 599293243867622494,
+    "fingerprint32": 3037031518
+  },
+  "obj_empty": {
+    "value": {},
+    "canonical_hex": "434f5752010000d0",
+    "fingerprint64": 594510368285850769,
+    "fingerprint32": 3036085393
   },
   "obj_a1": {
     "value": {
