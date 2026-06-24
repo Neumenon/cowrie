@@ -141,6 +141,15 @@ func (d *dict) get(key string) int {
 	return d.lookup[key]
 }
 
+// sortGlobal byte-sorts the whole dictionary and re-indexes it, so dict order is the
+// SPEC-v1 §2.4 canonical (global byte-sorted) order rather than DFS-discovery order.
+func (d *dict) sortGlobal() {
+	sort.Slice(d.keys, func(i, j int) bool { return d.keys[i] < d.keys[j] })
+	for i, k := range d.keys {
+		d.lookup[k] = i
+	}
+}
+
 // collectKeys recursively collects all object keys into the dictionary.
 func collectKeys(v *Value, d *dict) {
 	if v == nil {
@@ -204,9 +213,10 @@ func collectKeysFromAnyValue(v any, d *dict) {
 
 // encode writes the complete Cowrie v2 format to the buffer.
 func encode(buf *buffer, v *Value) error {
-	// Build dictionary
+	// Build dictionary (global byte-sorted, §2.4)
 	d := newDict()
 	collectKeys(v, d)
+	d.sortGlobal()
 
 	// Write header (SPEC-v1 §2.2: COWR + version + compression byte)
 	buf.writeByte(Magic0)

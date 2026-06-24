@@ -842,6 +842,19 @@ class Encoder {
   encode(v: Value): Uint8Array {
     this.collectKeys(v);
 
+    // Global byte-sorted canonical dictionary order (SPEC-v1 §2.4), not DFS-discovery order.
+    this.dictKeys.sort((a, b) => {
+      const ba = sharedTextEncoder.encode(a);
+      const bb = sharedTextEncoder.encode(b);
+      const n = Math.min(ba.length, bb.length);
+      for (let i = 0; i < n; i++) {
+        if (ba[i] !== bb[i]) return ba[i] - bb[i];
+      }
+      return ba.length - bb.length;
+    });
+    this.dictLookup.clear();
+    this.dictKeys.forEach((k, i) => this.dictLookup.set(k, i));
+
     // Header
     this.write(MAGIC);
     this.writeByte(VERSION);

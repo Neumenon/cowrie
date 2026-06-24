@@ -55,6 +55,8 @@ fn build_dictionary(value: &Value, opts: &EncodeOptions) -> Vec<String> {
     let mut keys = Vec::new();
     let mut seen = std::collections::HashSet::new();
     collect_keys(value, &mut keys, &mut seen, opts);
+    // Global byte-sorted canonical dictionary order (SPEC-v1 §2.4), not DFS-discovery order.
+    keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
     keys
 }
 
