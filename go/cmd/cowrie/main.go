@@ -23,6 +23,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -199,6 +200,56 @@ func decodeCmd(args []string) {
 	os.Stdout.Write([]byte("\n"))
 }
 
+// specErrorCode maps an internal decode error to its canonical SPEC-v1 §2.6
+// ERR_* code. The cross-language conformance gate extracts the first
+// /ERR_[A-Z_]+/ token from stderr, so 'recode' prints "<CODE>: <detail>".
+// Mirrors tools/cowrie_ref/errors.py + decode.py (the oracle for which input
+// maps to which code).
+func specErrorCode(err error) string {
+	switch {
+	case errors.Is(err, cowrie.ErrInvalidMagic):
+		return "ERR_INVALID_MAGIC"
+	case errors.Is(err, cowrie.ErrInvalidVersion):
+		return "ERR_INVALID_VERSION"
+	case errors.Is(err, cowrie.ErrNonCanonical):
+		return "ERR_NON_CANONICAL"
+	case errors.Is(err, cowrie.ErrTrailingData):
+		return "ERR_TRAILING_DATA"
+	case errors.Is(err, cowrie.ErrInvalidVarint):
+		return "ERR_INVALID_VARINT"
+	case errors.Is(err, cowrie.ErrInvalidFieldID):
+		// dict index out of range / non-ascending field id (§2.6)
+		return "ERR_INVALID_FIELD_ID"
+	case errors.Is(err, cowrie.ErrUnexpectedEOF), errors.Is(err, cowrie.ErrMalformedLength):
+		// truncation / premature EOF / declared length past end of buffer
+		return "ERR_TRUNCATED"
+	}
+	// Reserved or unknown type tag (§2.3): the decoder returns a *TagError for
+	// any tag it does not handle (including reserved tag 0x0F and any value
+	// outside the defined ranges). The oracle classifies these as RESERVED_TAG.
+	var te *cowrie.TagError
+	if errors.As(err, &te) {
+		return "ERR_RESERVED_TAG"
+	}
+	switch {
+	case errors.Is(err, cowrie.ErrInvalidTag), errors.Is(err, cowrie.ErrInvalidDType):
+		return "ERR_RESERVED_TAG"
+	}
+	return ""
+}
+
+// failDecode prints the canonical ERR_* code (when known) followed by detail to
+// stderr and exits non-zero. When no spec code maps, it prints the raw error so
+// the failure is still visible (and non-canonical/rejection still fails).
+func failDecode(err error) {
+	if code := specErrorCode(err); code != "" {
+		fmt.Fprintf(os.Stderr, "%s: %v\n", code, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
+	}
+	os.Exit(1)
+}
+
 // recodeCmd decodes framed Gen2 from stdin and re-encodes RAW canonical bytes to stdout.
 // Used by the cross-language identity gate: encode(decode(wire)) must be byte-identical
 // across Go/Rust/Python/TS. JSON-projection-independent — tests identity, not display.
@@ -278,8 +329,7 @@ func recodeCmd(args []string) {
 		val, err = cowrie.DecodeFramed(input)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
-		os.Exit(1)
+		failDecode(err)
 	}
 	output, err := cowrie.Encode(val)
 	if err != nil {

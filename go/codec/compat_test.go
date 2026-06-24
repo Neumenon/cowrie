@@ -152,12 +152,16 @@ func TestMasterStream_IsCowrieDocument(t *testing.T) {
 		data    []byte
 		isCowrie bool
 	}{
-		{"cowrie_v2", []byte{'S', 'J', 0x02, 0x00}, true},
-		{"cowrie_v1", []byte{'S', 'J', 0x01, 0x00}, true},
+		// SPEC-v1 §2.2: a Cowrie document begins with the 4-byte magic "COWR".
+		// The legacy 2-byte "SJ" magic was removed in the COWR/v1 migration; an
+		// "SJ…" prefix is no longer a Cowrie document.
+		{"cowrie_v1", []byte{'C', 'O', 'W', 'R', 0x01, 0x00}, true},
+		{"cowrie_v1_framed", []byte{'C', 'O', 'W', 'R', 0x01, 0x01}, true},
+		{"legacy_sj_rejected", []byte{'S', 'J', 0x02, 0x00}, false},
 		{"master_frame", []byte("SJST\x02"), false},
 		{"empty", []byte{}, false},
-		{"too_short", []byte("SJ"), false},
-		{"wrong_magic", []byte("XX\x02\x00"), false},
+		{"too_short", []byte("CO"), false},
+		{"wrong_magic", []byte("XXXX\x01\x00"), false},
 	}
 
 	for _, tt := range tests {

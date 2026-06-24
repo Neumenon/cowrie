@@ -330,7 +330,11 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 			buf.writeByte(TagObject)
 			buf.writeUvarint(uint64(n))
 		}
-		for _, m := range v.objectVal {
+		// §2.4 canonical: object fields MUST be emitted in strictly ascending
+		// dictIdx order. The dictionary is globally byte-sorted, so we order the
+		// members by their resolved dict index (equivalently, by key) here rather
+		// than relying on source/insertion order.
+		for _, m := range sortedMembersByDictIdx(v.objectVal, d) {
 			idx := d.get(m.Key)
 			buf.writeUvarint(uint64(idx))
 			if err := encodeValue(buf, m.Value, d); err != nil {
@@ -591,6 +595,19 @@ func encodeAny(buf *buffer, v any, d *dict) error {
 		return fmt.Errorf("cowrie: unsupported property type %T", v)
 	}
 	return nil
+}
+
+// sortedMembersByDictIdx returns the object members ordered by their resolved
+// dictionary index (§2.4 canonical: fields ascending by dictIdx). The dictionary
+// is globally byte-sorted, so dictIdx order matches key byte order. Returns a new
+// slice; the input is not mutated. Duplicate keys retain their relative order.
+func sortedMembersByDictIdx(members []Member, d *dict) []Member {
+	out := make([]Member, len(members))
+	copy(out, members)
+	sort.SliceStable(out, func(i, j int) bool {
+		return d.get(out[i].Key) < d.get(out[j].Key)
+	})
+	return out
 }
 
 // EncodeOptions controls encoding behavior.

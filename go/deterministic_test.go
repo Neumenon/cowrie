@@ -19,7 +19,11 @@ func TestDeterministicEncoding(t *testing.T) {
 		Member{Key: "apple", Value: Int64(2)},
 	)
 
-	// Non-deterministic encoding should differ
+	// SPEC-v1 §2.4: the canonical encoder is order-independent. The dictionary is
+	// globally byte-sorted and object fields are emitted in ascending dictIdx, so
+	// two objects with the same key/value set encode to identical bytes regardless
+	// of the order their members were supplied. (Pre-migration the default encoder
+	// preserved insertion order and was non-canonical — that behavior is removed.)
 	data1, err := Encode(obj1)
 	if err != nil {
 		t.Fatalf("Encode obj1 failed: %v", err)
@@ -30,8 +34,8 @@ func TestDeterministicEncoding(t *testing.T) {
 		t.Fatalf("Encode obj2 failed: %v", err)
 	}
 
-	if bytes.Equal(data1, data2) {
-		t.Error("Non-deterministic encoding unexpectedly produced identical output")
+	if !bytes.Equal(data1, data2) {
+		t.Errorf("canonical Encode should be order-independent:\n obj1: %x\n obj2: %x", data1, data2)
 	}
 
 	// Deterministic encoding should produce identical output

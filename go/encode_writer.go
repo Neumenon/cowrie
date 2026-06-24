@@ -13,9 +13,11 @@ import (
 // When the writer implements net.Conn (or writev-capable), this uses
 // net.Buffers for vectored I/O. Otherwise falls back to sequential writes.
 func EncodeToWriter(w io.Writer, v *Value) error {
-	// Build dictionary
+	// Build dictionary (global byte-sorted, §2.4) — must match Encode so the
+	// scatter-gather output is byte-identical to the contiguous encoder.
 	d := newDict()
 	collectKeys(v, d)
+	d.sortGlobal()
 
 	// Encode header + dictionary into a small buffer
 	hdr := bufferPool.Get().(*buffer)
@@ -133,7 +135,8 @@ func encodeValueScatter(buf *buffer, segments *net.Buffers, v *Value, d *dict) e
 			buf.writeByte(TagObject)
 			buf.writeUvarint(uint64(n))
 		}
-		for _, m := range v.objectVal {
+		// §2.4 canonical: fields ascending by dictIdx (see encodeValue).
+		for _, m := range sortedMembersByDictIdx(v.objectVal, d) {
 			idx := d.get(m.Key)
 			buf.writeUvarint(uint64(idx))
 			if err := encodeValueScatter(buf, segments, m.Value, d); err != nil {

@@ -390,10 +390,10 @@ func TestGraphPropEncodingDeterministic(t *testing.T) {
 	// We confirm "age" (idx 0) appears before "name" (idx 1) in the node encoding
 	// by checking the dictionary emitted in the header (first dict entry = "age").
 	nodeData, _ := Encode(nodeVal)
-	// Header: Magic(2) + Version(1) + Flags(1) + DictLen varint + dict entries
+	// Header (§2.2): Magic(4 COWR) + Version(1) + Flags(1) + DictLen varint + dict entries
 	// DictLen should be 2 (two unique keys). First key after the count should be "age".
-	// Skip 4 header bytes, then read dict count varint.
-	offset := 4
+	// Skip 6 header bytes, then read dict count varint.
+	offset := 6
 	dictCount, n := binary.Uvarint(nodeData[offset:])
 	offset += n
 	if dictCount != 2 {

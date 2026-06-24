@@ -579,14 +579,15 @@ fn decode_bad_magic() {
 
 #[test]
 fn decode_bad_version() {
-    let result = decode(b"SJ\xFF\x00\x00");
+    // Valid COWR magic, unsupported version byte 0xFF.
+    let result = decode(b"COWR\xFF\x00\x00");
     assert!(matches!(result, Err(CowrieError::InvalidVersion(0xFF))));
 }
 
 #[test]
 fn decode_truncated_after_header() {
-    // Valid header but no data
-    let result = decode(b"SJ\x02\x00");
+    // Valid COWR/v1 header (magic + version + flags) but no root value.
+    let result = decode(b"COWR\x01\x00");
     assert!(matches!(result, Err(CowrieError::Truncated)));
 }
 
@@ -1332,7 +1333,7 @@ fn master_stream_is_checks() {
     assert!(!is_master_stream(b"XX"));
     assert!(!is_master_stream(b""));
 
-    assert!(is_cowrie_document(b"SJ\x02\x00"));
+    assert!(is_cowrie_document(b"COWR\x01\x00"));
     assert!(!is_cowrie_document(b"SJST"));
     assert!(!is_cowrie_document(b""));
     assert!(!is_cowrie_document(b"XX\x02\x00"));

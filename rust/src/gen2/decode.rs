@@ -244,10 +244,6 @@ impl<'a> Reader<'a> {
                 }
                 Value::Float(f64::from_le_bytes(bytes))
             }
-            tags::FLOAT32 => {
-                let bytes = self.read_bytes_fixed::<4>()?;
-                Value::Float(f32::from_le_bytes(bytes) as f64)
-            }
             tags::DECIMAL128 => {
                 let mut data = vec![0u8; 17];
                 data[0] = self.read_byte()?; // scale (svarint; single byte in canonical form)

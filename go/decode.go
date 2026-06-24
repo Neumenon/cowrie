@@ -725,13 +725,9 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		copy(uuid[:], b)
 		return UUID128(uuid), nil
 
-	case TagFloat32:
-		b, err := r.read(4)
-		if err != nil {
-			return nil, err
-		}
-		bits := binary.LittleEndian.Uint32(b)
-		return Float64(float64(math.Float32frombits(bits))), nil
+	// NOTE: scalar Float32 (tag 0x0F) was removed in the COWR/v1 migration.
+	// Per SPEC-v1 §2.3, 0x0F is a RESERVED tag and MUST be rejected — it falls
+	// through to the default branch below (TagError -> ERR_RESERVED_TAG).
 
 	case TagBigInt:
 		length, err := r.readUvarint()

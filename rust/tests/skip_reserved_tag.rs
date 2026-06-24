@@ -8,12 +8,12 @@ use cowrie_rs::gen2::{decode, Value};
 
 /// Build a minimal Cowrie Gen2 stream manually.
 ///
-/// Format: magic(2) | version(1) | flags(1) | dict_len(uvarint) | dict_entries… | root_value
+/// Format: magic(4 "COWR") | version(1) | flags(1) | dict_len(uvarint) | dict_entries… | root_value
 fn cowrie_bytes(dict_keys: &[&str], root_value_bytes: &[u8]) -> Vec<u8> {
     let mut buf = Vec::new();
-    // Magic + version + flags
-    buf.extend_from_slice(b"SJ");
-    buf.push(0x02); // VERSION
+    // Magic + version + flags (canonical COWR/v1 header, SPEC-v1 §2.2)
+    buf.extend_from_slice(b"COWR");
+    buf.push(0x01); // VERSION
     buf.push(0x00); // flags
 
     // Dictionary

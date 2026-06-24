@@ -73,9 +73,11 @@ func TestSecurity_DecodeWithHintsDepthLimit(t *testing.T) {
 	// any encoder-side depth limits.
 
 	var buf buffer
-	// Header
+	// Header (§2.2): 4-byte magic COWR + version + flags
 	buf.writeByte(Magic0)
 	buf.writeByte(Magic1)
+	buf.writeByte(Magic2)
+	buf.writeByte(Magic3)
 	buf.writeByte(Version)
 	buf.writeByte(0) // no flags
 
@@ -239,13 +241,14 @@ func TestSecurity_DecompressionBomb(t *testing.T) {
 func TestSecurity_DecompressionBombCraftedHeader(t *testing.T) {
 	var buf bytes.Buffer
 
-	// Cowrie v2 header with compression flag
-	// Compression type = gzip (1), encoded in flags as: FlagCompressed | (comp << 1)
-	flags := byte(FlagCompressed) | byte((CompressionGzip&0x03)<<1)
+	// Cowrie v1 framed header (§2.2): COWR + version + single compression byte
+	// (1=gzip, 2=zstd). origLen uvarint follows, then the compressed payload.
 	buf.WriteByte(Magic0)
 	buf.WriteByte(Magic1)
+	buf.WriteByte(Magic2)
+	buf.WriteByte(Magic3)
 	buf.WriteByte(Version)
-	buf.WriteByte(flags)
+	buf.WriteByte(byte(CompressionGzip))
 
 	// Claimed original length: 1GB (way too large)
 	var varintBuf [binary.MaxVarintLen64]byte
@@ -276,7 +279,7 @@ func TestSecurity_VarintOverflow(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Cowrie v2 header
-	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
+	buf.Write([]byte{Magic0, Magic1, Magic2, Magic3, Version, 0x00})
 
 	// Dictionary length as overflowing varint (10 continuation bytes + 1 terminator > 10 bytes)
 	// binary.Uvarint returns n<0 for overflow
@@ -299,7 +302,7 @@ func TestSecurity_StringLenExceedsRemaining(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Cowrie v2 header
-	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
+	buf.Write([]byte{Magic0, Magic1, Magic2, Magic3, Version, 0x00})
 
 	// Empty dictionary
 	buf.WriteByte(0x00)
@@ -331,7 +334,7 @@ func TestSecurity_ArrayCountExceedsRemaining(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Cowrie v2 header
-	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
+	buf.Write([]byte{Magic0, Magic1, Magic2, Magic3, Version, 0x00})
 
 	// Empty dictionary
 	buf.WriteByte(0x00)
@@ -359,7 +362,7 @@ func TestSecurity_DictTooLarge(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Cowrie v2 header
-	buf.Write([]byte{Magic0, Magic1, Version, 0x00})
+	buf.Write([]byte{Magic0, Magic1, Magic2, Magic3, Version, 0x00})
 
 	// Dictionary length = 100 million (exceeds DefaultMaxDictLen of 1M)
 	var varintBuf [binary.MaxVarintLen64]byte

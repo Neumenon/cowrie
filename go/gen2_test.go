@@ -459,8 +459,8 @@ func TestTagExtUnknownKeep(t *testing.T) {
 	// Manually craft a TagExt payload
 	// Wire format: Magic(2) | Version(1) | Flags(1) | DictLen(uvarint) | TagExt | ExtType(uvarint) | Len(uvarint) | Payload
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,       // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,       // Version
 		0x00,       // Flags
 		0x00,       // DictLen = 0
 		TagExt,     // TagExt = 0x0E
@@ -491,8 +491,8 @@ func TestTagExtUnknownKeep(t *testing.T) {
 // TestTagExtUnknownSkipAsNull tests that unknown extensions can be skipped as Null.
 func TestTagExtUnknownSkipAsNull(t *testing.T) {
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,          // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,          // Version
 		0x00,          // Flags
 		0x00,          // DictLen = 0
 		TagExt,        // TagExt
@@ -517,8 +517,8 @@ func TestTagExtUnknownSkipAsNull(t *testing.T) {
 // TestTagExtUnknownError tests that unknown extensions can cause an error in strict mode.
 func TestTagExtUnknownError(t *testing.T) {
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,     // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,     // Version
 		0x00,     // Flags
 		0x00,     // DictLen = 0
 		TagExt,   // TagExt
@@ -543,8 +543,8 @@ func TestTagExtUnknownError(t *testing.T) {
 func TestTagExtPayloadTooLarge(t *testing.T) {
 	// Craft a payload claiming to be very large
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,                         // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,                         // Version
 		0x00,                         // Flags
 		0x00,                         // DictLen = 0
 		TagExt,                       // TagExt
@@ -567,8 +567,8 @@ func TestTagExtPayloadTooLarge(t *testing.T) {
 func TestUnknownExtRoundTrip(t *testing.T) {
 	// Craft a TagExt payload
 	original := []byte{
-		'S', 'J', // Magic
-		0x02,       // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,       // Version
 		0x00,       // Flags
 		0x00,       // DictLen = 0
 		TagExt,     // TagExt = 0x0E
@@ -616,8 +616,8 @@ func TestUnknownExtRoundTrip(t *testing.T) {
 func TestTensorDataTooLarge(t *testing.T) {
 	// Create a tensor claiming huge data
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,                         // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,                         // Version
 		0x00,                         // Flags
 		0x00,                         // DictLen = 0
 		TagTensor,                    // Tensor tag
@@ -640,8 +640,8 @@ func TestTensorDataTooLarge(t *testing.T) {
 // TestImageDataTooLarge tests that oversized image data is rejected.
 func TestImageDataTooLarge(t *testing.T) {
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,       // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,       // Version
 		0x00,       // Flags
 		0x00,       // DictLen = 0
 		TagImage,   // Image tag
@@ -663,8 +663,8 @@ func TestImageDataTooLarge(t *testing.T) {
 // TestDictTooLarge tests that oversized dictionary is rejected before allocation.
 func TestDictTooLarge(t *testing.T) {
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02,                         // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01,                         // Version
 		0x00,                         // Flags
 		0xFF, 0xFF, 0xFF, 0xFF, 0x0F, // DictLen = huge (will exceed limit before alloc)
 	}
@@ -685,8 +685,8 @@ func TestDictTooLarge(t *testing.T) {
 func TestInvalidVarint(t *testing.T) {
 	// A varint that would overflow uint64 (more than 10 bytes with high bits set)
 	payload := []byte{
-		'S', 'J', // Magic
-		0x02, // Version
+		'C', 'O', 'W', 'R', // Magic
+		0x01, // Version
 		0x00, // Flags
 		// DictLen as overflowing varint (all continuation bits, too many bytes)
 		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
@@ -1174,8 +1174,8 @@ func TestSkipReservedTagRoundTrip(t *testing.T) {
 
 	stream := []byte{
 		// ── header ──────────────────────────────────────────────────────────
-		'S', 'J', // magic
-		0x02,     // version
+		'C', 'O', 'W', 'R', // magic
+		0x01,     // version
 		0x00,     // flags
 
 		// ── dictionary (2 entries) ───────────────────────────────────────────

@@ -406,7 +406,8 @@ mod tests {
         let val = Value::Null;
         let encoded = encode(&val).unwrap();
         assert!(encoded.starts_with(MAGIC));
-        assert_eq!(encoded[2], VERSION);
+        // Header is 4-byte MAGIC ("COWR") + version byte, so version is at index 4.
+        assert_eq!(encoded[MAGIC.len()], VERSION);
     }
 
     #[test]

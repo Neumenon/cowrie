@@ -194,14 +194,16 @@ describe('Bug #4 — fixed-width field range validation', () => {
   });
 
   it('binary decode rejects channels=0 on the wire', () => {
-    // Wire: 'SJ' 02 00 00 | TAG_AUDIO 23 | enc 01 | sampleRate 44100 LE | channels 00 | len 02 | data
+    // Wire: 'COWR' 01 00 (header) 00 (dictLen) | TAG_AUDIO 23 | enc 01 |
+    //       sampleRate 44100 LE | channels 00 | len 02 | data
     const bytes = new Uint8Array([
-      0x53, 0x4a, 0x02, 0x00, 0x00, 0x23, 0x01, 0x44, 0xac, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+      0x43, 0x4f, 0x57, 0x52, 0x01, 0x00, 0x00,
+      0x23, 0x01, 0x44, 0xac, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
     ]);
     assert.throws(() => decode(bytes), RangeError);
     // channels=1 sibling decodes cleanly (proves the framing is otherwise valid).
     const ok = bytes.slice();
-    ok[11] = 0x01;
+    ok[13] = 0x01; // channels byte (shifted +2 by the 4-byte COWR magic)
     assert.strictEqual(decode(ok).type, Type.AUDIO);
   });
 });

@@ -1271,17 +1271,18 @@ describe('gen2 decode error paths', () => {
   });
 
   it('unsupported version', () => {
-    assert.throws(() => decode(new Uint8Array([0x53, 0x4a, 0x99, 0x00, 0x00, 0x00])), /version/i);
+    // COWR magic, version 0x99 (unsupported), comp=0
+    assert.throws(() => decode(new Uint8Array([0x43, 0x4f, 0x57, 0x52, 0x99, 0x00, 0x00])), /version/i);
   });
 
   it('truncated data', () => {
-    assert.throws(() => decode(new Uint8Array([0x53, 0x4a])), /end of data/i);
+    assert.throws(() => decode(new Uint8Array([0x43, 0x4f])), /ERR_TRUNCATED|end of data/i);
   });
 
   it('invalid tag', () => {
-    // Valid header, dict=0, then invalid tag 0x1F
-    const data = new Uint8Array([0x53, 0x4a, 0x02, 0x00, 0x00, 0x1f]);
-    assert.throws(() => decode(data), /Invalid tag/);
+    // Valid COWR/v1 header, dict=0, then reserved tag 0x1F
+    const data = new Uint8Array([0x43, 0x4f, 0x57, 0x52, 0x01, 0x00, 0x00, 0x1f]);
+    assert.throws(() => decode(data), /ERR_RESERVED_TAG|reserved tag/i);
   });
 
   it('invalid dictionary index', () => {
@@ -1302,7 +1303,7 @@ describe('gen2 decode error paths', () => {
         break;
       }
     }
-    assert.throws(() => decode(corrupted), /dictionary index/i);
+    assert.throws(() => decode(corrupted), /ERR_INVALID_FIELD_ID|dictionary index/i);
   });
 
   it('trailing data throws', () => {
@@ -1312,7 +1313,7 @@ describe('gen2 decode error paths', () => {
     withTrailing.set(enc);
     withTrailing[enc.length] = 0xff;
     withTrailing[enc.length + 1] = 0xff;
-    assert.throws(() => decode(withTrailing), /trailing data/i);
+    assert.throws(() => decode(withTrailing), /ERR_TRAILING_DATA|trailing data/i);
   });
 
   it('decode with UnknownExtBehavior.ERROR throws on ext', () => {
@@ -1356,32 +1357,6 @@ describe('gen2 decode error paths', () => {
 });
 
 // ============================================================
-// Float32 decode path
-// ============================================================
-
-describe('gen2 float32 decode', () => {
-  it('float32 tag decodes correctly', () => {
-    // Manually craft a cowrie payload with FLOAT32 tag (0x0f)
-    const buf = new ArrayBuffer(4);
-    new DataView(buf).setFloat32(0, 1.5, true);
-    const f32bytes = new Uint8Array(buf);
-
-    const payload = new Uint8Array([
-      0x53, 0x4a,  // magic
-      0x02,        // version
-      0x00,        // flags
-      0x00,        // dict count = 0
-      0x0f,        // FLOAT32 tag
-      ...f32bytes,
-    ]);
-
-    const v = decode(payload);
-    assert.strictEqual(v.type, Type.FLOAT64); // float32 decoded as float64
-    assert.ok(Math.abs((v.data as number) - 1.5) < 1e-6);
-  });
-});
-
-// ============================================================
 // Invariant #4: Trailing garbage
 // ============================================================
 
@@ -1392,7 +1367,7 @@ describe('Invariant Tests', () => {
     const corrupted = new Uint8Array(enc.length + 1);
     corrupted.set(enc);
     corrupted[enc.length] = 0xff;
-    assert.throws(() => decode(corrupted), /trailing data/i);
+    assert.throws(() => decode(corrupted), /ERR_TRAILING_DATA|trailing data/i);
   });
 });
 

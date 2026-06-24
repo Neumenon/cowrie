@@ -6,7 +6,7 @@
  * throwing, and that sibling kept fields decode correctly.
  *
  * The raw bytes are constructed by hand following the Gen2 wire format:
- *   [magic 2B][version 1B][flags 1B][dict-len varint][dict-entries...]
+ *   [magic 4B 'COWR'][version 1B][compression 1B][dict-len varint][dict-entries...]
  *   [root-value]
  *
  * The root is a 2-field object:
@@ -45,9 +45,9 @@ function encStr(s: string): number[] {
  *   { [dictKey0]: <reservedTag, payloadLen bytes>, [dictKey1]: "hello" }
  */
 function buildStream(reservedTag: number, payloadLen: number): Uint8Array {
-  const MAGIC = [0x53, 0x4a]; // 'SJ'
-  const VERSION = 2;
-  const FLAGS = 0;
+  const MAGIC = [0x43, 0x4f, 0x57, 0x52]; // 'COWR' (SPEC-v1 §2.2)
+  const VERSION = 1;
+  const COMPRESSION = 0; // none
 
   const key0 = 'reserved';
   const key1 = 'kept';
@@ -58,7 +58,7 @@ function buildStream(reservedTag: number, payloadLen: number): Uint8Array {
   const bytes: number[] = [
     ...MAGIC,
     VERSION,
-    FLAGS,
+    COMPRESSION,
     // dict: 2 entries
     ...uvarint(2),
     ...encStr(key0),

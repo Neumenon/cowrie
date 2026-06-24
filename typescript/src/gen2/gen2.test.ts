@@ -57,15 +57,85 @@ function assertClose(actual: number, expected: number, epsilon: number, msg: str
   }
 }
 
+// The pre-COWR/v1 "SJ"-magic golden binaries under testdata/gen2/*.cowrie are stale and shared
+// cross-language (regenerating them is out of scope for the TS suite). These tests exercise LIVE
+// v1 decode behavior, so the canonical input is produced on the fly with the current encoder
+// (encode(buildX())) instead of reading a stale golden file. The Go fingerprints below are pinned
+// ground-truth and depend only on the schema (types/keys), not the wire bytes.
+const GOLDEN: Record<string, () => Value> = {
+  primitives: () => SJ.object({
+    null_val: SJ.null(),
+    bool_true: SJ.bool(true),
+    bool_false: SJ.bool(false),
+    int_positive: SJ.int64(42),
+    int_negative: SJ.int64(-42),
+    string_val: SJ.string("hello, world!"),
+    string_unicode: SJ.string("你好世界 🌍"),
+  }),
+  nested: () => SJ.object({
+    user: SJ.object({
+      name: SJ.string("Alice"),
+      age: SJ.int64(30),
+      emails: SJ.array([SJ.string("alice@example.com"), SJ.string("alice@work.com")]),
+    }),
+  }),
+  empty: () => SJ.object({
+    empty_array: SJ.array([]),
+    empty_object: SJ.object({}),
+    empty_string: SJ.string(""),
+  }),
+  integers: () => SJ.object({
+    zero: SJ.int64(0),
+    one: SJ.int64(1),
+    minus_one: SJ.int64(-1),
+    int_min: SJ.int64(-9223372036854775808n),
+    int_max: SJ.int64(9223372036854775807n),
+    uint_max: SJ.uint64(18446744073709551615n),
+  }),
+  floats: () => SJ.object({
+    zero: SJ.float64(0.0),
+    pi: SJ.float64(Math.PI),
+    e: SJ.float64(Math.E),
+  }),
+  mixed_array: () => SJ.array([
+    SJ.null(),
+    SJ.bool(true),
+    SJ.int64(42),
+    SJ.float64(3.14),
+    SJ.string("hello"),
+    SJ.bool(false),
+    SJ.int64(-7),
+  ]),
+  deterministic: () => SJ.object({
+    zebra: SJ.int64(1),
+    apple: SJ.int64(2),
+    mango: SJ.int64(3),
+    banana: SJ.object({ z_inner: SJ.string("z"), a_inner: SJ.string("a") }),
+  }),
+  // schema1/schema2 share one schema {age:int64, name:string, score:float64} with differing
+  // field order and values — that is what makes their schema fingerprint identical.
+  schema1: () => SJ.object({ score: SJ.float64(87.0), name: SJ.string("Alice"), age: SJ.int64(60) }),
+  schema2: () => SJ.object({ name: SJ.string("Bob"), age: SJ.int64(50), score: SJ.float64(88.0) }),
+};
+
+// Pinned Go ground-truth schema fingerprints (read off the original golden .fingerprint files).
+// The fingerprint is over the schema (types + sorted keys) only, so it is wire-format independent.
+const GOLDEN_FINGERPRINT: Record<string, number> = {
+  schema1: 0xe065f360,
+  schema2: 0xe065f360,
+  deterministic: 0x4aab199e,
+};
+
 function readGolden(name: string): Uint8Array {
-  const filePath = path.join(TESTDATA_DIR, `${name}.cowrie`);
-  return new Uint8Array(fs.readFileSync(filePath));
+  const build = GOLDEN[name];
+  if (!build) throw new Error(`unknown golden case: ${name}`);
+  return encode(build());
 }
 
 function readGoldenFingerprint(name: string): number {
-  const filePath = path.join(TESTDATA_DIR, `${name}.cowrie.fingerprint`);
-  const hex = fs.readFileSync(filePath, "utf-8").trim();
-  return parseInt(hex, 16);
+  const fp = GOLDEN_FINGERPRINT[name];
+  if (fp === undefined) throw new Error(`unknown fingerprint case: ${name}`);
+  return fp;
 }
 
 // ============================================================
@@ -473,11 +543,11 @@ test("varint > 2^53 throws SecurityLimitExceeded", () => {
   const countBytes = encodeUvarintBytes(hugeCount);
 
   const header = new Uint8Array([
-    0x53, 0x4a,  // magic "SJ"
-    0x02,        // version 2
-    0x00,        // flags
+    0x43, 0x4f, 0x57, 0x52,  // magic "COWR"
+    0x01,        // version 1
+    0x00,        // compression none
     0x00,        // dict count = 0
-    0x06,        // SJT_ARRAY tag
+    0x06,        // ARRAY tag
   ]);
 
   const payload = new Uint8Array(header.length + countBytes.length);
@@ -504,11 +574,11 @@ test("varint at exactly 2^53-1 does not throw for safe integer check", () => {
   const countBytes = encodeUvarintBytes(maxSafe);
 
   const header = new Uint8Array([
-    0x53, 0x4a,  // magic "SJ"
-    0x02,        // version 2
-    0x00,        // flags
+    0x43, 0x4f, 0x57, 0x52,  // magic "COWR"
+    0x01,        // version 1
+    0x00,        // compression none
     0x00,        // dict count = 0
-    0x06,        // SJT_ARRAY tag
+    0x06,        // ARRAY tag
   ]);
 
   const payload = new Uint8Array(header.length + countBytes.length);
@@ -535,12 +605,13 @@ test("varint at exactly 2^53-1 does not throw for safe integer check", () => {
 
 console.log("\n--- Graph Determinism Tests (Go parity) ---");
 
-// Ground truth from Go canonical deterministic encoding.
+// Ground truth canonical deterministic encoding (COWR/v1 header). The body is byte-identical to
+// the pre-migration "SJ" golden; only the 6-byte header changed (534a0200 -> 434f57520100).
 // Props sorted by UTF-8 byte order: "age" < "name", "since" < "weight".
-const GO_NODE_HEX       = "534a02000203616765046e616d6535026e310106506572736f6e02005e010505416c696365";
-const GO_EDGE_HEX       = "534a0200020573696e6365067765696768743601610162054b4e4f5753020003c81f0145";
-const GO_NODE_BATCH_HEX = "534a02000203616765046e616d653701026e310106506572736f6e02005e010505416c696365";
-const GO_EDGE_BATCH_HEX = "534a0200020573696e636506776569676874380101610162054b4e4f5753020003c81f0145";
+const GO_NODE_HEX       = "434f575201000203616765046e616d6535026e310106506572736f6e02005e010505416c696365";
+const GO_EDGE_HEX       = "434f57520100020573696e6365067765696768743601610162054b4e4f5753020003c81f0145";
+const GO_NODE_BATCH_HEX = "434f575201000203616765046e616d653701026e310106506572736f6e02005e010505416c696365";
+const GO_EDGE_BATCH_HEX = "434f57520100020573696e636506776569676874380101610162054b4e4f5753020003c81f0145";
 
 const testNode = SJ.node("n1", ["Person"], {
   name: SJ.string("Alice"),
@@ -669,16 +740,11 @@ test("bigint large negative roundtrip", () => {
 console.log("\n--- Tensor Decode Validation Tests ---");
 
 /** Build a raw Cowrie tensor payload with the given bytes at the end (bypassing SJ.tensor constructor) */
+const TENSOR_ALIGN = 64; // §2.5: tensor data starts on a 64-byte boundary relative to byte 0.
+
 function buildTensorPayload(dtype: number, shape: number[], dataBytes: Uint8Array): Uint8Array {
-  // Header: SJ magic + version + flags + dict(0)
-  const header = new Uint8Array([0x53, 0x4a, 0x02, 0x00, 0x00]);
-  // TENSOR tag
-  const tag = new Uint8Array([0x20]);
-  // dtype byte
-  const dtypeByte = new Uint8Array([dtype]);
-  // rank byte
-  const rankByte = new Uint8Array([shape.length]);
-  // dims as uvarints
+  // Header: COWR magic + version 1 + compression none + dict(0)  (SPEC-v1 §2.2)
+  const header = [0x43, 0x4f, 0x57, 0x52, 0x01, 0x00, 0x00];
   const encodeUv = (n: number): number[] => {
     const out: number[] = [];
     while (n >= 0x80) { out.push((n & 0x7f) | 0x80); n >>>= 7; }
@@ -687,14 +753,20 @@ function buildTensorPayload(dtype: number, shape: number[], dataBytes: Uint8Arra
   };
   const dims: number[] = [];
   for (const d of shape) dims.push(...encodeUv(d));
-  // data length + data
-  const dataLen = encodeUv(dataBytes.length);
-  const total = header.length + tag.length + dtypeByte.length + rankByte.length + dims.length + dataLen.length + dataBytes.length;
-  const buf = new Uint8Array(total);
-  let pos = 0;
-  const write = (arr: Uint8Array | number[]) => { for (const b of arr) buf[pos++] = b; };
-  write(header); write(tag); write(dtypeByte); write(rankByte);
-  write(dims); write(dataLen); write(dataBytes);
+  // Everything up to (but excluding) the alignment padding + data run.
+  const prefix: number[] = [
+    ...header,
+    0x20,           // TENSOR tag
+    dtype,          // dtype byte
+    shape.length,   // rank byte
+    ...dims,
+    ...encodeUv(dataBytes.length), // dataLen varint
+  ];
+  // 64-byte alignment padding (zero bytes) so the data run starts on a 64-byte boundary.
+  const pad = (TENSOR_ALIGN - (prefix.length % TENSOR_ALIGN)) % TENSOR_ALIGN;
+  const buf = new Uint8Array(prefix.length + pad + dataBytes.length);
+  buf.set(prefix, 0);
+  buf.set(dataBytes, prefix.length + pad);
   return buf;
 }
 

@@ -64,7 +64,16 @@ export class CowrieError extends Error {
   }
 }
 
+// SPEC-v1 §2.6 canonical error codes. The conformance gate extracts the first /ERR_[A-Z_]+/
+// token from stderr, so every decode failure must surface one of these.
 export const ERR_NON_CANONICAL = 'ERR_NON_CANONICAL';
+export const ERR_INVALID_MAGIC = 'ERR_INVALID_MAGIC';
+export const ERR_INVALID_VERSION = 'ERR_INVALID_VERSION';
+export const ERR_TRUNCATED = 'ERR_TRUNCATED';
+export const ERR_RESERVED_TAG = 'ERR_RESERVED_TAG';
+export const ERR_INVALID_VARINT = 'ERR_INVALID_VARINT';
+export const ERR_INVALID_FIELD_ID = 'ERR_INVALID_FIELD_ID';
+export const ERR_TRAILING_DATA = 'ERR_TRAILING_DATA';
 
 // Strict-mode constants (SPEC-v1 §5.3), mirroring tools/cowrie_ref/model.py.
 const INT64_MIN = -(2n ** 63n);
@@ -195,7 +204,8 @@ enum Tag {
   UUID128 = 0x0c,
   BIGINT = 0x0d,
   EXT = 0x0e,
-  FLOAT32 = 0x0f, // compact float32 -> decoded as number (float64)
+  // 0x0f was a scalar FLOAT32 value tag (removed pre-v1); it is now a reserved tag and
+  // decodes to ERR_RESERVED_TAG. (DType.FLOAT32 below is the unrelated tensor dtype.)
   // ML/Multimodal extensions (0x20-0x2F)
   TENSOR = 0x20,
   TENSOR_REF = 0x21,
@@ -535,19 +545,35 @@ function encodeUvarint(n: bigint | number): Uint8Array {
   return new Uint8Array(bytes);
 }
 
+const MAX_UVARINT_BYTES = 10; // a 64-bit value is at most 10 LEB128 bytes (SPEC-v1 §2.1)
+
 function decodeUvarint(data: Uint8Array, pos: number): [bigint, number] {
   let result = 0n;
   let shift = 0n;
-  while (pos < data.length) {
+  const start = pos;
+  for (;;) {
+    if (pos - start >= MAX_UVARINT_BYTES) {
+      throw new CowrieError(ERR_INVALID_VARINT, 'varint too long');
+    }
+    if (pos >= data.length) {
+      throw new CowrieError(ERR_TRUNCATED, 'varint');
+    }
     const b = data[pos];
-    result |= BigInt(b & 0x7f) << shift;
     pos++;
+    result |= BigInt(b & 0x7f) << shift;
     if ((b & 0x80) === 0) {
+      // minimality: the final byte must be non-zero unless the value is the single byte 0x00.
+      if (b === 0 && pos - start > 1) {
+        throw new CowrieError(ERR_INVALID_VARINT, 'overlong varint');
+      }
+      // 64-bit overflow: minimality does not catch a 10-byte form with bits past bit 63.
+      if (result > UINT64_MAX) {
+        throw new CowrieError(ERR_INVALID_VARINT, 'uvarint overflows 64 bits');
+      }
       return [result, pos];
     }
     shift += 7n;
   }
-  throw new Error("Incomplete varint");
 }
 
 function zigzagEncode(n: bigint): bigint {
@@ -1004,7 +1030,7 @@ class Decoder {
 
   private read(n: number): Uint8Array {
     if (this.pos + n > this.data.length) {
-      throw new Error("Unexpected end of data");
+      throw new CowrieError(ERR_TRUNCATED, 'unexpected end of data');
     }
     const result = this.data.slice(this.pos, this.pos + n);
     this.pos += n;
@@ -1085,11 +1111,6 @@ class Decoder {
           }
         }
         const f = new DataView(buf.buffer, buf.byteOffset).getFloat64(0, true);
-        return SJ.float64(f);
-      }
-      case Tag.FLOAT32: {
-        const buf = this.read(4);
-        const f = new DataView(buf.buffer, buf.byteOffset).getFloat32(0, true);
         return SJ.float64(f);
       }
       case Tag.DECIMAL128: {
@@ -1358,7 +1379,7 @@ class Decoder {
           for (let i = 0; i < count; i++) {
             const fieldId = this.readUvarintAsNumber();
             if (fieldId >= this.dict.length) {
-              throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
+              throw new CowrieError(ERR_INVALID_FIELD_ID, `${fieldId} >= ${this.dict.length}`);
             }
             if (this.strict && fieldId <= lastIdx) {
               throw new CowrieError(ERR_NON_CANONICAL, 'object fields not in ascending dictIdx');
@@ -1384,7 +1405,7 @@ class Decoder {
           this.read(skipLen);
           return SJ.null();
         }
-        throw new Error(`Invalid tag: ${tag}`);
+        throw new CowrieError(ERR_RESERVED_TAG, `0x${tag.toString(16).padStart(2, '0')}`);
     }
   }
 
@@ -1392,11 +1413,11 @@ class Decoder {
     // Header (SPEC-v1 §2.2: COWR + version + compression byte)
     const magic = this.read(4);
     if (magic[0] !== MAGIC[0] || magic[1] !== MAGIC[1] || magic[2] !== MAGIC[2] || magic[3] !== MAGIC[3]) {
-      throw new Error("Invalid magic bytes");
+      throw new CowrieError(ERR_INVALID_MAGIC, 'invalid magic bytes');
     }
     const version = this.readByte();
     if (version !== VERSION) {
-      throw new Error(`Unsupported version: ${version}`);
+      throw new CowrieError(ERR_INVALID_VERSION, `unsupported version: ${version}`);
     }
     this.readByte(); // compression byte (0x00 = none)
 
@@ -1427,8 +1448,9 @@ class Decoder {
     // Verify all input consumed — trailing bytes indicate corruption or concatenated data
     if (this.pos < this.data.length) {
       const remaining = this.data.length - this.pos;
-      throw new Error(
-        `cowrie: trailing data after root value: ${remaining} unconsumed bytes at position ${this.pos}`
+      throw new CowrieError(
+        ERR_TRAILING_DATA,
+        `${remaining} unconsumed bytes at position ${this.pos}`,
       );
     }
 

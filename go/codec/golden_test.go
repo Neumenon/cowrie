@@ -297,12 +297,12 @@ func TestLegacyCowrie_GoldenRoundTrip(t *testing.T) {
 				t.Fatalf("encode error: %v", err)
 			}
 
-			// Verify Cowrie magic
+			// Verify Cowrie magic (SPEC-v1 §2.2: 4-byte "COWR")
 			if len(encoded) < 4 {
 				t.Fatal("encoded too short")
 			}
-			if encoded[0] != 'S' || encoded[1] != 'J' {
-				t.Errorf("missing Cowrie magic: got %q", encoded[0:2])
+			if encoded[0] != 'C' || encoded[1] != 'O' || encoded[2] != 'W' || encoded[3] != 'R' {
+				t.Errorf("missing Cowrie magic: got %q", encoded[0:4])
 			}
 
 			// Decode and verify round-trip

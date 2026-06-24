@@ -12,6 +12,7 @@ import (
 // =============================================================================
 
 // TestSpecMagicBytes verifies the wire format magic bytes are correct.
+// SPEC-v1 §2.2: 4-byte magic "COWR" (0x43 0x4F 0x57 0x52).
 func TestSpecMagicBytes(t *testing.T) {
 	v := String("test")
 	data, err := Encode(v)
@@ -19,16 +20,17 @@ func TestSpecMagicBytes(t *testing.T) {
 		t.Fatalf("encode error: %v", err)
 	}
 
-	// Magic: 'S' 'J' (2 bytes)
-	if len(data) < 2 {
+	// Magic: 'C' 'O' 'W' 'R' (4 bytes)
+	if len(data) < 4 {
 		t.Fatal("encoded data too short")
 	}
-	if data[0] != 'S' || data[1] != 'J' {
-		t.Errorf("magic bytes: got %c%c, want SJ", data[0], data[1])
+	if data[0] != 'C' || data[1] != 'O' || data[2] != 'W' || data[3] != 'R' {
+		t.Errorf("magic bytes: got %c%c%c%c, want COWR", data[0], data[1], data[2], data[3])
 	}
 }
 
 // TestSpecVersion verifies the version byte is correct.
+// SPEC-v1 §2.2: version byte 0x01 at offset 4 (after the 4-byte magic).
 func TestSpecVersion(t *testing.T) {
 	v := String("test")
 	data, err := Encode(v)
@@ -36,12 +38,12 @@ func TestSpecVersion(t *testing.T) {
 		t.Fatalf("encode error: %v", err)
 	}
 
-	// Version: 0x02 (1 byte at offset 2)
-	if len(data) < 3 {
+	// Version: 0x01 (1 byte at offset 4)
+	if len(data) < 5 {
 		t.Fatal("encoded data too short")
 	}
-	if data[2] != 0x02 {
-		t.Errorf("version: got 0x%02x, want 0x02", data[2])
+	if data[4] != 0x01 {
+		t.Errorf("version: got 0x%02x, want 0x01", data[4])
 	}
 }
 
@@ -62,12 +64,12 @@ func TestSpecFlags(t *testing.T) {
 				t.Fatalf("encode error: %v", err)
 			}
 
-			// Flags: offset 3
-			if len(data) < 4 {
+			// Flags: offset 5 (after 4-byte magic + 1-byte version)
+			if len(data) < 6 {
 				t.Fatal("encoded data too short")
 			}
-			if data[3] != tt.wantFlags {
-				t.Errorf("flags: got 0x%02x, want 0x%02x", data[3], tt.wantFlags)
+			if data[5] != tt.wantFlags {
+				t.Errorf("flags: got 0x%02x, want 0x%02x", data[5], tt.wantFlags)
 			}
 		})
 	}
@@ -247,13 +249,13 @@ func TestSpecFloat64LittleEndian(t *testing.T) {
 	}
 
 	// Find float64 data (after header, dict=0, tag)
-	// Header: 4 bytes, dict length: 1 byte (0), tag: 1 byte
-	if len(data) < 14 {
+	// Header (§2.2): 6 bytes, dict length: 1 byte (0), tag: 1 byte -> data at offset 8
+	if len(data) < 16 {
 		t.Fatal("encoded data too short")
 	}
 
 	// Extract the 8 float bytes
-	floatBytes := data[6:14]
+	floatBytes := data[8:16]
 
 	// Verify little-endian by decoding and comparing
 	decoded := binary.LittleEndian.Uint64(floatBytes)
@@ -299,12 +301,12 @@ func TestSpecUUID128FixedSize(t *testing.T) {
 	}
 
 	// Verify the UUID bytes are in the encoded data
-	// After header (4) + dict len (1) + tag (1) = offset 6
-	if len(data) < 22 {
+	// After header (6) + dict len (1) + tag (1) = offset 8
+	if len(data) < 24 {
 		t.Fatal("encoded data too short for UUID")
 	}
 
-	uuidBytes := data[6:22]
+	uuidBytes := data[8:24]
 	if !bytes.Equal(uuidBytes, uuid[:]) {
 		t.Errorf("UUID bytes mismatch: got %v, want %v", uuidBytes, uuid[:])
 	}
@@ -362,12 +364,12 @@ func TestSpecRoundTrip(t *testing.T) {
 
 // findRootTag finds the root value tag in encoded data.
 func findRootTag(data []byte) byte {
-	if len(data) < 5 {
+	if len(data) < 6 {
 		return 0
 	}
-	// Header: magic (2) + version (1) + flags (1) = 4 bytes
+	// Header (§2.2): magic (4) + version (1) + flags (1) = 6 bytes
 	// Then dictionary length (uvarint)
-	pos := 4
+	pos := 6
 	dictLen, n := binary.Uvarint(data[pos:])
 	pos += n
 
@@ -387,13 +389,13 @@ func findRootTag(data []byte) byte {
 
 // buildMinimalWithTag builds minimal valid Cowrie with a specific root tag.
 func buildMinimalWithTag(tag byte) []byte {
-	// Magic + Version + Flags + DictLen(0) + Tag
-	return []byte{'S', 'J', 0x02, 0x00, 0x00, tag}
+	// Magic(COWR) + Version(0x01) + Flags(0x00) + DictLen(0) + Tag
+	return []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00, tag}
 }
 
 // buildTensorWithDType builds a tensor value with a specific dtype.
 func buildTensorWithDType(dtype byte) []byte {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00} // Header + dict len
 	buf = append(buf, 0x20)                   // Tensor tag
 	buf = append(buf, dtype)                  // DType
 	buf = append(buf, 0x01)                   // Rank = 1
@@ -405,7 +407,7 @@ func buildTensorWithDType(dtype byte) []byte {
 
 // buildImageWithFormat builds an image value with a specific format.
 func buildImageWithFormat(format byte) []byte {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00} // Header + dict len
 	buf = append(buf, 0x22)                   // Image tag
 	buf = append(buf, format)                 // Format
 	buf = append(buf, 0x00, 0x01)             // Width = 256 LE
@@ -417,7 +419,7 @@ func buildImageWithFormat(format byte) []byte {
 
 // buildAudioWithEncoding builds an audio value with a specific encoding.
 func buildAudioWithEncoding(encoding byte) []byte {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00} // Header + dict len
 	buf = append(buf, 0x23)                   // Audio tag
 	buf = append(buf, encoding)               // Encoding
 	buf = append(buf, 0x44, 0xAC, 0x00, 0x00) // Sample rate = 44100 LE
@@ -435,7 +437,7 @@ func buildAudioWithEncoding(encoding byte) []byte {
 // remaining data are rejected.
 func TestSecurityMalformedStringLength(t *testing.T) {
 	// Build a string claiming to be 1GB but only has 4 bytes of data
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00}       // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00}       // Header + dict len
 	buf = append(buf, 0x05)                         // String tag
 	buf = append(buf, 0x80, 0x80, 0x80, 0x80, 0x04) // Varint: 1GB (way too big)
 	buf = append(buf, 't', 'e', 's', 't')           // Only 4 bytes of actual data
@@ -449,7 +451,7 @@ func TestSecurityMalformedStringLength(t *testing.T) {
 // TestSecurityMalformedBytesLength tests that bytes with lengths exceeding
 // remaining data are rejected.
 func TestSecurityMalformedBytesLength(t *testing.T) {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00}       // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00}       // Header + dict len
 	buf = append(buf, 0x08)                         // Bytes tag
 	buf = append(buf, 0x80, 0x80, 0x80, 0x80, 0x04) // Varint: 1GB
 	buf = append(buf, 0x00, 0x01, 0x02, 0x03)       // Only 4 bytes
@@ -463,7 +465,7 @@ func TestSecurityMalformedBytesLength(t *testing.T) {
 // TestSecurityMalformedArrayCount tests that arrays claiming too many elements
 // are rejected.
 func TestSecurityMalformedArrayCount(t *testing.T) {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00}       // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00}       // Header + dict len
 	buf = append(buf, 0x06)                         // Array tag
 	buf = append(buf, 0x80, 0x80, 0x80, 0x80, 0x04) // Varint: 1B elements
 
@@ -476,7 +478,7 @@ func TestSecurityMalformedArrayCount(t *testing.T) {
 // TestSecurityMalformedObjectCount tests that objects claiming too many fields
 // are rejected.
 func TestSecurityMalformedObjectCount(t *testing.T) {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00}       // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00}       // Header + dict len
 	buf = append(buf, 0x07)                         // Object tag
 	buf = append(buf, 0x80, 0x80, 0x80, 0x80, 0x04) // Varint: 1B fields
 
@@ -489,7 +491,7 @@ func TestSecurityMalformedObjectCount(t *testing.T) {
 // TestSecurityDepthLimit tests that deeply nested structures are rejected.
 func TestSecurityDepthLimit(t *testing.T) {
 	// Create a payload with 2000 nested arrays
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00} // Header + dict len
 	for i := 0; i < 2000; i++ {
 		buf = append(buf, 0x06, 0x01) // Array tag + count=1
 	}
@@ -530,13 +532,18 @@ func TestSecurityCustomLimits(t *testing.T) {
 
 // TestSecurityTensorMalformedLength tests tensor data length validation.
 func TestSecurityTensorMalformedLength(t *testing.T) {
-	buf := []byte{'S', 'J', 0x02, 0x00, 0x00} // Header + dict len
-	buf = append(buf, 0x20)                   // Tensor tag
-	buf = append(buf, 0x01)                   // dtype = float32
-	buf = append(buf, 0x01)                   // rank = 1
-	buf = append(buf, 0x02)                   // dim[0] = 2
-	buf = append(buf, 0x80, 0x80, 0x04)       // Data length = 65536 (way too big)
-	buf = append(buf, 0x00, 0x00, 0x00, 0x00) // Only 4 bytes
+	buf := []byte{'C', 'O', 'W', 'R', 0x01, 0x00, 0x00} // Header + dict len
+	buf = append(buf, 0x20)             // Tensor tag
+	buf = append(buf, 0x01)             // dtype = float32
+	buf = append(buf, 0x01)             // rank = 1
+	buf = append(buf, 0x02)             // dim[0] = 2
+	buf = append(buf, 0x80, 0x80, 0x04) // Data length = 65536 (way too big)
+	// §2.5: tensor data is 64-byte aligned. Pad with zeros up to the next 64-byte
+	// boundary so the decoder reaches the dataLen-vs-remaining check (rather than
+	// failing earlier while reading alignment padding). r.pos is now len(buf).
+	pad := (-len(buf)) & (TensorAlign - 1)
+	buf = append(buf, make([]byte, pad)...)
+	buf = append(buf, 0x00, 0x00, 0x00, 0x00) // Only 4 data bytes (<< 65536)
 
 	_, err := Decode(buf)
 	if err != ErrMalformedLength {

@@ -106,12 +106,12 @@ fn main() {
                 }
             }
             Err(e) => {
-                eprintln!("encode error: {}", e);
+                eprintln!("{}: encode error: {}", e.err_code(), e);
                 std::process::exit(1);
             }
         },
         Err(e) => {
-            eprintln!("decode error: {}", e);
+            eprintln!("{}: {}", e.err_code(), e);
             std::process::exit(1);
         }
     }

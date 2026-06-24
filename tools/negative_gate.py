@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -36,38 +37,51 @@ IMPLS = {
 }
 
 
-def behavior(cmd: list[str], raw: bytes, cwd: str | None) -> str:
+_CODE = re.compile(rb"ERR_[A-Z_]+")
+
+
+def probe(cmd: list[str], raw: bytes, cwd: str | None) -> tuple[str, str]:
+    """Return (behavior, error_code). On a decode error the impl prints the canonical ERR_* code
+    to stderr; we extract the first such token for exact-code verification (§2.6 / §5.3)."""
     p = subprocess.run(cmd, input=raw, capture_output=True, cwd=cwd)
     if p.returncode != 0 or not p.stdout:
-        return "REJECT"
-    return "NORMALIZE" if p.stdout != raw else "ACCEPT"
+        beh = "REJECT"
+    else:
+        beh = "NORMALIZE" if p.stdout != raw else "ACCEPT"
+    m = _CODE.search(p.stderr)
+    return beh, (m.group(0).decode() if m else "")
 
 
 def main() -> int:
     mode = "STRICT (§5.3)" if STRICT else "lenient (default decode)"
     print(f"Negative / anti-malleability gate [{mode}] — {len(NEG)} fixtures\n")
-    print(f"{'fixture':22}{'tier':14}{'go':>11}{'rust':>11}{'ts':>11}")
+    cols = "  (go/rust/ts behavior; STRICT also checks exact ERR_* code)"
+    print(f"{'fixture':22}{'tier':14}{'expect':22}{'go':>10}{'rust':>10}{'ts':>10}{cols if False else ''}")
     hard_fail = False
+    code_fail = 0
     strict_gap = 0
     for name, fx in NEG.items():
         raw = bytes.fromhex(fx["hex"])
         row = {}
         for lang, (cmd, cwd) in IMPLS.items():
-            b = behavior(cmd, raw, cwd)
-            row[lang] = b
-            # malformed: must always reject. non-canonical: must reject IN STRICT mode.
+            b, code = probe(cmd, raw, cwd)
+            row[lang] = b if not STRICT else f"{b}:{code or '?'}"
             if (fx["tier"] == "malformed" or STRICT) and b != "REJECT":
+                hard_fail = True
+            if STRICT and code != fx["expect"]:
+                code_fail += 1
                 hard_fail = True
             if not STRICT and fx["tier"] == "non-canonical" and b != "REJECT":
                 strict_gap += 1
-        print(f"{name:22}{fx['tier']:14}{row['go']:>11}{row['rust']:>11}{row['ts']:>11}")
+        print(f"{name:22}{fx['tier']:14}{fx['expect']:22}{row['go']:>10}{row['rust']:>10}{row['ts']:>10}"
+              if not STRICT else f"{name:22}{fx['tier']:14}{fx['expect']:22}{row['go']:>22}{row['rust']:>22}{row['ts']:>22}")
 
     print()
     if STRICT:
         if hard_fail:
-            print("❌ HARD FAIL: some fixture was NOT rejected in strict mode (non-canonical leaked through).")
+            print(f"❌ HARD FAIL: a fixture was not rejected, or {code_fail} exact-code mismatch(es) (§2.6 codes).")
         else:
-            print("✅ STRICT: every malformed AND non-canonical fixture rejected by all three decoders (§5.3).")
+            print("✅ STRICT: all fixtures rejected by go/rust/ts with the EXACT expected ERR_* code (§5.3 + §2.6).")
     else:
         print("❌ HARD FAIL: a malformed fixture was not rejected." if hard_fail
               else "✅ malformed fixtures rejected by every decoder.")

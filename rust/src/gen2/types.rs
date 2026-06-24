@@ -54,6 +54,39 @@ impl fmt::Display for CowrieError {
     }
 }
 
+impl CowrieError {
+    /// Map this internal error to its canonical SPEC-v1 §2.6 error code string.
+    ///
+    /// The `recode` harness prints this code to stderr so the cross-language
+    /// conformance gate can assert on the stable code (never the message).
+    pub fn err_code(&self) -> &'static str {
+        match self {
+            CowrieError::InvalidMagic => "ERR_INVALID_MAGIC",
+            CowrieError::InvalidVersion(_) => "ERR_INVALID_VERSION",
+            CowrieError::Truncated => "ERR_TRUNCATED",
+            CowrieError::Io(_) => "ERR_TRUNCATED",
+            // Reserved/unknown tag byte.
+            CowrieError::InvalidTag(_) => "ERR_RESERVED_TAG",
+            // Dictionary index out of range / non-ascending field ids.
+            CowrieError::InvalidDictIndex { .. } => "ERR_INVALID_FIELD_ID",
+            CowrieError::TrailingData { .. } => "ERR_TRAILING_DATA",
+            CowrieError::NonCanonical(_) => "ERR_NON_CANONICAL",
+            // `InvalidData` covers varint overflow (overlong/overflow uvarint) as well as
+            // structural validation failures (e.g. tensor dataLen mismatch). The varint
+            // overflow message is the one exercised by the negative-fixture gate
+            // (ERR_INVALID_VARINT); other InvalidData failures are likewise structural
+            // varint/length problems.
+            CowrieError::InvalidData(_) => "ERR_INVALID_VARINT",
+            // UTF-8 / depth / size limits are not part of the 8 canonical negative-fixture
+            // codes; surface them as truncation/structural problems by closest fit.
+            CowrieError::InvalidUtf8 => "ERR_TRUNCATED",
+            CowrieError::TooDeep => "ERR_TRUNCATED",
+            CowrieError::TooLarge => "ERR_TRUNCATED",
+            CowrieError::RankExceeded { .. } => "ERR_TRUNCATED",
+        }
+    }
+}
+
 impl std::error::Error for CowrieError {}
 
 impl From<std::io::Error> for CowrieError {

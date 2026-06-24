@@ -63,11 +63,11 @@ func TestFixintZeroWireSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Header: 2 (magic) + 1 (version) + 1 (flags) + 1 (dict len=0) = 5
+	// Header (§2.2): 4 (magic COWR) + 1 (version) + 1 (flags) + 1 (dict len=0) = 7
 	// Value: 1 (fixint tag)
-	// Total: 6
-	if len(data) != 6 {
-		t.Errorf("fixint(0) wire size: got %d, want 6", len(data))
+	// Total: 8
+	if len(data) != 8 {
+		t.Errorf("fixint(0) wire size: got %d, want 8", len(data))
 	}
 }
 
@@ -370,29 +370,29 @@ func TestBitmaskCount1(t *testing.T) {
 // v3 Wire Size Regression
 
 func TestWireSizeFixint(t *testing.T) {
-	// Fixint 42: header(5) + 1 byte = 6
+	// Fixint 42: header(7: COWR+ver+flags+dictlen0) + 1 byte = 8
 	data, _ := Encode(Int64(42))
-	if len(data) != 6 {
-		t.Errorf("fixint(42) size: got %d, want 6", len(data))
+	if len(data) != 8 {
+		t.Errorf("fixint(42) size: got %d, want 8", len(data))
 	}
 
-	// Old TagInt64 for 42: header(5) + tag(1) + zigzag_varint(1) = 7
+	// Old TagInt64 for 42: header(7) + tag(1) + zigzag_varint(1) = 9
 	// Savings: 1 byte per small int
 }
 
 func TestWireSizeFixneg(t *testing.T) {
-	// Fixneg -1: header(5) + 1 byte = 6
+	// Fixneg -1: header(7: COWR+ver+flags+dictlen0) + 1 byte = 8
 	data, _ := Encode(Int64(-1))
-	if len(data) != 6 {
-		t.Errorf("fixneg(-1) size: got %d, want 6", len(data))
+	if len(data) != 8 {
+		t.Errorf("fixneg(-1) size: got %d, want 8", len(data))
 	}
 }
 
 func TestWireSizeFixarray(t *testing.T) {
-	// Array [1,2,3]: header(5) + fixarray_tag(1) + 3×fixint(3) = 9
+	// Array [1,2,3]: header(7) + fixarray_tag(1) + 3×fixint(3) = 11
 	data, _ := Encode(Array(Int64(1), Int64(2), Int64(3)))
-	if len(data) != 9 {
-		t.Errorf("[1,2,3] size: got %d, want 9", len(data))
+	if len(data) != 11 {
+		t.Errorf("[1,2,3] size: got %d, want 11", len(data))
 	}
 }
 

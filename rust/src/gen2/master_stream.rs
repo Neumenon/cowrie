@@ -257,19 +257,9 @@ pub fn is_master_stream(data: &[u8]) -> bool {
     data.len() >= 4 && &data[0..4] == MASTER_MAGIC
 }
 
-/// Check if data starts with Cowrie document magic
+/// Check if data starts with the Cowrie document magic ("COWR", SPEC-v1 §2.2).
 pub fn is_cowrie_document(data: &[u8]) -> bool {
-    if data.len() < 4 {
-        return false;
-    }
-    if &data[0..2] != MAGIC {
-        return false;
-    }
-    // Exclude master stream format
-    if data.len() >= 4 && &data[2..4] == b"ST" {
-        return false;
-    }
-    true
+    data.len() >= MAGIC.len() && &data[0..MAGIC.len()] == MAGIC.as_slice()
 }
 
 /// Simple CRC32-IEEE implementation
@@ -367,8 +357,9 @@ mod tests {
 
     #[test]
     fn test_is_cowrie_document() {
-        assert!(is_cowrie_document(b"SJ\x02\x00"));
+        assert!(is_cowrie_document(b"COWR\x01\x00"));
         assert!(!is_cowrie_document(b"SJST"));
+        assert!(!is_cowrie_document(b"COW"));
         assert!(!is_cowrie_document(b""));
     }
 

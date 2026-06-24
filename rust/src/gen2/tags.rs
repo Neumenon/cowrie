@@ -19,7 +19,8 @@ pub const DATETIME64: u8 = 0x0B;
 pub const UUID128: u8 = 0x0C;
 pub const BIGINT: u8 = 0x0D;
 pub const EXT: u8 = 0x0E;
-pub const FLOAT32: u8 = 0x0F; // compact float32 → decoded as f64
+// 0x0F is RESERVED in canonical v1 (the removed compact-float32 scalar tag); it MUST
+// be rejected as ERR_RESERVED_TAG, matching the Python reference oracle.
 pub const TENSOR: u8 = 0x20;
 pub const TENSOR_REF: u8 = 0x21;
 pub const IMAGE: u8 = 0x22;

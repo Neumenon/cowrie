@@ -336,13 +336,13 @@ func TestIsMasterStream(t *testing.T) {
 }
 
 func TestIsCowrieDocument(t *testing.T) {
-	// Valid Cowrie document
-	valid := []byte{'S', 'J', 0x02, 0x00}
+	// Valid Cowrie document (SPEC-v1 §2.2 magic "COWR")
+	valid := []byte{'C', 'O', 'W', 'R', 0x01, 0x00}
 	if !IsCowrieDocument(valid) {
 		t.Error("IsCowrieDocument should return true for valid document")
 	}
 
-	// Master stream (should be false)
+	// Master stream "SJST" (should be false — different magic)
 	master := []byte{'S', 'J', 'S', 'T'}
 	if IsCowrieDocument(master) {
 		t.Error("IsCowrieDocument should return false for master stream")
