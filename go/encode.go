@@ -278,8 +278,11 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 		buf.write(bits[:])
 
 	case TypeDecimal128:
+		// §2.3: Decimal128 scale is an SVARINT (zigzag + LEB128), NOT a raw int8
+		// byte. A raw byte desyncs the stream for |scale|>63 (e.g. scale 64 must be
+		// 80 01, not 0x40). Mirrors tools/cowrie_ref/encode.py encode_value Decimal.
 		buf.writeByte(TagDecimal128)
-		buf.writeByte(byte(v.decimal128.Scale))
+		buf.writeUvarint(zigzagEncode(int64(v.decimal128.Scale)))
 		buf.write(v.decimal128.Coef[:])
 
 	case TypeString:

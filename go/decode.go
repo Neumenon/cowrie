@@ -715,10 +715,13 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		return Float64(math.Float64frombits(bits)), nil
 
 	case TagDecimal128:
-		scale, err := r.readByte()
+		// §2.3: scale is an SVARINT (zigzag + LEB128), NOT a raw int8 byte.
+		// Mirrors tools/cowrie_ref/decode.py T_DECIMAL.
+		su, err := r.readUvarint()
 		if err != nil {
 			return nil, err
 		}
+		scale := zigzagDecode(su)
 		coefBytes, err := r.read(16)
 		if err != nil {
 			return nil, err
@@ -731,7 +734,7 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if r.strict && decimalNotLowestTerms(coefBytes) {
 			return nil, fmt.Errorf("%w: decimal not lowest terms", ErrNonCanonical)
 		}
-		return NewDecimal128(int8(scale), coef), nil
+		return NewDecimal128(int8(scale), coef), nil // scale fits int8 for canonical Decimal128 values
 
 	case TagString:
 		s, err := r.readStringWithLimit(r.opts.MaxStringLen)
@@ -977,161 +980,12 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		}
 		return Tensor(DType(dtype), dims, data), nil
 
-	case TagTensorRef:
-		storeID, err := r.readByte()
-		if err != nil {
-			return nil, err
-		}
-		keyLen, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Sanity check: keyLen can't exceed remaining data
-		if keyLen > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		// TensorRef keys should be bounded (UUIDs, hashes, etc.) - use MaxStringLen as reasonable limit
-		if r.opts.MaxStringLen > 0 && keyLen > uint64(r.opts.MaxStringLen) {
-			return nil, ErrStringTooLarge
-		}
-		key, err := r.read(int(keyLen))
-		if err != nil {
-			return nil, err
-		}
-		return TensorRef(storeID, key), nil
-
-	case TagImage:
-		format, err := r.readByte()
-		if err != nil {
-			return nil, err
-		}
-		if !isValidImageFormat(ImageFormat(format)) {
-			return nil, ErrInvalidImgFormat
-		}
-		width, err := r.readUint16LE()
-		if err != nil {
-			return nil, err
-		}
-		height, err := r.readUint16LE()
-		if err != nil {
-			return nil, err
-		}
-		dataLen, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Sanity check: dataLen can't exceed remaining data
-		if dataLen > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		// Enforce MaxBytesLen for image data
-		if r.opts.MaxBytesLen > 0 && dataLen > uint64(r.opts.MaxBytesLen) {
-			return nil, ErrBytesTooLarge
-		}
-		data, err := r.read(int(dataLen))
-		if err != nil {
-			return nil, err
-		}
-		return Image(ImageFormat(format), width, height, data), nil
-
-	case TagAudio:
-		encoding, err := r.readByte()
-		if err != nil {
-			return nil, err
-		}
-		if !isValidAudioEncoding(AudioEncoding(encoding)) {
-			return nil, ErrInvalidAudioEnc
-		}
-		sampleRate, err := r.readUint32LE()
-		if err != nil {
-			return nil, err
-		}
-		channels, err := r.readByte()
-		if err != nil {
-			return nil, err
-		}
-		// channels is u8 on the wire but 0 is semantically invalid (no frames).
-		if channels < 1 {
-			return nil, ErrInvalidAudioCh
-		}
-		dataLen, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Sanity check: dataLen can't exceed remaining data
-		if dataLen > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		// Enforce MaxBytesLen for audio data
-		if r.opts.MaxBytesLen > 0 && dataLen > uint64(r.opts.MaxBytesLen) {
-			return nil, ErrBytesTooLarge
-		}
-		data, err := r.read(int(dataLen))
-		if err != nil {
-			return nil, err
-		}
-		return Audio(AudioEncoding(encoding), sampleRate, channels, data), nil
-
-	// v2.1 Graph Types
-	case TagNode:
-		nodeData, err := decodeNodeData(r, dict)
-		if err != nil {
-			return nil, err
-		}
-		return Node(nodeData.ID, nodeData.Labels, nodeData.Props), nil
-
-	case TagEdge:
-		edgeData, err := decodeEdgeData(r, dict)
-		if err != nil {
-			return nil, err
-		}
-		return Edge(edgeData.From, edgeData.To, edgeData.Type, edgeData.Props), nil
-
-	case TagNodeBatch:
-		count, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Sanity check: each node needs at least a few bytes
-		if count > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		// Limit check using array length limit
-		if r.opts.MaxArrayLen > 0 && count > uint64(r.opts.MaxArrayLen) {
-			return nil, ErrArrayTooLarge
-		}
-		nodes := make([]NodeData, count)
-		for i := uint64(0); i < count; i++ {
-			nodeData, err := decodeNodeData(r, dict)
-			if err != nil {
-				return nil, err
-			}
-			nodes[i] = *nodeData
-		}
-		return NodeBatch(nodes), nil
-
-	case TagEdgeBatch:
-		count, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		// Sanity check: each edge needs at least a few bytes
-		if count > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		// Limit check using array length limit
-		if r.opts.MaxArrayLen > 0 && count > uint64(r.opts.MaxArrayLen) {
-			return nil, ErrArrayTooLarge
-		}
-		edges := make([]EdgeData, count)
-		for i := uint64(0); i < count; i++ {
-			edgeData, err := decodeEdgeData(r, dict)
-			if err != nil {
-				return nil, err
-			}
-			edges[i] = *edgeData
-		}
-		return EdgeBatch(edges), nil
+	// SPEC-v1 §2.3: TensorRef(0x21), Image(0x22), Audio(0x23), Node(0x35),
+	// Edge(0x36), NodeBatch(0x37), EdgeBatch(0x38) are NOT in the v1 core set —
+	// they are RESERVED and MUST reject with ERR_RESERVED_TAG (in both lenient and
+	// strict mode). Their decode arms are removed so these tags fall through to the
+	// default branch, which returns *TagError -> ERR_RESERVED_TAG. Mirrors
+	// tools/cowrie_ref/decode.py (any non-core tag -> ERR_RESERVED_TAG).
 
 	case TagBitmask:
 		count, err := r.readUvarint()
@@ -1198,21 +1052,10 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			return UnknownExtension(extType, payload), nil
 		}
 
-	// Reserved tags (0x30-0x32, 0x39): Adjlist/RichText/Delta/GraphShard moved to attic.
-	// These are encoded as: tag | varint-len | payload-bytes
-	// Skip the payload and return Null for forward compatibility.
-	case 0x30, 0x31, 0x32, 0x39:
-		payloadLen, err := r.readUvarint()
-		if err != nil {
-			return nil, err
-		}
-		if payloadLen > uint64(r.remaining()) {
-			return nil, ErrMalformedLength
-		}
-		if _, err := r.read(int(payloadLen)); err != nil {
-			return nil, err
-		}
-		return Null(), nil
+	// SPEC-v1 §2.3: 0x30-0x34 and 0x39 (Adjlist/RichText/Delta/GraphShard etc.,
+	// moved to attic) are RESERVED. They MUST reject with ERR_RESERVED_TAG rather
+	// than being skipped-as-Null — the previous skip arm silently accepted them.
+	// They now fall through to the default branch -> *TagError -> ERR_RESERVED_TAG.
 
 	default:
 		// v3 inline types

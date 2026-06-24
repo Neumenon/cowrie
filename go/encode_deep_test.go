@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -126,15 +127,15 @@ func TestEncodeAny_AllBranches(t *testing.T) {
 		"tags":    []any{"a", "b"},
 		"meta":    map[string]any{"x": 1},
 	})
+	// Node(0x35) is reserved on decode (SPEC-v1 §2.3); this still exercises every
+	// encodeAny property branch, then asserts the decoder rejects the stream.
 	data, err := Encode(nv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := Decode(data)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+		t.Fatalf("expected ERR_RESERVED_TAG (*TagError) decoding reserved Node, got %v", err)
 	}
-	_ = decoded
 }
 
 func TestEncodeAny_NestedMaps(t *testing.T) {
@@ -152,9 +153,8 @@ func TestEncodeAny_NestedMaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Decode(data)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+		t.Fatalf("expected ERR_RESERVED_TAG (*TagError) decoding reserved Node, got %v", err)
 	}
 }
 
@@ -167,9 +167,8 @@ func TestEncodeAny_FixArrayFixMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Decode(data)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+		t.Fatalf("expected ERR_RESERVED_TAG (*TagError) decoding reserved Node, got %v", err)
 	}
 
 	largeArr := make([]any, 20)
@@ -183,9 +182,8 @@ func TestEncodeAny_FixArrayFixMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Decode(data2)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Decode(data2); !errors.As(err, new(*TagError)) {
+		t.Fatalf("expected ERR_RESERVED_TAG (*TagError) decoding reserved Node, got %v", err)
 	}
 }
 

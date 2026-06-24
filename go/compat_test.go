@@ -1,7 +1,7 @@
 package cowrie
 
 import (
-	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -38,65 +38,27 @@ func TestCrossLanguageCompatibility(t *testing.T) {
 		}
 	})
 
+	// SPEC-v1 §2.3 freeze-blocker #2: TensorRef(0x21), Image(0x22), Audio(0x23)
+	// are RESERVED — decoding these legacy fixtures now rejects with
+	// ERR_RESERVED_TAG instead of producing a value.
 	t.Run("tensor_ref", func(t *testing.T) {
 		data := readTestVector(t, testdataDir, "tensor_ref.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeTensorRef {
-			t.Fatalf("expected TypeTensorRef, got %v", v.Type())
-		}
-		ref := v.TensorRef()
-		if ref.StoreID != 7 {
-			t.Errorf("storeID: expected 7, got %d", ref.StoreID)
-		}
-		expectedKey := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE}
-		if !bytes.Equal(ref.Key, expectedKey) {
-			t.Errorf("key: expected %x, got %x", expectedKey, ref.Key)
+		if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+			t.Fatalf("expected ERR_RESERVED_TAG (*TagError), got %v", err)
 		}
 	})
 
 	t.Run("image_jpeg_640x480", func(t *testing.T) {
 		data := readTestVector(t, testdataDir, "image_jpeg_640x480.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeImage {
-			t.Fatalf("expected TypeImage, got %v", v.Type())
-		}
-		img := v.Image()
-		if img.Format != ImageFormatJPEG {
-			t.Errorf("format: expected JPEG, got %v", img.Format)
-		}
-		if img.Width != 640 || img.Height != 480 {
-			t.Errorf("dimensions: expected 640x480, got %dx%d", img.Width, img.Height)
-		}
-		expectedData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46}
-		if !bytes.Equal(img.Data, expectedData) {
-			t.Errorf("data mismatch")
+		if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+			t.Fatalf("expected ERR_RESERVED_TAG (*TagError), got %v", err)
 		}
 	})
 
 	t.Run("audio_pcm16_44100_stereo", func(t *testing.T) {
 		data := readTestVector(t, testdataDir, "audio_pcm16_44100_stereo.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeAudio {
-			t.Fatalf("expected TypeAudio, got %v", v.Type())
-		}
-		audio := v.Audio()
-		if audio.Encoding != AudioEncodingPCMInt16 {
-			t.Errorf("encoding: expected PCMInt16, got %v", audio.Encoding)
-		}
-		if audio.SampleRate != 44100 {
-			t.Errorf("sampleRate: expected 44100, got %d", audio.SampleRate)
-		}
-		if audio.Channels != 2 {
-			t.Errorf("channels: expected 2, got %d", audio.Channels)
+		if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+			t.Fatalf("expected ERR_RESERVED_TAG (*TagError), got %v", err)
 		}
 	})
 
@@ -124,25 +86,11 @@ func TestCrossLanguageCompatibility(t *testing.T) {
 	})
 
 	t.Run("array_mixed_v21", func(t *testing.T) {
+		// This fixture's array contains a reserved Image(0x22), so the whole
+		// message now rejects with ERR_RESERVED_TAG.
 		data := readTestVector(t, testdataDir, "array_mixed_v21.cowrie")
-		v, err := Decode(data)
-		if err != nil {
-			t.Fatalf("decode failed: %v", err)
-		}
-		if v.Type() != TypeArray {
-			t.Fatalf("expected TypeArray, got %v", v.Type())
-		}
-		if v.Len() != 3 {
-			t.Fatalf("array length: expected 3, got %d", v.Len())
-		}
-		if v.Index(0).Type() != TypeTensor {
-			t.Errorf("arr[0]: expected TypeTensor, got %v", v.Index(0).Type())
-		}
-		if v.Index(1).Type() != TypeImage {
-			t.Errorf("arr[1]: expected TypeImage, got %v", v.Index(1).Type())
-		}
-		if v.Index(2).Type() != TypeString || v.Index(2).String() != "mixed" {
-			t.Errorf("arr[2]: expected string 'mixed'")
+		if _, err := Decode(data); !errors.As(err, new(*TagError)) {
+			t.Fatalf("expected ERR_RESERVED_TAG (*TagError), got %v", err)
 		}
 	})
 }
@@ -214,21 +162,28 @@ func TestGoToCCompatibility(t *testing.T) {
 		t.Fatalf("failed to create testdata dir: %v", err)
 	}
 
-	// Generate Go test vectors that C can verify
-	vectors := map[string]*Value{
-		"go_tensor": Tensor(DTypeFloat32, []uint64{2, 3}, func() []byte {
+	// Generate Go test vectors that C can verify. reserved=true entries use a
+	// SPEC-v1 §2.3 reserved tag: encode still works but our own decoder now
+	// rejects them with ERR_RESERVED_TAG.
+	vectors := []struct {
+		name     string
+		val      *Value
+		reserved bool
+	}{
+		{"go_tensor", Tensor(DTypeFloat32, []uint64{2, 3}, func() []byte {
 			data := make([]byte, 24)
 			for i := range data {
 				data[i] = byte(i)
 			}
 			return data
-		}()),
-		"go_tensor_ref": TensorRef(7, []byte{0xDE, 0xAD, 0xBE, 0xEF}),
-		"go_image": Image(ImageFormatPNG, 800, 600, []byte("fake png")),
-		"go_audio": Audio(AudioEncodingOPUS, 48000, 2, []byte("fake opus")),
+		}()), false},
+		{"go_tensor_ref", TensorRef(7, []byte{0xDE, 0xAD, 0xBE, 0xEF}), true},
+		{"go_image", Image(ImageFormatPNG, 800, 600, []byte("fake png")), true},
+		{"go_audio", Audio(AudioEncodingOPUS, 48000, 2, []byte("fake opus")), true},
 	}
 
-	for name, v := range vectors {
+	for _, vec := range vectors {
+		name, v := vec.name, vec.val
 		encoded, err := Encode(v)
 		if err != nil {
 			t.Fatalf("failed to encode %s: %v", name, err)
@@ -240,8 +195,14 @@ func TestGoToCCompatibility(t *testing.T) {
 		}
 		t.Logf("wrote %s (%d bytes)", path, len(encoded))
 
-		// Verify we can decode our own output
+		// Verify decode behavior of our own output.
 		decoded, err := Decode(encoded)
+		if vec.reserved {
+			if !errors.As(err, new(*TagError)) {
+				t.Errorf("%s: expected ERR_RESERVED_TAG (*TagError), got %v", name, err)
+			}
+			continue
+		}
 		if err != nil {
 			t.Fatalf("failed to decode own %s: %v", name, err)
 		}

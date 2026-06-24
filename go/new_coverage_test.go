@@ -2,6 +2,7 @@ package cowrie
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -113,18 +114,19 @@ func TestConstructors_GraphTypes(t *testing.T) {
 
 func TestEncodeDecode_ExtTypes(t *testing.T) {
 	types := []struct {
-		name string
-		val  *Value
+		name     string
+		val      *Value
+		reserved bool // SPEC-v1 §2.3: decode rejects with ERR_RESERVED_TAG
 	}{
-		{"tensor_ref", TensorRef(1, []byte{0xAA})},
-		{"image", Image(ImageFormatPNG, 10, 10, []byte{0xFF})},
-		{"audio", Audio(AudioEncodingPCMInt16, 44100, 1, []byte{0x00, 0x01})},
-		{"bitmask", BitmaskFromBools([]bool{true, false, true})},
-		{"node", Node("n1", []string{"A"}, map[string]any{"x": "y"})},
-		{"edge", Edge("n1", "n2", "T", nil)},
-		{"node_batch", NodeBatch([]NodeData{{ID: "n1", Labels: []string{"A"}}})},
-		{"edge_batch", EdgeBatch([]EdgeData{{From: "n1", To: "n2", Type: "T"}})},
-		{"unknown_ext", UnknownExtension(42, []byte{0x01})},
+		{"tensor_ref", TensorRef(1, []byte{0xAA}), true},
+		{"image", Image(ImageFormatPNG, 10, 10, []byte{0xFF}), true},
+		{"audio", Audio(AudioEncodingPCMInt16, 44100, 1, []byte{0x00, 0x01}), true},
+		{"bitmask", BitmaskFromBools([]bool{true, false, true}), false},
+		{"node", Node("n1", []string{"A"}, map[string]any{"x": "y"}), true},
+		{"edge", Edge("n1", "n2", "T", nil), true},
+		{"node_batch", NodeBatch([]NodeData{{ID: "n1", Labels: []string{"A"}}}), true},
+		{"edge_batch", EdgeBatch([]EdgeData{{From: "n1", To: "n2", Type: "T"}}), true},
+		{"unknown_ext", UnknownExtension(42, []byte{0x01}), false},
 	}
 
 	for _, tt := range types {
@@ -134,6 +136,16 @@ func TestEncodeDecode_ExtTypes(t *testing.T) {
 				t.Fatalf("Encode failed: %v", err)
 			}
 			decoded, err := Decode(data)
+			if tt.reserved {
+				if err == nil {
+					t.Fatalf("decode of reserved tag should fail with ERR_RESERVED_TAG, got nil")
+				}
+				var te *TagError
+				if !errors.As(err, &te) {
+					t.Fatalf("expected *TagError (ERR_RESERVED_TAG), got %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Decode failed: %v", err)
 			}

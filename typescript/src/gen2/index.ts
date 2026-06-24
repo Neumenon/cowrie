@@ -772,7 +772,9 @@ class Encoder {
       case Type.DECIMAL128: {
         const d = v.data as Decimal128;
         this.writeByte(Tag.DECIMAL128);
-        this.writeByte(d.scale & 0xff);
+        // §2.3: scale is a SVARINT (zigzag + LEB128), NOT a raw int8 byte. A raw byte
+        // desyncs the stream for |scale| > 63 (mirrors cowrie_ref encode.py:60).
+        this.write(encodeUvarint(zigzagEncode(BigInt(d.scale))));
         this.write(d.coef);
         break;
       }
@@ -1137,7 +1139,9 @@ class Decoder {
         return SJ.float64(f);
       }
       case Tag.DECIMAL128: {
-        const scale = this.readByte();
+        // §2.3: scale is a SVARINT (zigzag + LEB128), NOT a raw int8 byte (mirrors
+        // cowrie_ref decode.py T_DECIMAL). A raw byte desyncs for |scale| > 63.
+        const scale = Number(zigzagDecode(this.readUvarint()));
         const coef = this.read(16);
         if (this.strict) {
           // Lowest-terms check (model.Decimal128.canonical): a non-zero coefficient
@@ -1147,7 +1151,7 @@ class Decoder {
             throw new CowrieError(ERR_NON_CANONICAL, 'decimal not lowest terms');
           }
         }
-        return SJ.decimal128(scale > 127 ? scale - 256 : scale, coef);
+        return SJ.decimal128(scale, coef);
       }
       case Tag.STRING:
         return SJ.string(this.readString());
@@ -1294,71 +1298,10 @@ class Decoder {
         }
         return SJ.tensor(dtype, shape, data);
       }
-      case Tag.IMAGE: {
-        const format = this.readByte() as ImageFormat;
-        const dimBuf = this.read(4);
-        const dimView = new DataView(dimBuf.buffer, dimBuf.byteOffset, 4);
-        const width = dimView.getUint16(0, true);
-        const height = dimView.getUint16(2, true);
-        const dataLen = this.readUvarintAsNumber();
-        if (dataLen > this.limits.maxBytesLen) {
-          throw new SecurityLimitExceeded(`Image data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
-        }
-        const data = this.read(dataLen);
-        return SJ.image(format, width, height, data);
-      }
-      case Tag.AUDIO: {
-        const encoding = this.readByte() as AudioEncoding;
-        const rateBuf = this.read(4);
-        const sampleRate = new DataView(rateBuf.buffer, rateBuf.byteOffset, 4).getUint32(0, true);
-        const channels = this.readByte();
-        const dataLen = this.readUvarintAsNumber();
-        if (dataLen > this.limits.maxBytesLen) {
-          throw new SecurityLimitExceeded(`Audio data too large: ${dataLen} > ${this.limits.maxBytesLen}`);
-        }
-        const data = this.read(dataLen);
-        return SJ.audio(encoding, sampleRate, channels, data);
-      }
-      case Tag.TENSOR_REF: {
-        const storeId = this.readByte();
-        const keyLen = this.readUvarintAsNumber();
-        if (keyLen > this.limits.maxStringLen) {
-          throw new SecurityLimitExceeded(`TensorRef key too long: ${keyLen} > ${this.limits.maxStringLen}`);
-        }
-        const key = this.read(keyLen);
-        return SJ.tensorRef(storeId, key);
-      }
-      // Graph types
-      case Tag.NODE: {
-        const node = this.decodeNode();
-        return SJ.node(node.id, node.labels, node.props);
-      }
-      case Tag.EDGE: {
-        const edge = this.decodeEdge();
-        return SJ.edge(edge.fromId, edge.toId, edge.edgeType, edge.props);
-      }
-      case Tag.NODE_BATCH: {
-        const count = this.readUvarintAsNumber();
-        if (count > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Node batch count too large: ${count} > ${this.limits.maxArrayLen}`);
-        }
-        const nodes: NodeData[] = [];
-        for (let i = 0; i < count; i++) {
-          nodes.push(this.decodeNode());
-        }
-        return SJ.nodeBatch(nodes);
-      }
-      case Tag.EDGE_BATCH: {
-        const count = this.readUvarintAsNumber();
-        if (count > this.limits.maxArrayLen) {
-          throw new SecurityLimitExceeded(`Edge batch count too large: ${count} > ${this.limits.maxArrayLen}`);
-        }
-        const edges: EdgeData[] = [];
-        for (let i = 0; i < count; i++) {
-          edges.push(this.decodeEdge());
-        }
-        return SJ.edgeBatch(edges);
-      }
+      // §2.3: TensorRef (0x21), Image (0x22), Audio (0x23), Node/Edge/batches
+      // (0x35-0x38) are NOT core tags. Per SPEC §2.3 all non-core tags MUST reject
+      // with ERR_RESERVED_TAG (in both lenient and strict). Their decode arms were
+      // removed; they now fall through to the reserved-tag default.
       case Tag.BITMASK: {
         const count = this.readUvarintAsNumber();
         const byteLen = Math.ceil(count / 8);
@@ -1418,17 +1361,9 @@ class Decoder {
         if (tag >= Tag.FIXNEG_BASE && tag <= Tag.FIXNEG_MAX) {
           return SJ.int64(BigInt(-1 - (tag - Tag.FIXNEG_BASE)));
         }
-        // Reserved tags 0x30–0x32 and 0x39 (AdjList/RichText/Delta/GraphShard —
-        // moved to dedicated packages). These are length-prefixed: skip silently
-        // and return null so a stream can still advance past them.
-        if (tag === 0x30 || tag === 0x31 || tag === 0x32 || tag === 0x39) {
-          const skipLen = this.readUvarintAsNumber();
-          if (skipLen > this.limits.maxExtLen) {
-            throw new SecurityLimitExceeded(`Reserved tag 0x${tag.toString(16)} payload too large: ${skipLen} > ${this.limits.maxExtLen}`);
-          }
-          this.read(skipLen);
-          return SJ.null();
-        }
+        // §2.3: every tag not in the core set rejects with ERR_RESERVED_TAG. This
+        // includes the formerly-skipped 0x30-0x34/0x39 (AdjList/RichText/Delta/
+        // GraphShard) — no silent skip-as-null.
         throw new CowrieError(ERR_RESERVED_TAG, `0x${tag.toString(16).padStart(2, '0')}`);
     }
   }
@@ -2661,171 +2596,118 @@ export function encodeWithOpts(v: Value, opts: EncodeOptions = {}): Uint8Array {
 const FNV_OFFSET_BASIS = 14695981039346656037n;
 const FNV_PRIME = 1099511628211n;
 
+// §4.1 fingerprint codes (FPC) — a namespace DISTINCT from §2.3 wire tags and from any
+// host enum/iota (the B4 root bug). Mirrors tools/cowrie_ref/model.py FPC exactly.
+const FPC = {
+  null: 0x00, bool: 0x01, int: 0x02, uint: 0x03, bigint: 0x04, float: 0x05,
+  decimal: 0x06, string: 0x07, bytes: 0x08, uuid: 0x09, datetime: 0x0a,
+  array: 0x0b, object: 0x0c, tensor: 0x0d, bitmask: 0x0e, extension: 0x0f,
+} as const;
+
+/** FNV-1a-64 a single byte into the running hash (§4.3). */
 function fnvHashByte(h: bigint, b: number): bigint {
-  h ^= BigInt(b);
+  h ^= BigInt(b & 0xff);
   h = BigInt.asUintN(64, h * FNV_PRIME);
   return h;
 }
 
-function fnvHashU64(h: bigint, v: bigint): bigint {
-  for (let i = 0; i < 8; i++) {
-    h ^= (v >> BigInt(i * 8)) & 0xffn;
-    h = BigInt.asUintN(64, h * FNV_PRIME);
-  }
-  return h;
-}
-
-function fnvHashString(h: bigint, s: string): bigint {
-  h = fnvHashU64(h, BigInt(s.length));
-  const bytes = sharedTextEncoder.encode(s);
-  for (const b of bytes) {
-    h ^= BigInt(b);
-    h = BigInt.asUintN(64, h * FNV_PRIME);
+/** FNV-1a-64 a minimal LEB128 uvarint into the running hash (§4.2 lengths/counts). */
+function fnvHashUvarint(h: bigint, n: bigint | number): bigint {
+  for (const b of encodeUvarint(n)) {
+    h = fnvHashByte(h, b);
   }
   return h;
 }
 
 /**
- * Map Type enum to ordinal for cross-language fingerprint compatibility.
- * Matches Go's Type enum: Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
- * String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
- * Tensor=13, TensorRef=14, Image=15, Audio=16
- * (AdjList=17, RichText=18, Delta=19 removed — moved to dedicated packages)
+ * §4 schema fingerprint, FPC grammar (mirrors tools/cowrie_ref/fingerprint.py `_fp`).
+ * Hashes TYPE STRUCTURE ONLY using the §4.1 FPC codes — never wire tags or iota ordinals,
+ * never values. Collection sizes, object keys, tensor dtype+rank+shape, bitmask count, and
+ * extension type are structural; all other payload is excluded. Lengths/counts/dims are
+ * MINIMAL LEB128 uvarints (not fixed 8-byte words).
  */
-function typeToOrd(type: Type): number {
-  switch (type) {
-    case Type.NULL:
-      return 0;
-    case Type.BOOL:
-      return 1;
-    case Type.INT64:
-      return 2;
-    case Type.UINT64:
-      return 3;
-    case Type.FLOAT64:
-      return 4;
-    case Type.DECIMAL128:
-      return 5;
-    case Type.STRING:
-      return 6;
-    case Type.BYTES:
-      return 7;
-    case Type.DATETIME64:
-      return 8;
-    case Type.UUID128:
-      return 9;
-    case Type.BIGINT:
-      return 10;
-    case Type.ARRAY:
-      return 11;
-    case Type.OBJECT:
-      return 12;
-    case Type.TENSOR:
-      return 13;
-    case Type.TENSOR_REF:
-      return 14;
-    case Type.IMAGE:
-      return 15;
-    case Type.AUDIO:
-      return 16;
-    // Graph types, bitmask, and unknown-ext use Go's byte(Type) iota ordinals so
-    // fingerprints match the Go reference. hashSchema below mirrors Go's per-type
-    // recursion (graph types add nothing; UNKNOWN_EXT additionally hashes extType).
-    case Type.NODE:
-      return 17;
-    case Type.EDGE:
-      return 18;
-    case Type.NODE_BATCH:
-      return 19;
-    case Type.EDGE_BATCH:
-      return 20;
-    case Type.BITMASK:
-      return 21;
-    case Type.UNKNOWN_EXT:
-      return 22;
-    default:
-      return 0xff;
-  }
-}
-
 function hashSchema(v: Value, h: bigint): bigint {
-  h = fnvHashByte(h, typeToOrd(v.type));
-
   switch (v.type) {
     case Type.NULL:
+      return fnvHashByte(h, FPC.null);
     case Type.BOOL:
+      return fnvHashByte(h, FPC.bool);
     case Type.INT64:
+      return fnvHashByte(h, FPC.int);
     case Type.UINT64:
-    case Type.FLOAT64:
-    case Type.STRING:
-    case Type.BYTES:
-    case Type.DECIMAL128:
-    case Type.DATETIME64:
-    case Type.UUID128:
+      return fnvHashByte(h, FPC.uint);
     case Type.BIGINT:
-      // Scalar types: type tag is sufficient
-      break;
+      return fnvHashByte(h, FPC.bigint);
+    case Type.FLOAT64:
+      return fnvHashByte(h, FPC.float);
+    case Type.DECIMAL128:
+      return fnvHashByte(h, FPC.decimal);
+    case Type.STRING:
+      return fnvHashByte(h, FPC.string);
+    case Type.BYTES:
+      return fnvHashByte(h, FPC.bytes);
+    case Type.UUID128:
+      return fnvHashByte(h, FPC.uuid);
+    case Type.DATETIME64:
+      return fnvHashByte(h, FPC.datetime);
+
+    case Type.BITMASK: {
+      // §4.2: bitmask collection size is structural.
+      const bm = v.data as BitmaskData;
+      h = fnvHashByte(h, FPC.bitmask);
+      return fnvHashUvarint(h, bm.count);
+    }
+
+    case Type.TENSOR: {
+      // §4.2: dtype + rank + shape are type structure (dims hashed, data excluded).
+      const t = v.data as TensorData;
+      h = fnvHashByte(h, FPC.tensor);
+      h = fnvHashByte(h, t.dtype);
+      h = fnvHashByte(h, t.shape.length);
+      for (const d of t.shape) {
+        h = fnvHashUvarint(h, d);
+      }
+      return h;
+    }
+
+    case Type.UNKNOWN_EXT: {
+      // §4.2: extType is structure, payload excluded.
+      const ext = v.data as UnknownExtData;
+      h = fnvHashByte(h, FPC.extension);
+      return fnvHashUvarint(h, ext.extType);
+    }
 
     case Type.ARRAY: {
       const arr = v.data as Value[];
-      h = fnvHashU64(h, BigInt(arr.length));
+      h = fnvHashByte(h, FPC.array);
+      h = fnvHashUvarint(h, arr.length);
       for (const item of arr) {
         h = hashSchema(item, h);
       }
-      break;
+      return h;
     }
 
     case Type.OBJECT: {
       const obj = v.data as Record<string, Value>;
-      // Use byte-order comparison for locale-independent deterministic sorting
-      const entries = Object.entries(obj).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-      h = fnvHashU64(h, BigInt(entries.length));
-      for (const [key, val] of entries) {
-        h = fnvHashString(h, key);
-        h = hashSchema(val, h);
+      // Canonical key order: ascending by raw UTF-8 bytes (§2.4 / sorted_keys).
+      const keys = Object.keys(obj).sort((a, b) =>
+        compareBytes(sharedTextEncoder.encode(a), sharedTextEncoder.encode(b)));
+      h = fnvHashByte(h, FPC.object);
+      h = fnvHashUvarint(h, keys.length);
+      for (const key of keys) {
+        const raw = sharedTextEncoder.encode(key);
+        h = fnvHashUvarint(h, raw.length);
+        for (const b of raw) h = fnvHashByte(h, b);
+        h = hashSchema(obj[key], h);
       }
-      break;
+      return h;
     }
 
-    case Type.TENSOR: {
-      // Include dtype and rank (dims are data, not schema)
-      const t = v.data as TensorData;
-      h = fnvHashByte(h, t.dtype);
-      h = fnvHashU64(h, BigInt(t.shape.length));
-      break;
-    }
-
-    case Type.IMAGE: {
-      // Include format in schema (dimensions are data, not schema)
-      const img = v.data as ImageData;
-      h = fnvHashByte(h, img.format);
-      break;
-    }
-
-    case Type.AUDIO: {
-      // Include encoding AND channels in schema (sample_rate is data) — matches Go.
-      const aud = v.data as AudioData;
-      h = fnvHashByte(h, aud.encoding);
-      h = fnvHashByte(h, aud.channels);
-      break;
-    }
-
-    case Type.TENSOR_REF: {
-      // Include store_id in schema (key is data)
-      const ref = v.data as TensorRefData;
-      h = fnvHashByte(h, ref.storeId);
-      break;
-    }
-
-    case Type.UNKNOWN_EXT: {
-      // Include ext type in schema (payload is data) — matches Go.
-      const ext = v.data as UnknownExtData;
-      h = fnvHashU64(h, ext.extType);
-      break;
-    }
+    default:
+      // No core value has any other Type; TensorRef/Image/Audio/graph types are not
+      // part of SPEC-v1 §4 (their decode arms reject as reserved tags).
+      throw new CowrieError(ERR_RESERVED_TAG, `fingerprint: unsupported type ${v.type}`);
   }
-
-  return h;
 }
 
 /**

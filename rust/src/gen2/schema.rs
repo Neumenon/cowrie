@@ -1,6 +1,10 @@
-//! Schema fingerprinting for Cowrie values.
+//! Schema fingerprinting for Cowrie values (SPEC-v1 §4).
 //!
-//! Provides FNV-1a based fingerprints for type routing and schema equality checks.
+//! FNV-1a-64 over a per-variant contribution grammar that captures *type structure only*, using the
+//! spec-pinned fingerprint codes (§4.1) — a namespace DISTINCT from the wire tags and from any host
+//! enum/`iota` (the B4 root bug). Lengths are MINIMAL LEB128 uvarints; Tensor includes dtype + rank
+//! + dims, Bitmask includes its bit count, Extension includes its extType. Byte-for-byte identical
+//! to the Python oracle `tools/cowrie_ref/fingerprint.py`.
 
 use super::types::Value;
 
@@ -10,18 +14,116 @@ const FNV_OFFSET_BASIS: u64 = 14695981039346656037;
 /// FNV-1a 64-bit prime
 const FNV_PRIME: u64 = 1099511628211;
 
-/// Compute a 64-bit FNV-1a fingerprint of a value's schema.
-///
-/// The fingerprint captures type structure (field names, types, tensor metadata)
-/// but not actual values. Two values with identical structure produce the same fingerprint.
-///
-/// This is useful for:
-/// - Type routing in stream protocols
-/// - Schema-based dispatch
-/// - Detecting schema drift
-/// - Fast schema equality checks
+/// §4.1 fingerprint codes (FPC) — a namespace distinct from the §2.3 wire tags.
+/// Mirrors `model.FPC` in the Python oracle exactly.
+mod fpc {
+    pub const NULL: u8 = 0x00;
+    pub const BOOL: u8 = 0x01;
+    pub const INT: u8 = 0x02;
+    pub const UINT: u8 = 0x03;
+    pub const BIGINT: u8 = 0x04;
+    pub const FLOAT: u8 = 0x05;
+    pub const DECIMAL: u8 = 0x06;
+    pub const STRING: u8 = 0x07;
+    pub const BYTES: u8 = 0x08;
+    pub const UUID: u8 = 0x09;
+    pub const DATETIME: u8 = 0x0A;
+    pub const ARRAY: u8 = 0x0B;
+    pub const OBJECT: u8 = 0x0C;
+    pub const TENSOR: u8 = 0x0D;
+    pub const BITMASK: u8 = 0x0E;
+    pub const EXTENSION: u8 = 0x0F;
+}
+
+/// Append a MINIMAL LEB128 uvarint to `out` (matches ref `varint.encode_uvarint`).
+fn push_uvarint(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+/// Append the §4.2 fingerprint contribution of `value` (type structure only — never values).
+/// Byte-identical to `fingerprint._fp` in the Python oracle.
+fn fp_contribution(out: &mut Vec<u8>, value: &Value) {
+    match value {
+        Value::Null => out.push(fpc::NULL),
+        Value::Bool(_) => out.push(fpc::BOOL),
+        // §1.1 number domain: i64 is always the "int" domain; a canonical Uint is always
+        // > INT64_MAX so it is the "uint" domain; BigInt is the "bigint" domain.
+        Value::Int(_) => out.push(fpc::INT),
+        Value::Uint(_) => out.push(fpc::UINT),
+        Value::BigInt(_) => out.push(fpc::BIGINT),
+        Value::Float(_) => out.push(fpc::FLOAT),
+        Value::Decimal(_) => out.push(fpc::DECIMAL),
+        Value::String(_) => out.push(fpc::STRING),
+        Value::Bytes(_) => out.push(fpc::BYTES),
+        Value::Uuid(_) => out.push(fpc::UUID),
+        Value::DateTime(_) => out.push(fpc::DATETIME),
+        Value::Bitmask { count, .. } => {
+            // §4.2: collection sizes are structural.
+            out.push(fpc::BITMASK);
+            push_uvarint(out, *count);
+        }
+        Value::Tensor(t) => {
+            // §4.2: dtype + rank + shape are type structure.
+            out.push(fpc::TENSOR);
+            out.push(t.dtype as u8);
+            out.push(t.shape.len() as u8);
+            for d in &t.shape {
+                push_uvarint(out, *d);
+            }
+        }
+        Value::Ext(ext) => {
+            // §4.2: extType is structure, payload excluded.
+            out.push(fpc::EXTENSION);
+            push_uvarint(out, ext.type_id);
+        }
+        Value::Array(arr) => {
+            out.push(fpc::ARRAY);
+            push_uvarint(out, arr.len() as u64);
+            for item in arr {
+                fp_contribution(out, item);
+            }
+        }
+        Value::Object(obj) => {
+            out.push(fpc::OBJECT);
+            push_uvarint(out, obj.len() as u64);
+            // BTreeMap iterates keys in ascending byte order — the §2.4 canonical order the
+            // oracle's `sorted_keys` produces (keys are UTF-8 and BTreeMap<String> sorts by bytes).
+            for (key, val) in obj {
+                let raw = key.as_bytes();
+                push_uvarint(out, raw.len() as u64);
+                out.extend_from_slice(raw);
+                fp_contribution(out, val);
+            }
+        }
+        // Reserved/non-core variants (TensorRef/Image/Audio/Node/Edge/batches) are never part of a
+        // canonical decoded value (the decoder rejects their tags with ERR_RESERVED_TAG), so they
+        // never reach this path via `recode`. They are not in the §4 grammar; hash them by a stable
+        // distinct sentinel so the function remains total without colliding with a core code.
+        Value::TensorRef(_) => out.push(0xF1),
+        Value::Image(_) => out.push(0xF2),
+        Value::Audio(_) => out.push(0xF3),
+        Value::Node(_) => out.push(0xF4),
+        Value::Edge(_) => out.push(0xF5),
+        Value::NodeBatch(_) => out.push(0xF6),
+        Value::EdgeBatch(_) => out.push(0xF7),
+    }
+}
+
+/// Compute the §4.3 64-bit type-structure fingerprint of a value: FNV-1a-64 over its §4.2
+/// fingerprint-grammar byte string. Byte-for-byte identical to the Python oracle.
 pub fn schema_fingerprint64(value: &Value) -> u64 {
-    hash_schema(value, FNV_OFFSET_BASIS)
+    let mut buf = Vec::new();
+    fp_contribution(&mut buf, value);
+    let mut h = FNV_OFFSET_BASIS;
+    for b in &buf {
+        h ^= *b as u64;
+        h = h.wrapping_mul(FNV_PRIME);
+    }
+    h
 }
 
 /// Returns the low 32 bits of the 64-bit schema fingerprint.
@@ -104,137 +206,6 @@ pub fn schema_equals(a: &Value, b: &Value) -> bool {
 /// for correctness-critical comparisons.
 pub fn schema_fingerprint_equal(a: &Value, b: &Value) -> bool {
     schema_fingerprint64(a) == schema_fingerprint64(b)
-}
-
-/// Map Value variant to Go's Type enum for cross-language fingerprint compatibility.
-/// Go's Type enum (iota): Null=0, Bool=1, Int64=2, Uint64=3, Float64=4, Decimal128=5,
-/// String=6, Bytes=7, Datetime64=8, UUID128=9, BigInt=10, Array=11, Object=12,
-/// Tensor=13, TensorRef=14, Image=15, Audio=16,
-/// Node=17, Edge=18, NodeBatch=19, EdgeBatch=20, Bitmask=21, UnknownExt=22
-fn value_type_ord(value: &Value) -> u8 {
-    match value {
-        Value::Null => 0,
-        Value::Bool(_) => 1,
-        Value::Int(_) => 2,
-        Value::Uint(_) => 3,
-        Value::Float(_) => 4,
-        Value::Decimal(_) => 5,
-        Value::String(_) => 6,
-        Value::Bytes(_) => 7,
-        Value::DateTime(_) => 8,
-        Value::Uuid(_) => 9,
-        Value::BigInt(_) => 10,
-        Value::Array(_) => 11,
-        Value::Object(_) => 12,
-        Value::Tensor(_) => 13,
-        Value::TensorRef(_) => 14,
-        Value::Image(_) => 15,
-        Value::Audio(_) => 16,
-        Value::Node(_) => 17,
-        Value::Edge(_) => 18,
-        Value::NodeBatch(_) => 19,
-        Value::EdgeBatch(_) => 20,
-        Value::Bitmask { .. } => 21,
-        Value::Ext(_) => 22,
-    }
-}
-
-fn hash_schema(value: &Value, mut h: u64) -> u64 {
-    // Hash the type ordinal (Go's Type enum value for cross-language compatibility)
-    h = fnv_hash_byte(h, value_type_ord(value));
-
-    match value {
-        Value::Null
-        | Value::Bool(_)
-        | Value::Int(_)
-        | Value::Uint(_)
-        | Value::Float(_)
-        | Value::String(_)
-        | Value::Bytes(_)
-        | Value::Decimal(_)
-        | Value::DateTime(_)
-        | Value::Uuid(_)
-        | Value::BigInt(_) => {
-            // Scalar types: type tag is sufficient
-        }
-
-        Value::Array(arr) => {
-            // Hash array length and element schemas
-            h = fnv_hash_u64(h, arr.len() as u64);
-            for item in arr {
-                h = hash_schema(item, h);
-            }
-        }
-
-        Value::Object(obj) => {
-            // Hash object length and key+schema pairs (already sorted by BTreeMap)
-            h = fnv_hash_u64(h, obj.len() as u64);
-            for (key, val) in obj {
-                h = fnv_hash_string(h, key);
-                h = hash_schema(val, h);
-            }
-        }
-
-        Value::Tensor(t) => {
-            // Include dtype and rank (dims are data, not schema)
-            h = fnv_hash_byte(h, t.dtype as u8);
-            h = fnv_hash_u64(h, t.shape.len() as u64);
-        }
-
-        Value::TensorRef(r) => {
-            h = fnv_hash_byte(h, r.store_id);
-        }
-
-        Value::Image(img) => {
-            h = fnv_hash_byte(h, img.format as u8);
-        }
-
-        Value::Audio(aud) => {
-            h = fnv_hash_byte(h, aud.encoding as u8);
-            h = fnv_hash_byte(h, aud.channels);
-        }
-
-        Value::Ext(ext) => {
-            h = fnv_hash_u64(h, ext.type_id);
-        }
-
-        // Graph types and bitmask: the Go reference hashes only the type ordinal
-        // (no structural recursion), so match that for cross-language parity.
-        Value::Node(_)
-        | Value::Edge(_)
-        | Value::NodeBatch(_)
-        | Value::EdgeBatch(_)
-        | Value::Bitmask { .. } => {}
-    }
-
-    h
-}
-
-#[inline]
-fn fnv_hash_byte(mut h: u64, b: u8) -> u64 {
-    h ^= b as u64;
-    h = h.wrapping_mul(FNV_PRIME);
-    h
-}
-
-#[inline]
-fn fnv_hash_u64(mut h: u64, v: u64) -> u64 {
-    for i in 0..8 {
-        h ^= (v >> (i * 8)) & 0xFF;
-        h = h.wrapping_mul(FNV_PRIME);
-    }
-    h
-}
-
-#[inline]
-fn fnv_hash_string(mut h: u64, s: &str) -> u64 {
-    // Hash length first
-    h = fnv_hash_u64(h, s.len() as u64);
-    for b in s.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(FNV_PRIME);
-    }
-    h
 }
 
 /// Return a human-readable description of the schema.
@@ -420,39 +391,25 @@ mod tests {
     }
 
     #[test]
-    fn test_fingerprint_cross_lang_audio_ext() {
-        // Ground truth from the Go reference. Audio must hash encoding AND channels
-        // (so ch=1 and ch=2 differ); Ext uses ordinal 22 + type_id. Before the
-        // parity fix, Rust placed Ext at ordinal 17 and recursed into graph/bitmask.
-        use crate::gen2::types::{AudioData, AudioEncoding, ExtData};
-        let d = vec![1u8, 2, 3];
-        let a2 = Value::Audio(AudioData {
-            encoding: AudioEncoding::PcmInt16,
-            sample_rate: 44100,
-            channels: 2,
-            data: d.clone(),
-        });
-        let a1 = Value::Audio(AudioData {
-            encoding: AudioEncoding::PcmInt16,
-            sample_rate: 44100,
-            channels: 1,
-            data: d.clone(),
-        });
+    fn test_fingerprint_fpc_oracle_parity() {
+        // Ground truth from the Python oracle `tools/cowrie_ref/fingerprint.py` (§4 FPC grammar),
+        // NOT the legacy ordinal/iota scheme. Null matches the golden fingerprint64 for "null".
+        use crate::gen2::types::ExtData;
+        assert_eq!(schema_fingerprint64(&Value::Null), 12638153115695167455);
+        // Extension: [FPC.extension=0x0F] + uvarint(ext_type); payload excluded.
         let ext = Value::Ext(ExtData {
             type_id: 99,
-            payload: d.clone(),
+            payload: vec![1, 2, 3],
         });
-        assert_eq!(
-            schema_fingerprint32(&a2),
-            3129750488,
-            "audio ch=2 must match Go"
-        );
-        assert_eq!(
-            schema_fingerprint32(&a1),
-            3129751793,
-            "audio ch=1 must match Go"
-        );
-        assert_ne!(schema_fingerprint32(&a1), schema_fingerprint32(&a2));
-        assert_eq!(schema_fingerprint32(&ext), 2917281034, "ext must match Go");
+        assert_eq!(schema_fingerprint64(&ext), 595430659518474151);
+        // Bitmask: [FPC.bitmask=0x0E] + uvarint(count) — count=3.
+        let bm = Value::Bitmask {
+            count: 3,
+            bits: vec![0b0000_0101],
+        };
+        assert_eq!(schema_fingerprint64(&bm), 596424618030187670);
+        // Object: [FPC.object] + uvarint(len) + per sorted key uvarint(len)+raw+fp(val).
+        let obj = Value::object(vec![("age", Value::Int(1)), ("name", Value::String("x".into()))]);
+        assert_eq!(schema_fingerprint64(&obj), 3154875172356742563);
     }
 }

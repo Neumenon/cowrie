@@ -96,6 +96,9 @@ run "file_identity_gate" "${PY}" tools/file_identity_gate.py
 # (b4) Tensor zero-copy locator parity (Phase 2/A): all impls agree on tensor data spans.
 run "tensor_view_gate" "${PY}" tools/tensor_view_gate.py
 
+# (b5) Structural-fingerprint parity (§4 / §4.4 — the gate that kills B4): all impls agree on fingerprint64.
+run "fingerprint_gate" "${PY}" tools/fingerprint_gate.py
+
 # (c) Negative gate, lenient decode: malformed fixtures must be rejected.
 run "negative_gate (lenient)" "${PY}" tools/negative_gate.py
 

@@ -118,12 +118,14 @@ const GOLDEN: Record<string, () => Value> = {
   schema2: () => SJ.object({ name: SJ.string("Bob"), age: SJ.int64(50), score: SJ.float64(88.0) }),
 };
 
-// Pinned Go ground-truth schema fingerprints (read off the original golden .fingerprint files).
+// Pinned cross-language ground-truth schema fingerprints under the SPEC-v1 §4 FPC grammar.
+// (The old 0xe065f360 / 0x4aab199e values were the legacy pre-§4 ordinal scheme and are no
+// longer canonical; these match the Python oracle / repo-root fingerprint_gate.)
 // The fingerprint is over the schema (types + sorted keys) only, so it is wire-format independent.
 const GOLDEN_FINGERPRINT: Record<string, number> = {
-  schema1: 0xe065f360,
-  schema2: 0xe065f360,
-  deterministic: 0x4aab199e,
+  schema1: 0x7ddcfe4c,
+  schema2: 0x7ddcfe4c,
+  deterministic: 0xaf007b4c,
 };
 
 function readGolden(name: string): Uint8Array {
@@ -339,26 +341,20 @@ test("bitmask schema fingerprint matches Go (regression: typeToOrd must not retu
   // Before the typeToOrd fix, TS returned 0xff for Type.BITMASK, producing a fingerprint
   // that silently disagreed with every other implementation. Bitmask (wire 0x24) is active.
   const val = SJ.bitmask(8, new Uint8Array([0xff]));
-  assertEqual(schemaFingerprint32(val), 2248264336, "bitmask fp32 must match Go");
+  assertEqual(schemaFingerprint32(val), 3036467323, "bitmask fp32 must match Go");
   assertEqual(
     schemaFingerprint64(val).toString(),
-    "12638165210323077776",
+    "596432314611585147",
     "bitmask fp64 must match Go",
   );
 });
 
-test("audio + unknown_ext schema fingerprints match Go (regression: channels + extType)", () => {
-  // Ground truth from the Go reference. Before this fix, TS omitted Audio channels
-  // (so ch1 == ch2, disagreeing with Go) and returned 0xff for UNKNOWN_EXT.
+test("unknown_ext schema fingerprint matches Go (regression: extType)", () => {
+  // Ground truth from the Python/Go reference under the SPEC-v1 §4 FPC grammar.
+  // (The Audio portion of this test was removed: AUDIO is no longer a core type,
+  // and hashSchema rejects it with ERR_RESERVED_TAG. UNKNOWN_EXT remains core.)
   const d = new Uint8Array([1, 2, 3]);
-  const a2 = SJ.audio(AudioEncoding.PCM_INT16, 44100, 2, d);
-  const a1 = SJ.audio(AudioEncoding.PCM_INT16, 44100, 1, d);
-  assertEqual(schemaFingerprint32(a2), 3129750488, "audio ch=2 fp must match Go");
-  assertEqual(schemaFingerprint32(a1), 3129751793, "audio ch=1 fp must match Go");
-  if (schemaFingerprint32(a1) === schemaFingerprint32(a2)) {
-    throw new Error("audio channels must affect the schema fingerprint");
-  }
-  assertEqual(schemaFingerprint32(SJ.unknownExt(99, d)), 2917281034, "unknown_ext fp must match Go");
+  assertEqual(schemaFingerprint32(SJ.unknownExt(99, d)), 3036260263, "unknown_ext fp must match Go");
 });
 
 test("schema1 and schema2 have same fingerprint", () => {

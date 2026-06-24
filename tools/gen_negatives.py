@@ -51,6 +51,12 @@ NEGATIVES: list[tuple[str, bytes, str, str]] = [
     ("duplicate_key",    H + b"\x02\x01a\x01a" + b"\xd1\x00\x41",   "ERR_DUPLICATE_KEY",   "non-canonical"),     # dict ["a","a"]
     ("rank_too_large",   D0 + b"\x20\x04\x21",                      "ERR_TOO_LARGE"    ,  "malformed"),     # tensor rank 33 > MAX_RANK
     ("too_deep",         D0 + b"\xc1" * 1001 + b"\x00",             "ERR_TOO_DEEP"     ,  "malformed"),     # 1001 nested arrays > MAX_DEPTH
+    # --- reserved-tag rejection (forward-compat): all non-core tags MUST reject (§2.3) ---
+    ("reserved_0x21",    D0 + b"\x21",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy TensorRef
+    ("reserved_0x22",    D0 + b"\x22",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy Image
+    ("reserved_0x35",    D0 + b"\x35",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy Node
+    ("reserved_0x30",    D0 + b"\x30",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy AdjList
+    ("reserved_0xf0",    D0 + b"\xf0",                              "ERR_RESERVED_TAG",   "malformed"),     # top reserved range
 ]
 
 

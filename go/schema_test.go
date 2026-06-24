@@ -143,14 +143,21 @@ func TestSchemaFingerprint64Arrays(t *testing.T) {
 
 func TestSchemaFingerprint64Tensors(t *testing.T) {
 	tensor1 := Tensor(DTypeFloat32, []uint64{4, 4}, make([]byte, 64))
+	tensor1b := Tensor(DTypeFloat32, []uint64{4, 4}, make([]byte, 64))
 	tensor2 := Tensor(DTypeFloat32, []uint64{8, 2}, make([]byte, 64))
 
 	fp1 := SchemaFingerprint64(tensor1)
 	fp2 := SchemaFingerprint64(tensor2)
 
-	// Same dtype and rank should have same fingerprint (dims are data, not schema)
-	if fp1 != fp2 {
-		t.Errorf("Same tensor schema should have same fingerprint: %x vs %x", fp1, fp2)
+	// SPEC-v1 §4.2: dtype + rank + shape (dims) are all type structure, so an
+	// identical tensor schema yields an identical fingerprint...
+	if fp1 != SchemaFingerprint64(tensor1b) {
+		t.Errorf("Identical tensor schema should have same fingerprint")
+	}
+	// ...but two tensors with the SAME rank yet DIFFERENT dims now differ (dims
+	// are part of the §4 fingerprint grammar — this is the B4 fix).
+	if fp1 == fp2 {
+		t.Errorf("Tensors with different dims should have different fingerprints: %x vs %x", fp1, fp2)
 	}
 
 	// Different dtype

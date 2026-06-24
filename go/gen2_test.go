@@ -3,6 +3,7 @@ package cowrie
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -961,166 +962,58 @@ func TestFromJSONEnrichedVsStrict(t *testing.T) {
 // v2.1 Graph Type Tests
 // ============================================================
 
+// SPEC-v1 §2.3: Node(0x35), Edge(0x36), NodeBatch(0x37), EdgeBatch(0x38) are
+// RESERVED. The encoder may still emit them, but the decoder MUST reject with
+// ERR_RESERVED_TAG (a *TagError). These tests assert freeze-blocker #2.
+func assertGraphReserved(t *testing.T, v *Value) {
+	t.Helper()
+	encoded, err := Encode(v)
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	if _, err := Decode(encoded); err == nil {
+		t.Fatalf("decode of reserved graph tag should fail, got nil error")
+	} else {
+		var te *TagError
+		if !errors.As(err, &te) {
+			t.Fatalf("decode error should be *TagError (ERR_RESERVED_TAG), got %v", err)
+		}
+	}
+}
+
 func TestNodeRoundTrip(t *testing.T) {
-	node := Node("person_42", []string{"Person", "Employee"}, map[string]any{
+	assertGraphReserved(t, Node("person_42", []string{"Person", "Employee"}, map[string]any{
 		"name":   "Alice",
 		"age":    int64(30),
 		"salary": float64(50000.0),
-	})
-
-	// Encode
-	encoded, err := Encode(node)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Decode
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	// Verify type
-	if decoded.Type() != TypeNode {
-		t.Fatalf("Expected TypeNode, got %v", decoded.Type())
-	}
-
-	// Verify data
-	nodeData := decoded.Node()
-	if nodeData.ID != "person_42" {
-		t.Errorf("ID: got %q, want %q", nodeData.ID, "person_42")
-	}
-	if len(nodeData.Labels) != 2 || nodeData.Labels[0] != "Person" || nodeData.Labels[1] != "Employee" {
-		t.Errorf("Labels: got %v, want [Person Employee]", nodeData.Labels)
-	}
-	if nodeData.Props["name"] != "Alice" {
-		t.Errorf("Props[name]: got %v, want Alice", nodeData.Props["name"])
-	}
-	if nodeData.Props["age"] != int64(30) {
-		t.Errorf("Props[age]: got %v, want 30", nodeData.Props["age"])
-	}
+	}))
 }
 
 func TestEdgeRoundTrip(t *testing.T) {
-	edge := Edge("person_42", "company_1", "WORKS_AT", map[string]any{
+	assertGraphReserved(t, Edge("person_42", "company_1", "WORKS_AT", map[string]any{
 		"since": int64(2020),
 		"role":  "Engineer",
-	})
-
-	// Encode
-	encoded, err := Encode(edge)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Decode
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	// Verify type
-	if decoded.Type() != TypeEdge {
-		t.Fatalf("Expected TypeEdge, got %v", decoded.Type())
-	}
-
-	// Verify data
-	edgeData := decoded.Edge()
-	if edgeData.From != "person_42" {
-		t.Errorf("From: got %q, want %q", edgeData.From, "person_42")
-	}
-	if edgeData.To != "company_1" {
-		t.Errorf("To: got %q, want %q", edgeData.To, "company_1")
-	}
-	if edgeData.Type != "WORKS_AT" {
-		t.Errorf("Type: got %q, want %q", edgeData.Type, "WORKS_AT")
-	}
-	if edgeData.Props["since"] != int64(2020) {
-		t.Errorf("Props[since]: got %v, want 2020", edgeData.Props["since"])
-	}
-	if edgeData.Props["role"] != "Engineer" {
-		t.Errorf("Props[role]: got %v, want Engineer", edgeData.Props["role"])
-	}
+	}))
 }
 
 func TestNodeBatchRoundTrip(t *testing.T) {
-	nodes := []NodeData{
+	assertGraphReserved(t, NodeBatch([]NodeData{
 		{ID: "n1", Labels: []string{"A"}, Props: map[string]any{"x": float64(0.1)}},
 		{ID: "n2", Labels: []string{"B"}, Props: map[string]any{"x": float64(0.2)}},
 		{ID: "n3", Labels: []string{"A", "B"}, Props: map[string]any{"x": float64(0.3)}},
-	}
-	batch := NodeBatch(nodes)
-
-	// Encode
-	encoded, err := Encode(batch)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Decode
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	// Verify type
-	if decoded.Type() != TypeNodeBatch {
-		t.Fatalf("Expected TypeNodeBatch, got %v", decoded.Type())
-	}
-
-	// Verify data
-	batchData := decoded.NodeBatch()
-	if len(batchData.Nodes) != 3 {
-		t.Fatalf("Expected 3 nodes, got %d", len(batchData.Nodes))
-	}
-	if batchData.Nodes[0].ID != "n1" {
-		t.Errorf("Nodes[0].ID: got %q, want %q", batchData.Nodes[0].ID, "n1")
-	}
-	if batchData.Nodes[2].Labels[1] != "B" {
-		t.Errorf("Nodes[2].Labels[1]: got %q, want %q", batchData.Nodes[2].Labels[1], "B")
-	}
+	}))
 }
 
 func TestEdgeBatchRoundTrip(t *testing.T) {
-	edges := []EdgeData{
+	assertGraphReserved(t, EdgeBatch([]EdgeData{
 		{From: "n1", To: "n2", Type: "KNOWS", Props: map[string]any{"weight": float64(0.5)}},
 		{From: "n2", To: "n3", Type: "FOLLOWS", Props: map[string]any{"weight": float64(0.8)}},
-	}
-	batch := EdgeBatch(edges)
-
-	// Encode
-	encoded, err := Encode(batch)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Decode
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-
-	// Verify type
-	if decoded.Type() != TypeEdgeBatch {
-		t.Fatalf("Expected TypeEdgeBatch, got %v", decoded.Type())
-	}
-
-	// Verify data
-	batchData := decoded.EdgeBatch()
-	if len(batchData.Edges) != 2 {
-		t.Fatalf("Expected 2 edges, got %d", len(batchData.Edges))
-	}
-	if batchData.Edges[0].Type != "KNOWS" {
-		t.Errorf("Edges[0].Type: got %q, want %q", batchData.Edges[0].Type, "KNOWS")
-	}
-	if batchData.Edges[1].Props["weight"] != float64(0.8) {
-		t.Errorf("Edges[1].Props[weight]: got %v, want 0.8", batchData.Edges[1].Props["weight"])
-	}
+	}))
 }
 
-
 func TestGraphDictionaryCodingSavings(t *testing.T) {
-	// Create 100 nodes with repeated property keys
+	// NodeBatch is reserved on decode now; just verify encode still works and
+	// decode rejects with ERR_RESERVED_TAG.
 	nodes := make([]NodeData, 100)
 	for i := 0; i < 100; i++ {
 		nodes[i] = NodeData{
@@ -1133,45 +1026,14 @@ func TestGraphDictionaryCodingSavings(t *testing.T) {
 			},
 		}
 	}
-	batch := NodeBatch(nodes)
-
-	// Encode
-	encoded, err := Encode(batch)
-	if err != nil {
-		t.Fatalf("Encode failed: %v", err)
-	}
-
-	// Log the size (dictionary coding should provide significant savings)
-	t.Logf("NodeBatch with 100 nodes: %d bytes", len(encoded))
-
-	// Decode and verify
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode failed: %v", err)
-	}
-	batchData := decoded.NodeBatch()
-	if len(batchData.Nodes) != 100 {
-		t.Fatalf("Expected 100 nodes, got %d", len(batchData.Nodes))
-	}
+	assertGraphReserved(t, NodeBatch(nodes))
 }
 
-// TestSkipReservedTagRoundTrip verifies that reserved tags (0x30-0x32, 0x39)
-// are silently skipped when encountered inside a container. The decoder must
-// not error or panic; kept fields must decode correctly; and the reserved-tag
-// slot must produce Null rather than corrupting the surrounding object.
+// TestSkipReservedTagRoundTrip verifies that a reserved tag (0x30) encountered
+// inside a container is now REJECTED with ERR_RESERVED_TAG (SPEC-v1 §2.3
+// freeze-blocker #2), not skipped-as-Null as the legacy decoder did.
 func TestSkipReservedTagRoundTrip(t *testing.T) {
-	// Hand-craft a Gen2 stream:
-	//
-	//   Header : 'S' 'J' 0x02 0x00
-	//   Dict   : 2 entries → ["kept_key", "dead_key"]
-	//   Root   : TagObject (0x07), count=2
-	//     field 0: dictIdx=1 ("dead_key"), value=0x30 (reserved), payloadLen=4, payload=[0xDE 0xAD 0xBE 0xEF]
-	//     field 1: dictIdx=0 ("kept_key"), value=TagString (0x05), len=5, "hello"
-	//
-	// The skip-reserved-tag logic in decodeValue reads payloadLen as a varint
-	// then discards that many bytes, returning Null().  The object therefore
-	// decodes as { dead_key: null, kept_key: "hello" } with no trailing bytes.
-
+	// Hand-crafted Gen2 stream whose object contains a reserved-tag (0x30) field.
 	stream := []byte{
 		// ── header ──────────────────────────────────────────────────────────
 		'C', 'O', 'W', 'R', // magic
@@ -1189,7 +1051,7 @@ func TestSkipReservedTagRoundTrip(t *testing.T) {
 
 		// field 0: dictIdx=1 ("dead_key"), reserved tag 0x30, 4-byte payload
 		0x01, // dictIdx = 1
-		0x30, // reserved tag (Adjlist — now cut)
+		0x30, // reserved tag (Adjlist — now rejected)
 		0x04, // payloadLen varint = 4
 		0xDE, 0xAD, 0xBE, 0xEF, // opaque payload
 
@@ -1199,70 +1061,18 @@ func TestSkipReservedTagRoundTrip(t *testing.T) {
 		0x05, 'h', 'e', 'l', 'l', 'o',
 	}
 
-	val, err := Decode(stream)
-	if err != nil {
-		t.Fatalf("Decode returned unexpected error: %v", err)
+	_, err := Decode(stream)
+	if err == nil {
+		t.Fatal("Decode of a reserved 0x30 tag should fail with ERR_RESERVED_TAG, got nil")
 	}
-	if val == nil {
-		t.Fatal("Decode returned nil value")
-	}
-	if val.Type() != TypeObject {
-		t.Fatalf("expected TypeObject, got %v", val.Type())
-	}
-
-	// The kept field must decode correctly.
-	kept := val.Get("kept_key")
-	if kept == nil {
-		t.Fatal("kept_key field missing from decoded object")
-	}
-	if kept.Type() != TypeString {
-		t.Fatalf("kept_key: expected TypeString, got %v", kept.Type())
-	}
-	if kept.String() != "hello" {
-		t.Fatalf("kept_key: expected %q, got %q", "hello", kept.String())
-	}
-
-	// The reserved-tag slot must produce Null (not corrupt the decode).
-	dead := val.Get("dead_key")
-	if dead == nil {
-		t.Fatal("dead_key field missing from decoded object (expected Null)")
-	}
-	if !dead.IsNull() {
-		t.Fatalf("dead_key: expected Null, got type %v", dead.Type())
+	var te *TagError
+	if !errors.As(err, &te) {
+		t.Fatalf("expected *TagError (ERR_RESERVED_TAG), got %v", err)
 	}
 }
 
 func TestGraphEmptyCollections(t *testing.T) {
-	// Test empty node
-	node := Node("empty", nil, nil)
-	encoded, err := Encode(node)
-	if err != nil {
-		t.Fatalf("Encode empty node failed: %v", err)
-	}
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode empty node failed: %v", err)
-	}
-	if decoded.Type() != TypeNode {
-		t.Errorf("Expected TypeNode, got %v", decoded.Type())
-	}
-	nodeData := decoded.Node()
-	if nodeData.ID != "empty" {
-		t.Errorf("ID: got %q, want %q", nodeData.ID, "empty")
-	}
-
-	// Test empty batch
-	batch := NodeBatch(nil)
-	encoded, err = Encode(batch)
-	if err != nil {
-		t.Fatalf("Encode empty batch failed: %v", err)
-	}
-	decoded, err = Decode(encoded)
-	if err != nil {
-		t.Fatalf("Decode empty batch failed: %v", err)
-	}
-	if decoded.Type() != TypeNodeBatch {
-		t.Errorf("Expected TypeNodeBatch, got %v", decoded.Type())
-	}
-
+	// Empty node/batch encode fine but decode rejects (reserved tags).
+	assertGraphReserved(t, Node("empty", nil, nil))
+	assertGraphReserved(t, NodeBatch(nil))
 }

@@ -37,6 +37,7 @@ CASES: dict[str, object] = {
     "float_neg_inf": float("-inf"), "float_subnormal": 5e-324, "float_max": 1.7976931348623157e308,
     "str_empty": "", "str_4byte": "\U00010000", "bytes_empty": b"",
     "decimal_neg_one": Decimal128(-1, 0), "decimal_neg_scale": Decimal128(123, -2),
+    "decimal_big_scale": Decimal128(3, 64), "decimal_big_negscale": Decimal128(7, -100),
     "decimal_neg_coeff": Decimal128(-12345, 2), "decimal_max_coeff": Decimal128(2**127 - 1, 0),
     "datetime_epoch": Datetime(0), "datetime_neg": Datetime(-1),
     "datetime_max": Datetime(2**63 - 1), "datetime_min": Datetime(-(2**63)),

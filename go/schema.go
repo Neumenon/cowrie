@@ -1,6 +1,7 @@
 package cowrie
 
 import (
+	"encoding/binary"
 	"sort"
 )
 
@@ -9,6 +10,36 @@ const (
 	fnvOffsetBasis64 = 14695981039346656037
 	fnvPrime64       = 1099511628211
 )
+
+// §4.1 fingerprint codes (FPC) — a namespace DISTINCT from the §2.3 wire tags
+// and from any host enum/iota. The fingerprint captures type STRUCTURE only, so
+// these codes are fixed by SPEC-v1 §4.1. Mirrors tools/cowrie_ref/model.py FPC.
+const (
+	fpcNull      = 0x00
+	fpcBool      = 0x01
+	fpcInt       = 0x02
+	fpcUint      = 0x03
+	fpcBigInt    = 0x04
+	fpcFloat     = 0x05
+	fpcDecimal   = 0x06
+	fpcString    = 0x07
+	fpcBytes     = 0x08
+	fpcUUID      = 0x09
+	fpcDatetime  = 0x0A
+	fpcArray     = 0x0B
+	fpcObject    = 0x0C
+	fpcTensor    = 0x0D
+	fpcBitmask   = 0x0E
+	fpcExtension = 0x0F
+)
+
+// appendUvarint appends the minimal LEB128 encoding of v (§2.1) to dst. Used by
+// the fingerprint grammar — lengths are minimal uvarints, NOT fixed 8 bytes.
+func appendUvarint(dst []byte, v uint64) []byte {
+	var buf [10]byte
+	n := binary.PutUvarint(buf[:], v)
+	return append(dst, buf[:n]...)
+}
 
 // SchemaFingerprint64 computes a 64-bit FNV-1a fingerprint of the value's schema.
 // The schema fingerprint captures the type structure (field names, types, tensor metadata)
@@ -22,8 +53,17 @@ const (
 //
 // The fingerprint uses canonical ordering (sorted keys) for determinism.
 func SchemaFingerprint64(v *Value) uint64 {
+	// SPEC-v1 §4: FNV-1a-64 over the §4.2 fingerprint-contribution grammar
+	// (FPC codes, minimal-LEB128 lengths, dims/count included). This is computed
+	// as fnv1a64(appendFP(v)) — the same shape as the oracle's
+	// fnv1a64(_fp(value)) in tools/cowrie_ref/fingerprint.py. NOT the old
+	// per-node iota/wire-tag scheme (the B4 divergence).
+	buf := appendFP(nil, v)
 	h := uint64(fnvOffsetBasis64)
-	h = hashSchema(v, h)
+	for _, b := range buf {
+		h ^= uint64(b)
+		h *= fnvPrime64
+	}
 	return h
 }
 
@@ -33,76 +73,81 @@ func SchemaFingerprint32(v *Value) uint32 {
 	return uint32(SchemaFingerprint64(v))
 }
 
-// hashSchema recursively computes the FNV-1a hash of a value's schema.
-func hashSchema(v *Value, h uint64) uint64 {
+// appendFP appends value v's §4.2 fingerprint-contribution bytes to dst and
+// returns the extended slice. This is the Go port of tools/cowrie_ref/
+// fingerprint.py _fp: type STRUCTURE only, addressed by §4.1 FPC codes, with
+// minimal-LEB128 lengths; collection sizes (array len, object count, bitmask
+// count) and tensor dtype+rank+dims are structural; values are never included.
+func appendFP(dst []byte, v *Value) []byte {
 	if v == nil {
-		return fnvHashByte(h, byte(TypeNull))
+		return append(dst, fpcNull)
 	}
-
-	// Hash the type tag
-	h = fnvHashByte(h, byte(v.typ))
-
 	switch v.typ {
-	case TypeNull, TypeBool, TypeInt64, TypeUint64, TypeFloat64,
-		TypeDecimal128, TypeString, TypeBytes, TypeDatetime64,
-		TypeUUID128, TypeBigInt:
-		// Scalar types: type tag is sufficient
-
-	case TypeArray:
-		// For arrays, hash the schema of each element (order matters)
-		// Use count as part of schema for fixed-size arrays
-		h = fnvHashUint64(h, uint64(len(v.arrayVal)))
-		for _, item := range v.arrayVal {
-			h = hashSchema(item, h)
+	case TypeNull:
+		return append(dst, fpcNull)
+	case TypeBool:
+		return append(dst, fpcBool)
+	case TypeInt64:
+		// §1.1 number domain: an int64-range integer fingerprints as "int".
+		return append(dst, fpcInt)
+	case TypeUint64:
+		return append(dst, fpcUint)
+	case TypeBigInt:
+		return append(dst, fpcBigInt)
+	case TypeFloat64:
+		return append(dst, fpcFloat)
+	case TypeDecimal128:
+		return append(dst, fpcDecimal)
+	case TypeString:
+		return append(dst, fpcString)
+	case TypeBytes:
+		return append(dst, fpcBytes)
+	case TypeUUID128:
+		return append(dst, fpcUUID)
+	case TypeDatetime64:
+		return append(dst, fpcDatetime)
+	case TypeBitmask:
+		// §4.2: bitmask count is structural.
+		dst = append(dst, fpcBitmask)
+		return appendUvarint(dst, v.bitmaskVal.Count)
+	case TypeTensor:
+		// §4.2: dtype + rank + shape (dims) are type structure.
+		dst = append(dst, fpcTensor, byte(v.tensorVal.DType), byte(len(v.tensorVal.Dims)))
+		for _, d := range v.tensorVal.Dims {
+			dst = appendUvarint(dst, d)
 		}
-
+		return dst
+	case TypeUnknownExt:
+		// §4.2: extType is structure, payload excluded.
+		dst = append(dst, fpcExtension)
+		return appendUvarint(dst, v.unknownExtVal.ExtType)
+	case TypeArray:
+		dst = append(dst, fpcArray)
+		dst = appendUvarint(dst, uint64(len(v.arrayVal)))
+		for _, item := range v.arrayVal {
+			dst = appendFP(dst, item)
+		}
+		return dst
 	case TypeObject:
-		// For objects, sort keys and hash key+schema pairs
-		h = fnvHashUint64(h, uint64(len(v.objectVal)))
-
-		// Get sorted keys for deterministic ordering
+		dst = append(dst, fpcObject)
+		dst = appendUvarint(dst, uint64(len(v.objectVal)))
+		// Canonical key order: ascending by raw UTF-8 bytes (§2.4). Go string
+		// comparison is byte-lexicographic, matching the oracle's sorted_keys.
 		sorted := make([]Member, len(v.objectVal))
 		copy(sorted, v.objectVal)
-		sort.Slice(sorted, func(i, j int) bool {
-			return sorted[i].Key < sorted[j].Key
-		})
-
+		sort.Slice(sorted, func(i, j int) bool { return sorted[i].Key < sorted[j].Key })
 		for _, m := range sorted {
-			h = fnvHashString(h, m.Key)
-			h = hashSchema(m.Value, h)
+			// key length as minimal LEB128 uvarint + raw UTF-8 key bytes + value fp.
+			dst = appendUvarint(dst, uint64(len(m.Key)))
+			dst = append(dst, m.Key...)
+			dst = appendFP(dst, m.Value)
 		}
-
-	case TypeTensor:
-		// For tensors, include dtype and rank (but not dims values, which are data)
-		h = fnvHashByte(h, byte(v.tensorVal.DType))
-		h = fnvHashUint64(h, uint64(len(v.tensorVal.Dims)))
-
-	case TypeTensorRef:
-		// TensorRef schema includes store ID
-		h = fnvHashByte(h, v.tensorRefVal.StoreID)
-
-	case TypeImage:
-		// Image schema includes format
-		h = fnvHashByte(h, byte(v.imageVal.Format))
-
-	case TypeAudio:
-		// Audio schema includes encoding and channels
-		h = fnvHashByte(h, byte(v.audioVal.Encoding))
-		h = fnvHashByte(h, v.audioVal.Channels)
-
-	case TypeUnknownExt:
-		// Unknown extensions: include ext type in schema
-		h = fnvHashUint64(h, v.unknownExtVal.ExtType)
+		return dst
+	default:
+		// Non-core types (graph types etc.) are §2.3-reserved and cannot appear in
+		// a decoded v1 value; contribute only the type tag as a defensive fallback.
+		return append(dst, byte(v.typ))
 	}
-
-	return h
-}
-
-// fnvHashByte adds a single byte to the FNV-1a hash.
-func fnvHashByte(h uint64, b byte) uint64 {
-	h ^= uint64(b)
-	h *= fnvPrime64
-	return h
 }
 
 // fnvHashBytes adds a byte slice to the FNV-1a hash.
@@ -110,27 +155,6 @@ func fnvHashBytes(h uint64, data []byte) uint64 {
 	for _, b := range data {
 		h ^= uint64(b)
 		h *= fnvPrime64
-	}
-	return h
-}
-
-// fnvHashString adds a string to the FNV-1a hash.
-func fnvHashString(h uint64, s string) uint64 {
-	// Hash length first to distinguish "" from no field
-	h = fnvHashUint64(h, uint64(len(s)))
-	for i := 0; i < len(s); i++ {
-		h ^= uint64(s[i])
-		h *= fnvPrime64
-	}
-	return h
-}
-
-// fnvHashUint64 adds a uint64 to the FNV-1a hash (little-endian bytes).
-func fnvHashUint64(h uint64, v uint64) uint64 {
-	for i := 0; i < 8; i++ {
-		h ^= v & 0xFF
-		h *= fnvPrime64
-		v >>= 8
 	}
 	return h
 }

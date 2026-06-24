@@ -1,10 +1,7 @@
 //! Cowrie decoder.
 
 use super::tags;
-use super::types::{
-    AudioData, AudioEncoding, CowrieError, DType, EdgeBatchData, EdgeData, ExtData, ImageData,
-    ImageFormat, NodeBatchData, NodeData, TensorData, TensorRef, Value,
-};
+use super::types::{CowrieError, DType, ExtData, TensorData, Value};
 use crate::{MAGIC, VERSION};
 use std::collections::BTreeMap;
 
@@ -255,17 +252,18 @@ impl<'a> Reader<'a> {
                 Value::Float(f64::from_le_bytes(bytes))
             }
             tags::DECIMAL128 => {
-                let mut data = vec![0u8; 17];
-                data[0] = self.read_byte()?; // scale (svarint; single byte in canonical form)
-                self.read_into(&mut data[1..])?; // 16-byte coef (little-endian, signed)
+                // Scale is a SVARINT (zigzag + minimal LEB128), SPEC-v1 §2.3 / ref decode.py
+                // (T_DECIMAL): `scale = self._svarint()`. A raw int8 byte desyncs the stream
+                // for |scale| > 63, so we must read the full svarint, then the 16-byte coef.
+                let scale_start = self.pos;
+                let scale = self.read_svarint()?;
+                let scale_bytes = self.data[scale_start..self.pos].to_vec();
+                let coeff_bytes = self.read_bytes_fixed::<16>()?; // 16-byte coef (LE, signed)
                 if self.opts.strict {
                     // Lowest-terms check (§3 / Python `dec != dec.canonical()`):
                     // canonical() strips trailing-zero coefficient digits into a smaller
                     // scale, and maps any zero coefficient to scale 0. So a value is
                     // non-canonical iff (coeff != 0 && coeff % 10 == 0) OR (coeff == 0 && scale != 0).
-                    let scale = zigzag_decode(data[0] as u64);
-                    let mut coeff_bytes = [0u8; 16];
-                    coeff_bytes.copy_from_slice(&data[1..17]);
                     let coeff = i128::from_le_bytes(coeff_bytes);
                     let non_canonical = if coeff == 0 {
                         scale != 0
@@ -278,6 +276,10 @@ impl<'a> Reader<'a> {
                         ));
                     }
                 }
+                // Store the canonical wire form: svarint(scale) bytes followed by the 16 coef
+                // bytes. The encoder writes this Vec verbatim, so encode(decode(x)) is identity.
+                let mut data = scale_bytes;
+                data.extend_from_slice(&coeff_bytes);
                 Value::Decimal(data)
             }
             tags::STRING => {
@@ -436,86 +438,11 @@ impl<'a> Reader<'a> {
                 }
                 Value::Tensor(TensorData::new(dtype, shape, data))
             }
-            tags::TENSOR_REF => {
-                let store_id = self.read_byte()?;
-                let key_len = self.read_uvarint()? as usize;
-                if key_len > self.opts.max_bytes_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let key = self.read_bytes(key_len)?;
-                Value::TensorRef(TensorRef { store_id, key })
-            }
-            tags::IMAGE => {
-                let format_byte = self.read_byte()?;
-                let format = ImageFormat::try_from(format_byte)?;
-                let width = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
-                let height = u16::from_le_bytes(self.read_bytes_fixed::<2>()?);
-                let data_len = self.read_uvarint()? as usize;
-                if data_len > self.opts.max_bytes_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let data = self.read_bytes(data_len)?;
-                Value::Image(ImageData {
-                    format,
-                    width,
-                    height,
-                    data,
-                })
-            }
-            tags::AUDIO => {
-                let encoding_byte = self.read_byte()?;
-                let encoding = AudioEncoding::try_from(encoding_byte)?;
-                let sample_rate = u32::from_le_bytes(self.read_bytes_fixed::<4>()?);
-                let channels = self.read_byte()?;
-                // channels is u8 on the wire but 0 is semantically invalid (no frames).
-                if channels == 0 {
-                    return Err(CowrieError::InvalidData(
-                        "audio channel count must be >= 1".into(),
-                    ));
-                }
-                let data_len = self.read_uvarint()? as usize;
-                if data_len > self.opts.max_bytes_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let data = self.read_bytes(data_len)?;
-                Value::Audio(AudioData {
-                    encoding,
-                    sample_rate,
-                    channels,
-                    data,
-                })
-            }
-            // Graph types
-            tags::NODE => {
-                let node = self.decode_node_data()?;
-                Value::Node(node)
-            }
-            tags::EDGE => {
-                let edge = self.decode_edge_data()?;
-                Value::Edge(edge)
-            }
-            tags::NODE_BATCH => {
-                let count = self.read_uvarint()? as usize;
-                if count > self.opts.max_array_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let mut nodes = Vec::with_capacity(count);
-                for _ in 0..count {
-                    nodes.push(self.decode_node_data()?);
-                }
-                Value::NodeBatch(NodeBatchData { nodes })
-            }
-            tags::EDGE_BATCH => {
-                let count = self.read_uvarint()? as usize;
-                if count > self.opts.max_array_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let mut edges = Vec::with_capacity(count);
-                for _ in 0..count {
-                    edges.push(self.decode_edge_data()?);
-                }
-                Value::EdgeBatch(EdgeBatchData { edges })
-            }
+            // SPEC-v1 §2.3: tags 0x21 (TensorRef), 0x22 (Image), 0x23 (Audio), 0x35-0x38
+            // (Node/Edge/batches) are RESERVED and are NOT part of the canonical v1 core. They
+            // MUST reject with ERR_RESERVED_TAG in both lenient and strict mode (the Python
+            // oracle has no decode arm for them). Removed the legacy decode arms; these tags now
+            // fall through to the catch-all `_ => InvalidTag(tag)` (ERR_RESERVED_TAG) below.
             tags::BITMASK => {
                 let count = self.read_uvarint()?;
                 let byte_len = count.div_ceil(8) as usize;
@@ -581,17 +508,8 @@ impl<'a> Reader<'a> {
             t if (tags::FIXNEG_BASE..=tags::FIXNEG_MAX).contains(&t) => {
                 Value::Int(-1 - (t - tags::FIXNEG_BASE) as i64)
             }
-            // Reserved / stripped tags in 0x30–0x34 and 0x39: length-prefixed payload.
-            // Silently skip payload so that a reader can forward-scan past unknown tags.
-            t if (0x30..=0x34).contains(&t) || t == 0x39 => {
-                let payload_len = self.read_uvarint()? as usize;
-                if payload_len > self.opts.max_bytes_len {
-                    return Err(CowrieError::TooLarge);
-                }
-                let _ = self.read_bytes(payload_len)?;
-                // Return Null as a placeholder — callers that care about type should inspect the tag.
-                Value::Null
-            }
+            // SPEC-v1 §2.3: ALL non-core tags (0x0F, 0x21-0x23, 0x25-0x34, 0x35-0x3F, …) are
+            // RESERVED and MUST reject with ERR_RESERVED_TAG — never skipped or returned as Null.
             _ => return Err(CowrieError::InvalidTag(tag)),
         };
 
@@ -631,16 +549,6 @@ impl<'a> Reader<'a> {
         Ok(bytes)
     }
 
-    fn read_into(&mut self, buf: &mut [u8]) -> Result<(), CowrieError> {
-        let len = buf.len();
-        if self.pos + len > self.data.len() {
-            return Err(CowrieError::Truncated);
-        }
-        buf.copy_from_slice(&self.data[self.pos..self.pos + len]);
-        self.pos += len;
-        Ok(())
-    }
-
     fn read_uvarint(&mut self) -> Result<u64, CowrieError> {
         let mut result: u64 = 0;
         let mut shift: u32 = 0;
@@ -667,6 +575,13 @@ impl<'a> Reader<'a> {
         Ok(result)
     }
 
+    /// Read a SVARINT (zigzag of a 64-bit signed value, then strict minimal uvarint).
+    /// Mirrors ref `varint.decode_svarint`.
+    fn read_svarint(&mut self) -> Result<i64, CowrieError> {
+        let z = self.read_uvarint()?;
+        Ok(zigzag_decode(z))
+    }
+
     fn read_string(&mut self) -> Result<String, CowrieError> {
         let len = self.read_uvarint()? as usize;
         if len > self.opts.max_string_len {
@@ -676,62 +591,6 @@ impl<'a> Reader<'a> {
         String::from_utf8(bytes).map_err(|_| CowrieError::InvalidUtf8)
     }
 
-    /// Decode a node (without tag byte).
-    fn decode_node_data(&mut self) -> Result<NodeData, CowrieError> {
-        // ID
-        let id = self.read_string()?;
-        // Labels
-        let label_count = self.read_uvarint()? as usize;
-        if label_count > self.opts.max_array_len {
-            return Err(CowrieError::TooLarge);
-        }
-        let mut labels = Vec::with_capacity(label_count);
-        for _ in 0..label_count {
-            labels.push(self.read_string()?);
-        }
-        // Properties
-        let props = self.decode_props()?;
-        Ok(NodeData { id, labels, props })
-    }
-
-    /// Decode an edge (without tag byte).
-    fn decode_edge_data(&mut self) -> Result<EdgeData, CowrieError> {
-        // From, To, Type
-        let from = self.read_string()?;
-        let to = self.read_string()?;
-        let edge_type = self.read_string()?;
-        // Properties
-        let props = self.decode_props()?;
-        Ok(EdgeData {
-            from,
-            to,
-            edge_type,
-            props,
-        })
-    }
-
-    /// Decode dictionary-coded properties.
-    fn decode_props(&mut self) -> Result<BTreeMap<String, Value>, CowrieError> {
-        let prop_count = self.read_uvarint()? as usize;
-        if prop_count > self.opts.max_object_len {
-            return Err(CowrieError::TooLarge);
-        }
-        let mut props = BTreeMap::new();
-        for _ in 0..prop_count {
-            let key_idx = self.read_uvarint()? as usize;
-            if key_idx >= self.dict.len() {
-                return Err(CowrieError::InvalidData(format!(
-                    "dictionary index {} out of range (dict size: {})",
-                    key_idx,
-                    self.dict.len()
-                )));
-            }
-            let key = self.dict[key_idx].clone();
-            let val = self.decode_value()?;
-            props.insert(key, val);
-        }
-        Ok(props)
-    }
 }
 
 /// Returns the element size in bytes for byte-aligned dtypes.
@@ -938,201 +797,140 @@ mod tests {
         assert!(matches!(result, Err(CowrieError::Truncated)));
     }
 
-    #[test]
-    fn test_roundtrip_node() {
-        use super::super::types::NodeData;
+    // SPEC-v1 §2.3: TensorRef (0x21), Image (0x22), Audio (0x23) and the graph tags Node (0x35),
+    // Edge (0x36), NodeBatch (0x37), EdgeBatch (0x38) are RESERVED and NOT part of the canonical v1
+    // core. The decoder MUST reject their wire bytes with ERR_RESERVED_TAG (mapped to
+    // `CowrieError::InvalidTag`). The encoder may still serialize the legacy in-memory variants, but
+    // a conformant decoder never accepts them — so these are rejection tests, not round-trips.
 
+    #[test]
+    fn test_reserved_node_rejected() {
+        use super::super::types::NodeData;
         let mut props = BTreeMap::new();
         props.insert("name".to_string(), Value::String("Alice".to_string()));
         props.insert("age".to_string(), Value::Int(30));
-
         let node = Value::Node(NodeData {
             id: "person_42".to_string(),
             labels: vec!["Person".to_string(), "Employee".to_string()],
             props,
         });
-
         let encoded = encode(&node).expect("encode");
-        let decoded = decode(&encoded).expect("decode");
-
-        match decoded {
-            Value::Node(n) => {
-                assert_eq!(n.id, "person_42");
-                assert_eq!(n.labels, vec!["Person", "Employee"]);
-                assert_eq!(n.props.get("name").and_then(|v| v.as_str()), Some("Alice"));
-                assert_eq!(n.props.get("age").and_then(|v| v.as_i64()), Some(30));
-            }
-            _ => panic!("Expected Node, got {:?}", decoded),
-        }
+        assert!(
+            matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x35))),
+            "Node tag 0x35 must reject as ERR_RESERVED_TAG"
+        );
     }
 
     #[test]
-    fn test_roundtrip_edge() {
+    fn test_reserved_edge_rejected() {
         use super::super::types::EdgeData;
-
         let mut props = BTreeMap::new();
         props.insert("since".to_string(), Value::Int(2020));
-        props.insert("role".to_string(), Value::String("Engineer".to_string()));
-
         let edge = Value::Edge(EdgeData {
             from: "person_42".to_string(),
             to: "company_1".to_string(),
             edge_type: "WORKS_AT".to_string(),
             props,
         });
-
         let encoded = encode(&edge).expect("encode");
-        let decoded = decode(&encoded).expect("decode");
-
-        match decoded {
-            Value::Edge(e) => {
-                assert_eq!(e.from, "person_42");
-                assert_eq!(e.to, "company_1");
-                assert_eq!(e.edge_type, "WORKS_AT");
-                assert_eq!(e.props.get("since").and_then(|v| v.as_i64()), Some(2020));
-            }
-            _ => panic!("Expected Edge, got {:?}", decoded),
-        }
+        assert!(
+            matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x36))),
+            "Edge tag 0x36 must reject as ERR_RESERVED_TAG"
+        );
     }
 
     #[test]
-    fn test_roundtrip_node_batch() {
+    fn test_reserved_node_batch_rejected() {
         use super::super::types::{NodeBatchData, NodeData};
-
-        let nodes = vec![
-            NodeData {
-                id: "n1".to_string(),
-                labels: vec!["A".to_string()],
-                props: BTreeMap::new(),
-            },
-            NodeData {
-                id: "n2".to_string(),
-                labels: vec!["B".to_string()],
-                props: BTreeMap::new(),
-            },
-        ];
-
+        let nodes = vec![NodeData {
+            id: "n1".to_string(),
+            labels: vec!["A".to_string()],
+            props: BTreeMap::new(),
+        }];
         let batch = Value::NodeBatch(NodeBatchData { nodes });
-
         let encoded = encode(&batch).expect("encode");
-        let decoded = decode(&encoded).expect("decode");
-
-        match decoded {
-            Value::NodeBatch(nb) => {
-                assert_eq!(nb.nodes.len(), 2);
-                assert_eq!(nb.nodes[0].id, "n1");
-                assert_eq!(nb.nodes[1].id, "n2");
-            }
-            _ => panic!("Expected NodeBatch, got {:?}", decoded),
-        }
+        assert!(
+            matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x37))),
+            "NodeBatch tag 0x37 must reject as ERR_RESERVED_TAG"
+        );
     }
 
     #[test]
-    fn test_roundtrip_image() {
+    fn test_reserved_image_rejected() {
         use super::super::types::{ImageData, ImageFormat};
-
         let val = Value::Image(ImageData {
             format: ImageFormat::Png,
             width: 640,
             height: 480,
             data: vec![0x89, 0x50, 0x4E, 0x47],
         });
-
         let encoded = encode(&val).expect("encode");
-        let decoded = decode(&encoded).expect("decode");
-
-        match decoded {
-            Value::Image(img) => {
-                assert_eq!(img.format, ImageFormat::Png);
-                assert_eq!(img.width, 640);
-                assert_eq!(img.height, 480);
-                assert_eq!(img.data, vec![0x89, 0x50, 0x4E, 0x47]);
-            }
-            _ => panic!("Expected Image, got {:?}", decoded),
-        }
+        assert!(
+            matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x22))),
+            "Image tag 0x22 must reject as ERR_RESERVED_TAG"
+        );
     }
 
     #[test]
-    fn test_roundtrip_audio() {
+    fn test_reserved_audio_rejected() {
         use super::super::types::{AudioData, AudioEncoding};
-
         let val = Value::Audio(AudioData {
             encoding: AudioEncoding::Opus,
             sample_rate: 48000,
             channels: 2,
             data: vec![0x01, 0x02, 0x03, 0x04],
         });
-
         let encoded = encode(&val).expect("encode");
-        let decoded = decode(&encoded).expect("decode");
-
-        match decoded {
-            Value::Audio(aud) => {
-                assert_eq!(aud.encoding, AudioEncoding::Opus);
-                assert_eq!(aud.sample_rate, 48000);
-                assert_eq!(aud.channels, 2);
-                assert_eq!(aud.data, vec![0x01, 0x02, 0x03, 0x04]);
-            }
-            _ => panic!("Expected Audio, got {:?}", decoded),
-        }
+        assert!(
+            matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x23))),
+            "Audio tag 0x23 must reject as ERR_RESERVED_TAG"
+        );
     }
 
     #[test]
-    fn test_roundtrip_all_image_formats() {
+    fn test_reserved_image_all_formats_rejected() {
         use super::super::types::{ImageData, ImageFormat};
-
-        let formats = [
+        for fmt in [
             ImageFormat::Jpeg,
             ImageFormat::Png,
             ImageFormat::Webp,
             ImageFormat::Avif,
             ImageFormat::Bmp,
-        ];
-
-        for fmt in formats {
+        ] {
             let val = Value::Image(ImageData {
                 format: fmt,
                 width: 100,
                 height: 200,
                 data: vec![0xFF],
             });
-
             let encoded = encode(&val).expect("encode");
-            let decoded = decode(&encoded).expect("decode");
-
-            match decoded {
-                Value::Image(img) => assert_eq!(img.format, fmt),
-                _ => panic!("Expected Image"),
-            }
+            assert!(
+                matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x22))),
+                "Image tag 0x22 must reject as ERR_RESERVED_TAG"
+            );
         }
     }
 
     #[test]
-    fn test_roundtrip_all_audio_encodings() {
+    fn test_reserved_audio_all_encodings_rejected() {
         use super::super::types::{AudioData, AudioEncoding};
-
-        let encodings = [
+        for enc in [
             AudioEncoding::PcmInt16,
             AudioEncoding::PcmFloat32,
             AudioEncoding::Opus,
             AudioEncoding::Aac,
-        ];
-
-        for enc in encodings {
+        ] {
             let val = Value::Audio(AudioData {
                 encoding: enc,
                 sample_rate: 44100,
                 channels: 1,
                 data: vec![0x00],
             });
-
             let encoded = encode(&val).expect("encode");
-            let decoded = decode(&encoded).expect("decode");
-
-            match decoded {
-                Value::Audio(aud) => assert_eq!(aud.encoding, enc),
-                _ => panic!("Expected Audio"),
-            }
+            assert!(
+                matches!(decode(&encoded), Err(CowrieError::InvalidTag(0x23))),
+                "Audio tag 0x23 must reject as ERR_RESERVED_TAG"
+            );
         }
     }
 

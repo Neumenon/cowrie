@@ -16,6 +16,8 @@ import {
   fromAny,
   decode,
   encode,
+  CowrieError,
+  ERR_RESERVED_TAG,
 } from './index.ts';
 
 // ============================================================
@@ -193,17 +195,20 @@ describe('Bug #4 — fixed-width field range validation', () => {
     assert.strictEqual(enc('{"z":{"y":1,"x":2},"a":3}'), enc('{"a":3,"z":{"x":2,"y":1}}'));
   });
 
-  it('binary decode rejects channels=0 on the wire', () => {
+  it('binary decode rejects AUDIO tag on the wire with ERR_RESERVED_TAG', () => {
+    // SPEC-v1 §2.3 / §4: AUDIO (tag 0x23) is no longer a core wire tag; the
+    // decoder rejects it with ERR_RESERVED_TAG before any field-level (e.g.
+    // channels) validation. The wire-level Audio decode path was removed.
     // Wire: 'COWR' 01 00 (header) 00 (dictLen) | TAG_AUDIO 23 | enc 01 |
     //       sampleRate 44100 LE | channels 00 | len 02 | data
     const bytes = new Uint8Array([
       0x43, 0x4f, 0x57, 0x52, 0x01, 0x00, 0x00,
       0x23, 0x01, 0x44, 0xac, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
     ]);
-    assert.throws(() => decode(bytes), RangeError);
-    // channels=1 sibling decodes cleanly (proves the framing is otherwise valid).
-    const ok = bytes.slice();
-    ok[13] = 0x01; // channels byte (shifted +2 by the 4-byte COWR magic)
-    assert.strictEqual(decode(ok).type, Type.AUDIO);
+    assert.throws(
+      () => decode(bytes),
+      (err: unknown) =>
+        err instanceof CowrieError && err.code === ERR_RESERVED_TAG,
+    );
   });
 });

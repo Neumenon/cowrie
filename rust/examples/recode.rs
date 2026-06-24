@@ -20,7 +20,7 @@
 //! output. Offsets are captured during decode (not guessed), mirroring `cowrie_ref.tensor_spans`.
 use cowrie_rs::gen2::{
     address_of_bytes, decode_file, decode_framed, decode_framed_strict, encode, encode_file,
-    merkle_root, tensor_spans, to_hex,
+    merkle_root, schema_fingerprint64, tensor_spans, to_hex,
 };
 use std::io::{Read, Write};
 
@@ -31,6 +31,7 @@ fn main() {
     let file_id = std::env::args().skip(1).any(|a| a == "--file-id");
     let file_recode = std::env::args().skip(1).any(|a| a == "--file-recode");
     let tensor_spans_mode = std::env::args().skip(1).any(|a| a == "--tensor-spans");
+    let fingerprint_mode = std::env::args().skip(1).any(|a| a == "--fingerprint");
 
     let mut data = Vec::new();
     std::io::stdin().read_to_end(&mut data).expect("failed to read stdin");
@@ -81,7 +82,7 @@ fn main() {
                 }
             }
             Err(e) => {
-                eprintln!("file decode error: {}", e);
+                eprintln!("{}: file decode error: {}", e.err_code(), e);
                 std::process::exit(1);
             }
         }
@@ -95,7 +96,13 @@ fn main() {
     };
 
     match decoded {
-        Ok(v) => match encode(&v) {
+        Ok(v) => {
+            // --- §4 schema fingerprint mode: print fingerprint64 as 16 lowercase hex chars ---
+            if fingerprint_mode {
+                println!("{:016x}", schema_fingerprint64(&v));
+                return;
+            }
+            match encode(&v) {
             Ok(out) => {
                 if addr {
                     // Content address of the canonical bytes we would otherwise emit.
@@ -109,7 +116,8 @@ fn main() {
                 eprintln!("{}: encode error: {}", e.err_code(), e);
                 std::process::exit(1);
             }
-        },
+            }
+        }
         Err(e) => {
             eprintln!("{}: {}", e.err_code(), e);
             std::process::exit(1);

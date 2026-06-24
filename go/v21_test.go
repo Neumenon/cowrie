@@ -2,6 +2,7 @@ package cowrie
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 )
 
@@ -48,91 +49,36 @@ func TestTensorRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTensorRefRoundTrip(t *testing.T) {
-	key := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	v := TensorRef(42, key)
-
+// SPEC-v1 §2.3: TensorRef(0x21), Image(0x22), Audio(0x23) are RESERVED tags.
+// The encoder can still emit them (forward-preservation), but the decoder MUST
+// reject them with ERR_RESERVED_TAG (a *TagError). These tests assert the
+// freeze-blocker #2 reject behavior, not the old round-trip-as-Null/keep.
+func assertReservedTagDecode(t *testing.T, v *Value) {
+	t.Helper()
 	encoded, err := Encode(v)
 	if err != nil {
 		t.Fatalf("encode failed: %v", err)
 	}
+	if _, err := Decode(encoded); err == nil {
+		t.Fatalf("decode of reserved tag should fail, got nil error")
+	} else {
+		var te *TagError
+		if !errors.As(err, &te) {
+			t.Fatalf("decode error should be *TagError (ERR_RESERVED_TAG), got %v", err)
+		}
+	}
+}
 
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-
-	if decoded.Type() != TypeTensorRef {
-		t.Fatalf("decoded type: expected TypeTensorRef, got %v", decoded.Type())
-	}
-	ref := decoded.TensorRef()
-	if ref.StoreID != 42 {
-		t.Errorf("storeID: expected 42, got %v", ref.StoreID)
-	}
-	if !bytes.Equal(ref.Key, key) {
-		t.Errorf("key mismatch")
-	}
+func TestTensorRefRoundTrip(t *testing.T) {
+	assertReservedTagDecode(t, TensorRef(42, []byte{0xDE, 0xAD, 0xBE, 0xEF}))
 }
 
 func TestImageRoundTrip(t *testing.T) {
-	data := []byte("fake png data")
-	v := Image(ImageFormatPNG, 1920, 1080, data)
-
-	encoded, err := Encode(v)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-
-	if decoded.Type() != TypeImage {
-		t.Fatalf("decoded type: expected TypeImage, got %v", decoded.Type())
-	}
-	img := decoded.Image()
-	if img.Format != ImageFormatPNG {
-		t.Errorf("format: expected PNG, got %v", img.Format)
-	}
-	if img.Width != 1920 || img.Height != 1080 {
-		t.Errorf("dimensions: expected 1920x1080, got %vx%v", img.Width, img.Height)
-	}
-	if !bytes.Equal(img.Data, data) {
-		t.Errorf("data mismatch")
-	}
+	assertReservedTagDecode(t, Image(ImageFormatPNG, 1920, 1080, []byte("fake png data")))
 }
 
 func TestAudioRoundTrip(t *testing.T) {
-	data := []byte("fake opus data")
-	v := Audio(AudioEncodingOPUS, 48000, 2, data)
-
-	encoded, err := Encode(v)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-
-	if decoded.Type() != TypeAudio {
-		t.Fatalf("decoded type: expected TypeAudio, got %v", decoded.Type())
-	}
-	audio := decoded.Audio()
-	if audio.Encoding != AudioEncodingOPUS {
-		t.Errorf("encoding: expected OPUS, got %v", audio.Encoding)
-	}
-	if audio.SampleRate != 48000 {
-		t.Errorf("sampleRate: expected 48000, got %v", audio.SampleRate)
-	}
-	if audio.Channels != 2 {
-		t.Errorf("channels: expected 2, got %v", audio.Channels)
-	}
-	if !bytes.Equal(audio.Data, data) {
-		t.Errorf("data mismatch")
-	}
+	assertReservedTagDecode(t, Audio(AudioEncodingOPUS, 48000, 2, []byte("fake opus data")))
 }
 
 func TestV21TypeStrings(t *testing.T) {
@@ -154,66 +100,24 @@ func TestV21TypeStrings(t *testing.T) {
 }
 
 func TestV21InArray(t *testing.T) {
-	// Test that v2.1 types work correctly when nested in arrays
+	// Tensor is a v1 core type and round-trips; the reserved Image(0x22) nested in
+	// the array makes the whole message reject on decode with ERR_RESERVED_TAG.
 	arr := Array(
 		Tensor(DTypeInt8, []uint64{4}, []byte{1, 2, 3, 4}),
 		Image(ImageFormatJPEG, 100, 100, []byte("jpeg")),
 		String("mixed"),
 		Int64(42),
 	)
-
-	encoded, err := Encode(arr)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-
-	if decoded.Len() != 4 {
-		t.Fatalf("array length: expected 4, got %d", decoded.Len())
-	}
-	if decoded.Index(0).Type() != TypeTensor {
-		t.Errorf("arr[0] type: expected TypeTensor, got %v", decoded.Index(0).Type())
-	}
-	if decoded.Index(1).Type() != TypeImage {
-		t.Errorf("arr[1] type: expected TypeImage, got %v", decoded.Index(1).Type())
-	}
-	if decoded.Index(2).String() != "mixed" {
-		t.Errorf("arr[2] value: expected 'mixed', got %q", decoded.Index(2).String())
-	}
-	if decoded.Index(3).Int64() != 42 {
-		t.Errorf("arr[3] value: expected 42, got %v", decoded.Index(3).Int64())
-	}
+	assertReservedTagDecode(t, arr)
 }
 
 func TestV21InObject(t *testing.T) {
-	// Test that v2.1 types work correctly when nested in objects
+	// The reserved Audio(0x23) nested in the object makes decode reject with
+	// ERR_RESERVED_TAG (Tensor is core, but a single reserved tag fails the stream).
 	obj := Object(
 		Member{Key: "embedding", Value: Tensor(DTypeFloat32, []uint64{768}, make([]byte, 768*4))},
 		Member{Key: "audio_clip", Value: Audio(AudioEncodingPCMInt16, 16000, 1, []byte("audio"))},
 		Member{Key: "name", Value: String("test")},
 	)
-
-	encoded, err := Encode(obj)
-	if err != nil {
-		t.Fatalf("encode failed: %v", err)
-	}
-
-	decoded, err := Decode(encoded)
-	if err != nil {
-		t.Fatalf("decode failed: %v", err)
-	}
-
-	if decoded.Get("embedding").Type() != TypeTensor {
-		t.Errorf("embedding type: expected TypeTensor, got %v", decoded.Get("embedding").Type())
-	}
-	if decoded.Get("audio_clip").Type() != TypeAudio {
-		t.Errorf("audio_clip type: expected TypeAudio, got %v", decoded.Get("audio_clip").Type())
-	}
-	if decoded.Get("name").String() != "test" {
-		t.Errorf("name: expected 'test', got %q", decoded.Get("name").String())
-	}
+	assertReservedTagDecode(t, obj)
 }

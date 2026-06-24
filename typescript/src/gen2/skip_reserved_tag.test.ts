@@ -1,24 +1,24 @@
 /**
- * C4: skip-reserved-tag round-trip test.
+ * C4: reserved-tag rejection test.
  *
- * Verifies that the TS decoder silently skips reserved tags (0x30 Adjlist,
- * 0x31 RichText, 0x32 Delta, 0x39 GraphShard) inside a Gen2 stream without
- * throwing, and that sibling kept fields decode correctly.
+ * Per SPEC-v1 §2.3 / §4, the TS decoder MUST reject any non-core/reserved wire
+ * tag with ERR_RESERVED_TAG. Previously the decoder silently skipped reserved
+ * tags (0x30 Adjlist, 0x31 RichText, 0x32 Delta, 0x39 GraphShard); that behavior
+ * was removed. This test now verifies the decoder throws on those tags.
  *
  * The raw bytes are constructed by hand following the Gen2 wire format:
  *   [magic 4B 'COWR'][version 1B][compression 1B][dict-len varint][dict-entries...]
  *   [root-value]
  *
  * The root is a 2-field object:
- *   { "reserved": <tag 0x30, 4-byte payload>, "kept": "hello" }
+ *   { "reserved": <reserved tag, payload>, "kept": "hello" }
  *
- * Expected decode: { reserved: null, kept: "hello" }
+ * Expected decode: throws CowrieError with code ERR_RESERVED_TAG.
  */
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { decode, Type } from './index.ts';
-import type { Value } from './index.ts';
+import { decode, CowrieError, ERR_RESERVED_TAG } from './index.ts';
 
 /**
  * Build a uvarint (little-endian base-128) byte sequence for a non-negative
@@ -79,51 +79,39 @@ function buildStream(reservedTag: number, payloadLen: number): Uint8Array {
   return new Uint8Array(bytes);
 }
 
-describe('gen2 skip reserved tags', () => {
+describe('gen2 rejects reserved tags', () => {
   for (const [name, tag] of [
     ['0x30 (Adjlist)', 0x30],
     ['0x31 (RichText)', 0x31],
     ['0x32 (Delta)', 0x32],
     ['0x39 (GraphShard)', 0x39],
   ] as [string, number][]) {
-    it(`silently skips reserved tag ${name} and keeps sibling fields`, () => {
+    it(`rejects reserved tag ${name} with ERR_RESERVED_TAG`, () => {
       const stream = buildStream(tag, 4);
 
-      // Must not throw
-      let result: Value;
-      assert.doesNotThrow(() => {
-        result = decode(stream);
-      });
-
-      assert.strictEqual(result!.type, Type.OBJECT);
-      const obj = result!.data as Record<string, Value>;
-
-      // Reserved field decodes as null (skip returns SJ.null())
-      assert.strictEqual(obj['reserved'].type, Type.NULL);
-
-      // Kept field decodes correctly
-      assert.strictEqual(obj['kept'].type, Type.STRING);
-      assert.strictEqual(obj['kept'].data, 'hello');
+      assert.throws(
+        () => decode(stream),
+        (err: unknown) =>
+          err instanceof CowrieError && err.code === ERR_RESERVED_TAG,
+      );
     });
   }
 
-  it('silently skips zero-length reserved tag payload', () => {
+  it('rejects zero-length reserved tag payload', () => {
     const stream = buildStream(0x30, 0);
-    let result: Value;
-    assert.doesNotThrow(() => {
-      result = decode(stream);
-    });
-    assert.strictEqual((result!.data as Record<string, Value>)['reserved'].type, Type.NULL);
-    assert.strictEqual((result!.data as Record<string, Value>)['kept'].data, 'hello');
+    assert.throws(
+      () => decode(stream),
+      (err: unknown) =>
+        err instanceof CowrieError && err.code === ERR_RESERVED_TAG,
+    );
   });
 
-  it('silently skips multi-byte reserved tag payload (16 bytes)', () => {
+  it('rejects multi-byte reserved tag payload (16 bytes)', () => {
     const stream = buildStream(0x31, 16);
-    let result: Value;
-    assert.doesNotThrow(() => {
-      result = decode(stream);
-    });
-    assert.strictEqual((result!.data as Record<string, Value>)['reserved'].type, Type.NULL);
-    assert.strictEqual((result!.data as Record<string, Value>)['kept'].data, 'hello');
+    assert.throws(
+      () => decode(stream),
+      (err: unknown) =>
+        err instanceof CowrieError && err.code === ERR_RESERVED_TAG,
+    );
   });
 });

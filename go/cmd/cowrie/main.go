@@ -268,7 +268,23 @@ func recodeCmd(args []string) {
 	fileID := fs.Bool("file-id", false, "Read a Cowrie FILE (§7) on stdin, decode+verify, print merkle_root as lowercase hex")
 	fileRecode := fs.Bool("file-recode", false, "Read a Cowrie FILE (§7) on stdin, decode, re-encode, write raw bytes to stdout")
 	tensorSpans := fs.Bool("tensor-spans", false, "Read a canonical Cowrie message on stdin, decode, print one line per tensor in document order: \"<data_offset> <data_len> <dtype> <shape>\"")
+	fingerprint := fs.Bool("fingerprint", false, "Read a canonical Cowrie message on stdin, decode, print the §4 fingerprint64 as 16 lowercase hex chars")
 	fs.Parse(args)
+
+	if *fingerprint {
+		input, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		val, err := cowrie.DecodeFramed(input)
+		if err != nil {
+			failDecode(err)
+		}
+		// §4: print fingerprint64 as 16 lowercase hex chars (zero-padded).
+		fmt.Printf("%016x\n", cowrie.SchemaFingerprint64(val))
+		return
+	}
 
 	if *tensorSpans {
 		input, err := io.ReadAll(os.Stdin)

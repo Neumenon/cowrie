@@ -328,15 +328,17 @@ fn roundtrip_tensor_all_dtypes() {
     }
 }
 
+// SPEC-v1 §2.3: TensorRef/Image/Audio/Node/Edge/batches are RESERVED tags — a conformant decoder
+// must reject their wire bytes with ERR_RESERVED_TAG (CowrieError::InvalidTag). The encoder may
+// still serialize the legacy in-memory variants, so these are rejection tests, not round-trips.
 #[test]
-fn roundtrip_tensor_ref() {
+fn reserved_tensor_ref_rejected() {
     let v = Value::TensorRef(TensorRef {
         store_id: 3,
         key: vec![0xDE, 0xAD, 0xBE, 0xEF],
     });
     let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidTag(0x21))));
 }
 
 // ============================================================
@@ -344,7 +346,7 @@ fn roundtrip_tensor_ref() {
 // ============================================================
 
 #[test]
-fn roundtrip_image() {
+fn reserved_image_rejected() {
     let formats = [
         ImageFormat::Jpeg,
         ImageFormat::Png,
@@ -360,13 +362,16 @@ fn roundtrip_image() {
             data: vec![0xFF; 100],
         });
         let enc = encode(&v).unwrap();
-        let dec = decode(&enc).unwrap();
-        assert_eq!(dec, v, "image format {:?}", fmt);
+        assert!(
+            matches!(decode(&enc), Err(CowrieError::InvalidTag(0x22))),
+            "image format {:?} must reject",
+            fmt
+        );
     }
 }
 
 #[test]
-fn roundtrip_audio() {
+fn reserved_audio_rejected() {
     let encodings = [
         AudioEncoding::PcmInt16,
         AudioEncoding::PcmFloat32,
@@ -381,8 +386,11 @@ fn roundtrip_audio() {
             data: vec![0x80; 200],
         });
         let enc = encode(&v).unwrap();
-        let dec = decode(&enc).unwrap();
-        assert_eq!(dec, v, "audio encoding {:?}", ae);
+        assert!(
+            matches!(decode(&enc), Err(CowrieError::InvalidTag(0x23))),
+            "audio encoding {:?} must reject",
+            ae
+        );
     }
 }
 
@@ -409,9 +417,8 @@ fn audio_json_bridge_range_rejected() {
 
 #[test]
 fn audio_decode_channels_zero_rejected() {
-    // channels=0 is representable on the wire (u8) but semantically invalid; the
-    // binary decoder must reject it. We encode it directly (the struct literal and
-    // encoder don't validate) and assert decode fails.
+    // The Audio tag (0x23) is RESERVED in canonical v1 (SPEC-v1 §2.3): the decoder rejects it
+    // outright with ERR_RESERVED_TAG before any channel-count semantics apply.
     let v = Value::Audio(AudioData {
         encoding: AudioEncoding::PcmInt16,
         sample_rate: 44100,
@@ -419,7 +426,7 @@ fn audio_decode_channels_zero_rejected() {
         data: vec![0, 0],
     });
     let enc = encode(&v).unwrap();
-    assert!(matches!(decode(&enc), Err(CowrieError::InvalidData(_))));
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidTag(0x23))));
 }
 
 // ============================================================
@@ -457,7 +464,7 @@ fn roundtrip_bitmask() {
 // ============================================================
 
 #[test]
-fn roundtrip_node() {
+fn reserved_node_rejected() {
     let mut props = BTreeMap::new();
     props.insert("weight".to_string(), Value::Float(1.5));
     props.insert("name".to_string(), Value::String("Alice".into()));
@@ -467,12 +474,11 @@ fn roundtrip_node() {
         props,
     });
     let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidTag(0x35))));
 }
 
 #[test]
-fn roundtrip_edge() {
+fn reserved_edge_rejected() {
     let mut props = BTreeMap::new();
     props.insert("since".to_string(), Value::Int(2020));
     let v = Value::Edge(EdgeData {
@@ -482,12 +488,11 @@ fn roundtrip_edge() {
         props,
     });
     let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidTag(0x36))));
 }
 
 #[test]
-fn roundtrip_node_batch() {
+fn reserved_node_batch_rejected() {
     let nodes = vec![
         NodeData::new("n1", vec!["L1".into()], BTreeMap::new()),
         NodeData::new("n2", vec!["L2".into()], {
@@ -498,12 +503,11 @@ fn roundtrip_node_batch() {
     ];
     let v = Value::NodeBatch(NodeBatchData { nodes });
     let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidTag(0x37))));
 }
 
 #[test]
-fn roundtrip_edge_batch() {
+fn reserved_edge_batch_rejected() {
     let edges = vec![
         EdgeData::new("a", "b", "REL", BTreeMap::new()),
         EdgeData::new("c", "d", "REL2", {
@@ -514,8 +518,7 @@ fn roundtrip_edge_batch() {
     ];
     let v = Value::EdgeBatch(EdgeBatchData { edges });
     let enc = encode(&v).unwrap();
-    let dec = decode(&enc).unwrap();
-    assert_eq!(dec, v);
+    assert!(matches!(decode(&enc), Err(CowrieError::InvalidTag(0x38))));
 }
 
 // ============================================================
@@ -542,6 +545,9 @@ fn encode_omit_null_in_nested() {
 
 #[test]
 fn encode_omit_null_in_node_props() {
+    // Node (0x35) is a RESERVED tag (SPEC-v1 §2.3) so the encoded bytes are not decodable; we
+    // verify only the encode-side `omit_null` behavior: the null prop ("drop") is filtered, so the
+    // omit_null encoding is strictly shorter than the full encoding.
     let mut props = BTreeMap::new();
     props.insert("keep".to_string(), Value::Int(1));
     props.insert("drop".to_string(), Value::Null);
@@ -554,11 +560,14 @@ fn encode_omit_null_in_node_props() {
         omit_null: true,
         ..Default::default()
     };
-    let enc = encode_with_options(&v, &opts).unwrap();
-    let dec = decode(&enc).unwrap();
-    let node = dec.as_node().unwrap();
-    assert!(!node.props.contains_key("drop"));
-    assert_eq!(node.props.get("keep"), Some(&Value::Int(1)));
+    let with_omit = encode_with_options(&v, &opts).unwrap();
+    let without_omit = encode(&v).unwrap();
+    assert!(
+        with_omit.len() < without_omit.len(),
+        "omit_null should drop the null node prop"
+    );
+    // The reserved Node tag is rejected by a conformant decoder.
+    assert!(matches!(decode(&with_omit), Err(CowrieError::InvalidTag(0x35))));
 }
 
 // ============================================================
@@ -1089,7 +1098,9 @@ fn schema_tensor_includes_rank() {
 }
 
 #[test]
-fn schema_image_includes_format() {
+fn schema_image_reserved_not_in_fpc_grammar() {
+    // Image is a RESERVED type — it is NOT part of the §4 FPC fingerprint grammar, so its format
+    // does not contribute. Two Image values hash identically (both use the reserved sentinel).
     let i1 = Value::Image(ImageData {
         format: ImageFormat::Jpeg,
         width: 1,
@@ -1102,11 +1113,12 @@ fn schema_image_includes_format() {
         height: 1,
         data: vec![],
     });
-    assert_ne!(schema_fingerprint64(&i1), schema_fingerprint64(&i2));
+    assert_eq!(schema_fingerprint64(&i1), schema_fingerprint64(&i2));
 }
 
 #[test]
-fn schema_audio_includes_encoding_channels() {
+fn schema_audio_reserved_not_in_fpc_grammar() {
+    // Audio is a RESERVED type — not in the §4 FPC grammar, so encoding/channels do not contribute.
     let a1 = Value::Audio(AudioData {
         encoding: AudioEncoding::Opus,
         sample_rate: 48000,
@@ -1119,7 +1131,7 @@ fn schema_audio_includes_encoding_channels() {
         channels: 2,
         data: vec![],
     });
-    assert_ne!(schema_fingerprint64(&a1), schema_fingerprint64(&a2));
+    assert_eq!(schema_fingerprint64(&a1), schema_fingerprint64(&a2));
 }
 
 #[test]
@@ -1137,8 +1149,8 @@ fn schema_ext_includes_type_id() {
 
 #[test]
 fn schema_bitmask() {
-    // Go parity: a bitmask's schema is the type ordinal alone; count/bits are
-    // data, not schema, so two bitmasks of different sizes hash identically.
+    // SPEC-v1 §4.2: a Bitmask's fingerprint is [FPC.bitmask] + uvarint(count) — the bit COUNT is
+    // structural (a collection size), so two bitmasks of different counts hash DIFFERENTLY.
     let b1 = Value::Bitmask {
         count: 8,
         bits: vec![0xFF],
@@ -1147,7 +1159,13 @@ fn schema_bitmask() {
         count: 16,
         bits: vec![0xFF, 0xFF],
     };
-    assert_eq!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
+    assert_ne!(schema_fingerprint64(&b1), schema_fingerprint64(&b2));
+    // Same count ⇒ same fingerprint regardless of the bit values (values are not structural).
+    let b3 = Value::Bitmask {
+        count: 8,
+        bits: vec![0x00],
+    };
+    assert_eq!(schema_fingerprint64(&b1), schema_fingerprint64(&b3));
 }
 
 #[test]

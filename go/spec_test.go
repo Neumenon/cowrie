@@ -3,6 +3,7 @@ package cowrie
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"testing"
 )
@@ -188,20 +189,23 @@ func TestSpecInvalidEnumValues(t *testing.T) {
 	})
 
 	t.Run("invalid_image_format", func(t *testing.T) {
-		// Build an image with invalid format (0xFF)
+		// Image(0x22) is now a RESERVED tag (SPEC-v1 §2.3): the decoder rejects on
+		// the tag byte itself (ERR_RESERVED_TAG) before ever reading the format
+		// byte, so the format value is irrelevant.
 		data := buildImageWithFormat(0xFF)
 		_, err := Decode(data)
-		if err != ErrInvalidImgFormat {
-			t.Errorf("expected ErrInvalidImgFormat, got: %v", err)
+		if !errors.As(err, new(*TagError)) {
+			t.Errorf("expected ERR_RESERVED_TAG (*TagError), got: %v", err)
 		}
 	})
 
 	t.Run("invalid_audio_encoding", func(t *testing.T) {
-		// Build an audio with invalid encoding (0xFF)
+		// Audio(0x23) is now a RESERVED tag (SPEC-v1 §2.3): decode rejects on the
+		// tag byte (ERR_RESERVED_TAG) before reaching the encoding byte.
 		data := buildAudioWithEncoding(0xFF)
 		_, err := Decode(data)
-		if err != ErrInvalidAudioEnc {
-			t.Errorf("expected ErrInvalidAudioEnc, got: %v", err)
+		if !errors.As(err, new(*TagError)) {
+			t.Errorf("expected ERR_RESERVED_TAG (*TagError), got: %v", err)
 		}
 	})
 
@@ -315,27 +319,28 @@ func TestSpecUUID128FixedSize(t *testing.T) {
 // TestSpecRoundTrip verifies all types survive encode/decode round-trip.
 func TestSpecRoundTrip(t *testing.T) {
 	tests := []struct {
-		name  string
-		value *Value
+		name     string
+		value    *Value
+		reserved bool // SPEC-v1 §2.3: decode rejects with ERR_RESERVED_TAG
 	}{
-		{"null", Null()},
-		{"false", Bool(false)},
-		{"true", Bool(true)},
-		{"int64_positive", Int64(12345)},
-		{"int64_negative", Int64(-12345)},
-		{"uint64", Uint64(18446744073709551615)},
-		{"float64", Float64(3.14159265358979)},
-		{"string", String("hello world 🌍")},
-		{"bytes", Bytes([]byte{0x00, 0xFF, 0x42})},
-		{"datetime64", Datetime64(1732905600000000000)},
-		{"uuid128", UUID128([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16})},
-		{"bigint", BigInt([]byte{0x01, 0x02, 0x03})},
-		{"array", Array(Int64(1), String("two"), Bool(true))},
-		{"object", Object(Member{Key: "a", Value: Int64(1)}, Member{Key: "b", Value: String("two")})},
-		{"tensor", Tensor(DTypeFloat32, []uint64{2, 3}, make([]byte, 24))},
-		{"tensorRef", TensorRef(5, []byte("model-key"))},
-		{"image", Image(ImageFormatPNG, 100, 200, []byte{0x89, 0x50, 0x4E, 0x47})},
-		{"audio", Audio(AudioEncodingOPUS, 48000, 1, []byte{0x4F, 0x67, 0x67, 0x53})},
+		{"null", Null(), false},
+		{"false", Bool(false), false},
+		{"true", Bool(true), false},
+		{"int64_positive", Int64(12345), false},
+		{"int64_negative", Int64(-12345), false},
+		{"uint64", Uint64(18446744073709551615), false},
+		{"float64", Float64(3.14159265358979), false},
+		{"string", String("hello world 🌍"), false},
+		{"bytes", Bytes([]byte{0x00, 0xFF, 0x42}), false},
+		{"datetime64", Datetime64(1732905600000000000), false},
+		{"uuid128", UUID128([16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}), false},
+		{"bigint", BigInt([]byte{0x01, 0x02, 0x03}), false},
+		{"array", Array(Int64(1), String("two"), Bool(true)), false},
+		{"object", Object(Member{Key: "a", Value: Int64(1)}, Member{Key: "b", Value: String("two")}), false},
+		{"tensor", Tensor(DTypeFloat32, []uint64{2, 3}, make([]byte, 24)), false},
+		{"tensorRef", TensorRef(5, []byte("model-key")), true},
+		{"image", Image(ImageFormatPNG, 100, 200, []byte{0x89, 0x50, 0x4E, 0x47}), true},
+		{"audio", Audio(AudioEncodingOPUS, 48000, 1, []byte{0x4F, 0x67, 0x67, 0x53}), true},
 	}
 
 	for _, tt := range tests {
@@ -346,6 +351,12 @@ func TestSpecRoundTrip(t *testing.T) {
 			}
 
 			decoded, err := Decode(data)
+			if tt.reserved {
+				if !errors.As(err, new(*TagError)) {
+					t.Fatalf("expected ERR_RESERVED_TAG (*TagError), got: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("decode error: %v", err)
 			}

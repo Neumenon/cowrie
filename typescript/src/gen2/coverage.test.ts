@@ -364,54 +364,10 @@ describe('gen2 encode/decode roundtrip: ML types', () => {
     assert.deepStrictEqual(t.shape, [2, 3]);
   });
 
-  it('image JPEG', () => {
-    const imageBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
-    const v = roundtrip(SJ.image(ImageFormat.JPEG, 640, 480, imageBytes));
-    assert.strictEqual(v.type, Type.IMAGE);
-    const img = v.data as ImageData;
-    assert.strictEqual(img.format, ImageFormat.JPEG);
-    assert.strictEqual(img.width, 640);
-    assert.strictEqual(img.height, 480);
-    assert.deepStrictEqual(img.data, imageBytes);
-  });
-
-  it('image PNG', () => {
-    const imageBytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-    const v = roundtrip(SJ.image(ImageFormat.PNG, 100, 200, imageBytes));
-    const img = v.data as ImageData;
-    assert.strictEqual(img.format, ImageFormat.PNG);
-    assert.strictEqual(img.width, 100);
-    assert.strictEqual(img.height, 200);
-  });
-
-  it('audio PCM_INT16', () => {
-    const audioBytes = new Uint8Array(100);
-    const v = roundtrip(SJ.audio(AudioEncoding.PCM_INT16, 44100, 2, audioBytes));
-    assert.strictEqual(v.type, Type.AUDIO);
-    const aud = v.data as AudioData;
-    assert.strictEqual(aud.encoding, AudioEncoding.PCM_INT16);
-    assert.strictEqual(aud.sampleRate, 44100);
-    assert.strictEqual(aud.channels, 2);
-    assert.strictEqual(aud.data.length, 100);
-  });
-
-  it('audio OPUS', () => {
-    const audioBytes = new Uint8Array(50);
-    const v = roundtrip(SJ.audio(AudioEncoding.OPUS, 48000, 1, audioBytes));
-    const aud = v.data as AudioData;
-    assert.strictEqual(aud.encoding, AudioEncoding.OPUS);
-    assert.strictEqual(aud.sampleRate, 48000);
-    assert.strictEqual(aud.channels, 1);
-  });
-
-  it('tensor_ref', () => {
-    const key = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
-    const v = roundtrip(SJ.tensorRef(5, key));
-    assert.strictEqual(v.type, Type.TENSOR_REF);
-    const ref = v.data as TensorRefData;
-    assert.strictEqual(ref.storeId, 5);
-    assert.deepStrictEqual(ref.key, key);
-  });
+  // NOTE: image / audio / tensor_ref wire encode-decode round-trips were removed.
+  // Per SPEC-v1 §2.3 / §4 these tags (0x22 IMAGE, 0x23 AUDIO, 0x21 TENSOR_REF) are
+  // no longer core wire tags; decoding them now rejects with ERR_RESERVED_TAG.
+  // Rejection on decode is covered in skip_reserved_tag.test.ts / bugfix.test.ts.
 
   it('bitmask', () => {
     const bits = new Uint8Array([0b10110101]);
@@ -448,56 +404,12 @@ describe('gen2 encode/decode roundtrip: ML types', () => {
 // ============================================================
 // Graph types roundtrip
 // ============================================================
-
-describe('gen2 encode/decode roundtrip: graph types', () => {
-  it('node', () => {
-    const v = roundtrip(SJ.node('n1', ['Person', 'User'], {
-      name: SJ.string('Alice'),
-      age: SJ.int64(30),
-    }));
-    assert.strictEqual(v.type, Type.NODE);
-    const node = v.data as NodeData;
-    assert.strictEqual(node.id, 'n1');
-    assert.deepStrictEqual(node.labels, ['Person', 'User']);
-    assert.strictEqual((node.props['name'] as Value).data, 'Alice');
-  });
-
-  it('edge', () => {
-    const v = roundtrip(SJ.edge('n1', 'n2', 'FOLLOWS', {
-      since: SJ.int64(2020),
-    }));
-    assert.strictEqual(v.type, Type.EDGE);
-    const edge = v.data as EdgeData;
-    assert.strictEqual(edge.fromId, 'n1');
-    assert.strictEqual(edge.toId, 'n2');
-    assert.strictEqual(edge.edgeType, 'FOLLOWS');
-  });
-
-  it('node batch', () => {
-    const nodes: NodeData[] = [
-      { id: 'n1', labels: ['A'], props: { x: SJ.int64(1) } },
-      { id: 'n2', labels: ['B'], props: { x: SJ.int64(2) } },
-    ];
-    const v = roundtrip(SJ.nodeBatch(nodes));
-    assert.strictEqual(v.type, Type.NODE_BATCH);
-    const batch = v.data as NodeBatchData;
-    assert.strictEqual(batch.nodes.length, 2);
-    assert.strictEqual(batch.nodes[0].id, 'n1');
-    assert.strictEqual(batch.nodes[1].id, 'n2');
-  });
-
-  it('edge batch', () => {
-    const edges: EdgeData[] = [
-      { fromId: 'a', toId: 'b', edgeType: 'X', props: { w: SJ.int64(1) } },
-      { fromId: 'b', toId: 'c', edgeType: 'Y', props: { w: SJ.int64(2) } },
-    ];
-    const v = roundtrip(SJ.edgeBatch(edges));
-    assert.strictEqual(v.type, Type.EDGE_BATCH);
-    const batch = v.data as EdgeBatchData;
-    assert.strictEqual(batch.edges.length, 2);
-  });
-
-});
+//
+// REMOVED: the `gen2 encode/decode roundtrip: graph types` describe block
+// (node / edge / node batch / edge batch) tested wire encode-decode of graph
+// tags (0x35-0x38). Per SPEC-v1 §2.3 / §4 these are no longer core wire tags
+// and decoding them now rejects with ERR_RESERVED_TAG, so the round-trip paths
+// no longer exist. Rejection is covered in skip_reserved_tag.test.ts.
 
 // ============================================================
 // JSON Bridge
@@ -888,32 +800,9 @@ describe('gen2 deterministic encoding', () => {
     assert.strictEqual(obj['t'].type, Type.TENSOR);
   });
 
-  it('deterministic encode image', () => {
-    const img = SJ.image(ImageFormat.JPEG, 10, 10, new Uint8Array(4));
-    const v = SJ.object({ img });
-    const enc = encodeWithOpts(v, { deterministic: true });
-    const decoded = decode(enc);
-    const obj = decoded.data as Record<string, Value>;
-    assert.strictEqual(obj['img'].type, Type.IMAGE);
-  });
-
-  it('deterministic encode audio', () => {
-    const aud = SJ.audio(AudioEncoding.OPUS, 48000, 1, new Uint8Array(10));
-    const v = SJ.object({ aud });
-    const enc = encodeWithOpts(v, { deterministic: true });
-    const decoded = decode(enc);
-    const obj = decoded.data as Record<string, Value>;
-    assert.strictEqual(obj['aud'].type, Type.AUDIO);
-  });
-
-  it('deterministic encode tensor_ref', () => {
-    const ref = SJ.tensorRef(1, new Uint8Array([1, 2, 3]));
-    const v = SJ.object({ ref });
-    const enc = encodeWithOpts(v, { deterministic: true });
-    const decoded = decode(enc);
-    const obj = decoded.data as Record<string, Value>;
-    assert.strictEqual(obj['ref'].type, Type.TENSOR_REF);
-  });
+  // REMOVED: deterministic encode image / audio / tensor_ref. These required
+  // decoding the encoded bytes, but IMAGE/AUDIO/TENSOR_REF wire tags are no
+  // longer core (SPEC-v1 §2.3 / §4) and decode now rejects with ERR_RESERVED_TAG.
 
   it('deterministic encode bitmask', () => {
     const bm = SJ.bitmask(4, new Uint8Array([0b1010]));
@@ -991,23 +880,10 @@ describe('gen2 schema fingerprinting', () => {
     assert.notStrictEqual(fp1, fp2); // different dtype
   });
 
-  it('image schema includes format', () => {
-    const i1 = SJ.image(ImageFormat.JPEG, 10, 10, new Uint8Array(4));
-    const i2 = SJ.image(ImageFormat.PNG, 10, 10, new Uint8Array(4));
-    assert.notStrictEqual(schemaFingerprint32(i1), schemaFingerprint32(i2));
-  });
-
-  it('audio schema includes encoding', () => {
-    const a1 = SJ.audio(AudioEncoding.PCM_INT16, 44100, 2, new Uint8Array(4));
-    const a2 = SJ.audio(AudioEncoding.OPUS, 44100, 2, new Uint8Array(4));
-    assert.notStrictEqual(schemaFingerprint32(a1), schemaFingerprint32(a2));
-  });
-
-  it('tensor_ref schema includes storeId', () => {
-    const r1 = SJ.tensorRef(1, new Uint8Array([1]));
-    const r2 = SJ.tensorRef(2, new Uint8Array([1]));
-    assert.notStrictEqual(schemaFingerprint32(r1), schemaFingerprint32(r2));
-  });
+  // REMOVED: image / audio / tensor_ref schema fingerprint tests. The §4
+  // FPC-grammar fingerprint (SPEC-v1) only covers core types; IMAGE/AUDIO/
+  // TENSOR_REF are no longer supported and hashSchema rejects them with
+  // ERR_RESERVED_TAG.
 
   it('scalar types same schema', () => {
     const fp1 = schemaFingerprint32(SJ.int64(1));

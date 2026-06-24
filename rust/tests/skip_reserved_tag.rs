@@ -1,10 +1,13 @@
-//! Test that reserved/stripped tags (0x30–0x34, 0x39) are silently skipped by the decoder.
+//! Test that ALL reserved/non-core tags (incl. 0x30–0x34, 0x39) are REJECTED with
+//! ERR_RESERVED_TAG by the decoder (SPEC-v1 §2.3).
 //!
-//! The C3 sprint stripped encoder/decoder arms for Adjlist (0x30), RichText (0x31),
-//! Delta (0x32), and GraphShard (0x39). Per the spec, a reader must forward-scan past
-//! unknown length-prefixed values without error. This file verifies that contract.
+//! Earlier builds silently skipped these length-prefixed reserved values (decoding them as
+//! `Value::Null`) — a verified freeze-blocker: every conformant implementation rejects them.
+//! Per the spec, any tag outside the canonical v1 core MUST reject (in both lenient and strict
+//! mode), never be forward-scanned. This file verifies that contract.
 
-use cowrie_rs::gen2::{decode, Value};
+use cowrie_rs::gen2::decode;
+use cowrie_rs::gen2::types::CowrieError;
 
 /// Build a minimal Cowrie Gen2 stream manually.
 ///
@@ -40,72 +43,40 @@ fn write_uvarint(buf: &mut Vec<u8>, mut v: u64) {
     }
 }
 
-/// Reserved tag 0x30 (was Adjlist) with a 4-byte payload: skipped → Value::Null.
+/// Reserved tag 0x30 (was Adjlist) inside an array: MUST reject with ERR_RESERVED_TAG.
 #[test]
-fn skip_tag_0x30_in_array() {
-    // Construct FIXARRAY(3) = [Int(1), <0x30 reserved, 4 bytes>, Int(2)]
-    // FIXARRAY_BASE = 0xC0, so FIXARRAY(3) = 0xC3
+fn reject_tag_0x30_in_array() {
+    // FIXARRAY(3) = [Int(1), <0x30 reserved, 4 bytes>, Int(2)]; the reserved element must abort.
     let mut value_bytes = Vec::new();
     value_bytes.push(0xC3); // FIXARRAY with 3 elements
-
-    // Element 0: FIXINT 1 (0x40 + 1 = 0x41)
-    value_bytes.push(0x41);
-
-    // Element 1: reserved tag 0x30, payload_len = 4, payload = [0xDE, 0xAD, 0xBE, 0xEF]
-    value_bytes.push(0x30);
+    value_bytes.push(0x41); // FIXINT 1
+    value_bytes.push(0x30); // reserved tag 0x30
     write_uvarint(&mut value_bytes, 4);
     value_bytes.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
-
-    // Element 2: FIXINT 2 (0x40 + 2 = 0x42)
-    value_bytes.push(0x42);
+    value_bytes.push(0x42); // FIXINT 2
 
     let stream = cowrie_bytes(&[], &value_bytes);
-    let result = decode(&stream);
     assert!(
-        result.is_ok(),
-        "should not error on reserved tag 0x30: {:?}",
-        result
-    );
-
-    let val = result.unwrap();
-    let arr = val.as_array().expect("expected Array");
-    assert_eq!(arr.len(), 3, "array should have 3 elements");
-    assert_eq!(arr[0], Value::Int(1), "first kept element should be Int(1)");
-    assert_eq!(arr[1], Value::Null, "reserved tag should decode as Null");
-    assert_eq!(
-        arr[2],
-        Value::Int(2),
-        "second kept element should be Int(2)"
+        matches!(decode(&stream), Err(CowrieError::InvalidTag(0x30))),
+        "reserved tag 0x30 must reject with ERR_RESERVED_TAG"
     );
 }
 
-/// Reserved tag 0x39 (was GraphShard) — same skip behaviour.
+/// Reserved tag 0x39 (was GraphShard) — also rejects.
 #[test]
-fn skip_tag_0x39_in_array() {
+fn reject_tag_0x39_in_array() {
     let mut value_bytes = Vec::new();
     value_bytes.push(0xC2); // FIXARRAY(2)
-
-    // Element 0: FIXINT 42 (0x40 + 42 = 0x6A)
-    value_bytes.push(0x6A);
-
-    // Element 1: reserved tag 0x39, payload_len = 4, arbitrary payload
-    value_bytes.push(0x39);
+    value_bytes.push(0x6A); // FIXINT 42
+    value_bytes.push(0x39); // reserved tag 0x39
     write_uvarint(&mut value_bytes, 4);
     value_bytes.extend_from_slice(&[0x01, 0x02, 0x03, 0x04]);
 
     let stream = cowrie_bytes(&[], &value_bytes);
-    let result = decode(&stream);
     assert!(
-        result.is_ok(),
-        "should not error on reserved tag 0x39: {:?}",
-        result
+        matches!(decode(&stream), Err(CowrieError::InvalidTag(0x39))),
+        "reserved tag 0x39 must reject with ERR_RESERVED_TAG"
     );
-
-    let val = result.unwrap();
-    let arr = val.as_array().expect("expected Array");
-    assert_eq!(arr.len(), 2);
-    assert_eq!(arr[0], Value::Int(42));
-    assert_eq!(arr[1], Value::Null, "reserved 0x39 should decode as Null");
 }
 
 /// A kept Object field still decodes correctly when surrounded by a reserved-tag skip.
@@ -138,33 +109,22 @@ fn skip_reserved_tag_kept_field_survives() {
     );
 }
 
-/// All six reserved tag values (0x30–0x34, 0x39) skip cleanly with empty payload.
+/// All six reserved tag values (0x30–0x34, 0x39) reject with ERR_RESERVED_TAG (SPEC-v1 §2.3).
 #[test]
-fn all_reserved_tags_skip_with_empty_payload() {
+fn all_reserved_tags_reject() {
     let reserved_tags: &[u8] = &[0x30, 0x31, 0x32, 0x33, 0x34, 0x39];
     for &tag in reserved_tags {
-        // Array of [reserved_tag(empty), Int(7)]
+        // Array of [reserved_tag(empty), Int(7)] — the reserved element must abort the decode.
         let mut value_bytes = Vec::new();
         value_bytes.push(0xC2); // FIXARRAY(2)
         value_bytes.push(tag);
-        write_uvarint(&mut value_bytes, 0); // payload_len = 0
+        write_uvarint(&mut value_bytes, 0); // (would-be) payload_len = 0
         value_bytes.push(0x47); // FIXINT 7
 
         let stream = cowrie_bytes(&[], &value_bytes);
-        let result = decode(&stream);
         assert!(
-            result.is_ok(),
-            "reserved tag 0x{:02x} should skip cleanly: {:?}",
-            tag,
-            result
-        );
-        let val = result.unwrap();
-        let arr = val.as_array().expect("expected Array");
-        assert_eq!(arr[0], Value::Null, "tag 0x{:02x} → Null", tag);
-        assert_eq!(
-            arr[1],
-            Value::Int(7),
-            "kept element preserved after tag 0x{:02x}",
+            matches!(decode(&stream), Err(CowrieError::InvalidTag(t)) if t == tag),
+            "reserved tag 0x{:02x} must reject with ERR_RESERVED_TAG",
             tag
         );
     }

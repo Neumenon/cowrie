@@ -304,6 +304,18 @@
     "fingerprint64": 12638150916671911033,
     "fingerprint32": 2248258681
   },
+  "decimal_big_scale": {
+    "value": "Decimal128(coefficient=3, scale=64)",
+    "canonical_hex": "434f57520100000a800103000000000000000000000000000000",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "decimal_big_negscale": {
+    "value": "Decimal128(coefficient=7, scale=-100)",
+    "canonical_hex": "434f57520100000ac70107000000000000000000000000000000",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
   "decimal_neg_coeff": {
     "value": "Decimal128(coefficient=-12345, scale=2)",
     "canonical_hex": "434f57520100000a04c7cfffffffffffffffffffffffffffff",

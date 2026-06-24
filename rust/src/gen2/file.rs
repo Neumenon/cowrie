@@ -60,21 +60,35 @@ fn encode_uvarint(v: u64) -> Vec<u8> {
     out
 }
 
-/// Decode a uvarint from `data` at `pos`, returning `(value, new_pos)`.
+/// Decode a STRICT minimal uvarint from `data` at `pos`, returning `(value, new_pos)`.
+///
+/// Matches the §2.1 strict decoder (ref `varint.decode_uvarint`) used everywhere else: a §7 file
+/// footer must not contain overlong/non-minimal or >64-bit varints. A non-minimal encoding (a
+/// trailing 0x00 continuation on a multi-byte form) or a value past bit 63 is rejected with
+/// ERR_INVALID_VARINT — the private non-strict version that used to live here accepted overlong
+/// frame_count/offset varints that every other implementation rejects.
 fn decode_uvarint(data: &[u8], mut pos: usize) -> Result<(u64, usize), CowrieError> {
     let mut result: u64 = 0;
     let mut shift: u32 = 0;
+    let mut nbytes: usize = 0;
     loop {
         if pos >= data.len() {
             return Err(CowrieError::Truncated);
         }
         let byte = data[pos];
         pos += 1;
-        if shift >= 64 {
-            return Err(CowrieError::InvalidData("uvarint overflow".into()));
+        nbytes += 1;
+        // 64-bit overflow: >10 bytes, or a 10th byte (shift 63) contributing bits above bit 63.
+        if shift >= 64 || (shift == 63 && (byte & 0x7f) > 1) {
+            return Err(CowrieError::InvalidData("uvarint overflows 64 bits".into()));
         }
         result |= ((byte & 0x7f) as u64) << shift;
         if byte & 0x80 == 0 {
+            // Minimality: the terminating byte must be non-zero unless the whole varint is the
+            // single byte 0x00. A trailing 0x00 with length > 1 is overlong/non-minimal.
+            if byte == 0 && nbytes > 1 {
+                return Err(CowrieError::InvalidData("overlong varint".into()));
+            }
             break;
         }
         shift += 7;
