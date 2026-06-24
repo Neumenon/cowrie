@@ -66,11 +66,11 @@
 pub mod gen1;
 pub mod gen2;
 
-/// Cowrie magic bytes: "SJ" (used by Gen2)
-pub const MAGIC: &[u8; 2] = b"SJ";
+/// Cowrie v1 magic bytes: "COWR" (SPEC-v1 §2.2)
+pub const MAGIC: &[u8; 4] = b"COWR";
 
-/// Cowrie version 2 (Gen2)
-pub const VERSION: u8 = 0x02;
+/// Cowrie v1 version
+pub const VERSION: u8 = 0x01;
 
 #[cfg(test)]
 mod tests {

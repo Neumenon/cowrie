@@ -80,13 +80,13 @@ impl<'a> Reader<'a> {
 
     fn decode(&mut self) -> Result<Value, CowrieError> {
         // Check magic first (even if truncated, bad magic takes priority)
-        if self.remaining() < 2 {
+        if self.remaining() < 4 {
             return Err(CowrieError::Truncated);
         }
-        if &self.data[0..2] != MAGIC {
+        if &self.data[0..4] != MAGIC {
             return Err(CowrieError::InvalidMagic);
         }
-        self.pos = 2;
+        self.pos = 4;
 
         // Check version
         let version = self.read_byte()?;

@@ -19,11 +19,6 @@ pub enum Compression {
     Zstd = 2,
 }
 
-/// Flag bits in the header.
-const FLAG_COMPRESSED: u8 = 0x01;
-const COMP_TYPE_MASK: u8 = 0x06;
-const COMP_TYPE_SHIFT: u8 = 1;
-
 /// Encode a value with compression framing.
 ///
 /// The framed format adds a 4-byte header before the payload:
@@ -40,28 +35,26 @@ pub fn encode_framed(value: &Value, compression: Compression) -> Result<Vec<u8>,
         return Ok(raw);
     }
 
-    // Build flags
+    // Compression byte (§2.2): 1=gzip, 2=zstd
     let comp_bits = match compression {
         Compression::None => 0,
         Compression::Gzip => 1,
         Compression::Zstd => 2,
     };
-    let flags = FLAG_COMPRESSED | ((comp_bits << COMP_TYPE_SHIFT) & COMP_TYPE_MASK);
 
-    // Compress the data after the header
-    let payload = &raw[4..];
+    // Compress the data after the 6-byte header (COWR + version + compression byte)
+    let payload = &raw[6..];
     let compressed = match compression {
         Compression::Gzip => compress_gzip(payload)?,
         Compression::Zstd => compress_zstd(payload)?,
         Compression::None => unreachable!(),
     };
 
-    // Build output: header + uncompressed length + compressed data
-    let mut out = Vec::with_capacity(4 + 10 + compressed.len());
-    out.push(raw[0]); // 'S'
-    out.push(raw[1]); // 'J'
-    out.push(raw[2]); // version
-    out.push(flags);
+    // Build output: header (§2.2) + uncompressed length + compressed data
+    let mut out = Vec::with_capacity(6 + 10 + compressed.len());
+    out.extend_from_slice(&raw[0..4]); // COWR
+    out.push(raw[4]); // version
+    out.push(comp_bits as u8); // compression byte (1=gzip, 2=zstd)
 
     // Write uncompressed length as uvarint
     let mut len = payload.len() as u64;
@@ -82,30 +75,30 @@ pub fn decode_framed(data: &[u8]) -> Result<Value, CowrieError> {
 
 /// Decode a framed Cowrie value with a maximum decompressed size limit.
 pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, CowrieError> {
-    if data.len() < 4 {
+    if data.len() < 6 {
         return Err(CowrieError::Truncated);
     }
 
-    // Check magic + version
-    if &data[0..2] != MAGIC {
+    // Check magic + version + compression byte (§2.2)
+    if &data[0..4] != MAGIC {
         return Err(CowrieError::InvalidMagic);
     }
-    if data[2] != VERSION {
-        return Err(CowrieError::InvalidVersion(data[2]));
+    if data[4] != VERSION {
+        return Err(CowrieError::InvalidVersion(data[4]));
     }
 
-    let flags = data[3];
+    let comp_byte = data[5];
 
-    if (flags & FLAG_COMPRESSED) == 0 {
+    if comp_byte == 0 {
         // Not compressed, decode directly
         return decode(data);
     }
 
-    // Get compression type
-    let comp_type = (flags & COMP_TYPE_MASK) >> COMP_TYPE_SHIFT;
+    // Compression type from the compression byte (1=gzip, 2=zstd)
+    let comp_type = comp_byte;
 
     // Read uncompressed length
-    let mut pos = 4;
+    let mut pos = 6;
     let mut uncompressed_len: u64 = 0;
     let mut shift = 0;
     loop {
@@ -142,12 +135,11 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, C
         ));
     }
 
-    // Reconstruct full Cowrie data with header
-    let mut full = Vec::with_capacity(4 + decompressed.len());
-    full.push(data[0]); // 'S'
-    full.push(data[1]); // 'J'
-    full.push(data[2]); // version
-    full.push(0); // flags = 0 (no compression)
+    // Reconstruct full Cowrie data with the 6-byte uncompressed header
+    let mut full = Vec::with_capacity(6 + decompressed.len());
+    full.extend_from_slice(&data[0..4]); // COWR
+    full.push(data[4]); // version
+    full.push(0); // compression = none
     full.extend_from_slice(&decompressed);
 
     decode(&full)
