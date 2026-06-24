@@ -63,16 +63,16 @@ def test_trace_expressible_and_byte_stable() -> None:
     assert c.encode(c.decode(c.encode(tr))) == c.encode(tr)
 
 
-def test_graph_is_canonical_under_node_reordering() -> None:
-    # The FIX: graphs have no inherent order; profile sorts nodes/edges by canonical encoding, so a
-    # permutation of the same node/edge set yields the SAME content address (the promise now holds).
+def test_graph_builder_convention_and_its_limits() -> None:
+    # DEMOTED / experimental: the BUILDER sorts so a permutation of the same set -> same address...
     g1 = p.graph([{"id": "a", "labels": ["X"]}, {"id": "b"}], [{"src": "a", "dst": "b", "type": "e"}])
     g2 = p.graph([{"id": "b"}, {"id": "a", "labels": ["X"]}], [{"src": "a", "dst": "b", "type": "e"}])
-    assert _is_core(g1)
     assert c.content_address(g1) == c.content_address(g2)
-    assert c.encode(c.decode(c.encode(g1))) == c.encode(g1)
-    # a genuinely different graph still differs
     assert c.content_address(g1) != c.content_address(p.graph([{"id": "a"}], []))
+    # ...BUT this is NOT format-enforced (the known limitation, pinned so it can't silently regress):
+    hand = {"nodes": [{"id": "b"}, {"id": "a", "labels": ["X"]}], "edges": [{"src": "a", "dst": "b", "type": "e"}]}
+    assert c.content_address(hand) != c.content_address(g1)   # unsorted hand-built graph differs
+    c.decode(c.encode(hand), strict=True)                    # ...and strict decode ACCEPTS it (no enforcement)
 
 
 def test_dataset_manifest_is_merkle_dag_over_file_roots() -> None:

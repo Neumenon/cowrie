@@ -24,7 +24,7 @@ optimize later.
 | **Embedding** | ✅ **proven, high** | canonical dedup JSON can't do (700/1000 unique), O(1) drift, cross-lang cache |
 | **Dataset manifest** | ✅ **proven, high** | one verifiable Merkle hash for a whole sharded dataset; verify a shard without the rest |
 | **Trace** | ✅ **kept** | byte-exact eval-CI reproducibility is real (OTLP "exists" is an *adoption* point, discounted) |
-| **Graph** | ✅ **kept — FIXED** | had a real correctness bug (reordered nodes → different hash); now nodes/edges are sorted by canonical encoding so the order-independent identity promise actually holds (verified) |
+| **Graph** | 🔬 **demoted — experimental, until demand** | the builder sorts nodes/edges so a permutation of the same *set* shares an address, BUT this is builder-side only, **not a Cowrie guarantee**: the format does not enforce it (an unsorted graph Object is a valid, differently-addressed value the strict decoder accepts), it destroys meaningful order (set-semantics only), and the sort key is not yet spec'd or cross-language gated. Core-grade trust needs a pinned sort-key + strict graph-decode + a cross-lang gate — deferred until real demand. |
 | **Packed tensor-file** | ⏳ deferred (useful on merit) | content-identity + Merkle over aligned weights = real supply-chain integrity; not yet built |
 | **Media** | 🔬 **revisit later** | today thin (Core `Bytes` already content-addresses); kept for investigation, not blessed |
 | **TrainingBatch / Eval** | ➖ ignored (low) | batches are produced-once/consumed-once — content-addressing solves a non-problem |

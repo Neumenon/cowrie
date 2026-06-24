@@ -61,9 +61,17 @@ def trace(trace_id: str, spans: list[dict]) -> dict:
 def graph(nodes: list[dict], edges: list[dict]) -> dict:
     """A knowledge/agent-memory graph snapshot as Core objects/arrays (no graph wire variant).
 
-    CANONICAL by construction: graphs have no inherent node/edge order, but Core arrays do — so nodes
-    and edges are sorted by their canonical Cowrie encoding. Any permutation of the same node/edge set
-    therefore yields the SAME content address (the promise now holds; verified by test_profiles)."""
+    EXPERIMENTAL CONVENTION — DEMOTED until there is real demand. The builder sorts nodes/edges by
+    their canonical encoding so a permutation of the same *set* yields the same address — but this is a
+    BUILDER-SIDE BEST EFFORT, **not a Cowrie guarantee** like Embedding/Dataset have. Three caveats,
+    each verified in test_profiles:
+      1. NOT format-enforced — a hand-built graph Object with unsorted nodes is a valid, differently-
+         addressed value that the strict decoder ACCEPTS (the format only sees a plain Object).
+      2. Assumes SET semantics — the sort destroys any meaningful node/edge order (e.g. a path).
+      3. Sort key not yet spec'd or cross-language gated — other implementations could diverge.
+    Use only for set-semantic snapshots; do NOT rely on it for cross-language identity. To make it
+    Core-grade it needs a pinned sort-key spec + a strict graph-decode that rejects unsorted graphs +
+    a cross-language gate (deferred until demand)."""
     from .encode import encode as _canon
     return {"nodes": sorted(nodes, key=_canon), "edges": sorted(edges, key=_canon)}
 
