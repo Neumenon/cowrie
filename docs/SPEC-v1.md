@@ -60,12 +60,105 @@ gate's "semantic AST equality" uses.
 > Delta, columnar/ColumnHints, TensorRef (no external-store semantics specified). Express these as
 > schemas over the core (Object/Array/Tensor) if needed, never as new wire variants.
 
-## 2. Wire encoding — TODO (next draft section)
-Tag table (one unified 0x00–0xFF space), header byte layout, dictionary wire format
-(DictLen = entry **count**; entries `len:uvarint + UTF-8`), FIXMAP `dictIdx:uvarint + value`,
-varint definition (LEB128, **max 10 bytes**, minimal), per-primitive byte layout + **endianness**
-(BigInt/Decimal128 coefficient/UUID/Datetime all pinned), DType enum **with explicit numeric values
-and sizes**, error-code table + **condition→error precedence**.
+## 2. Wire encoding
+Encodes exactly the §1 value model — no other variants. (Image/Audio/Video as opaque envelopes is a
+deferred decision, §2.9.)
+
+### 2.1 Varints
+- **uvarint** = unsigned LEB128, little-endian groups, 7 bits/byte, MSB=continuation. MUST be
+  **minimal** (no trailing all-zero continuation) and **≤ 10 bytes** (a 64-bit value). Overlong or
+  >10 bytes ⇒ `ERR_INVALID_VARINT`. Used for all lengths, counts, dict indices, dims.
+- **svarint** = zigzag(`(n<<1) ^ (n>>63)`) then uvarint. Used by Int64 (0x03).
+
+### 2.2 Stream header
+```
+COWR (0x43 0x4F 0x57 0x52) | version:u8 (0x01) | compression:u8 | DictLen:uvarint
+| Dict[DictLen] = (keyLen:uvarint + keyLen UTF-8 bytes)   | RootValue
+```
+- `version != 0x01` ⇒ `ERR_INVALID_VERSION`; bad magic ⇒ `ERR_INVALID_MAGIC`.
+- **compression:** `0x00` none · `0x01` gzip · `0x02` zstd · else `ERR_UNSUPPORTED_COMPRESSION`.
+  If non-zero, everything after the `compression` byte (i.e. `DictLen … RootValue`) is replaced by
+  `OrigLen:uvarint + compressed bytes`; decoders decompress (size-bounded, `ERR_DECOMPRESSED_*`)
+  then parse the inner `DictLen … RootValue`. **Compression is transport only; canonical = `0x00`.**
+- **Dict** = the deduplicated set of all Object keys in the document. `DictLen` is an **entry count**
+  (not a byte length). Canonical order is byte-sorted (§3 / Appendix C.4). Exactly one Root value
+  follows; bytes after it ⇒ `ERR_TRAILING_DATA`.
+
+### 2.3 Tag space (one unified 0x00–0xFF)
+| Tag | Variant | Body |
+|---|---|---|
+| 0x00 | Null | — |
+| 0x01 | Bool false | — |
+| 0x02 | Bool true | — |
+| 0x03 | Int | svarint |
+| 0x04 | Float (f64) | 8 bytes IEEE-754 binary64 **LE** |
+| 0x05 | String | len:uvarint + UTF-8 |
+| 0x06 | Array | count:uvarint + count values |
+| 0x07 | Object | count:uvarint + count × (dictIdx:uvarint + value) |
+| 0x08 | Bytes | len:uvarint + raw bytes |
+| 0x09 | Uint | uvarint (no zigzag) |
+| 0x0A | Decimal128 | scale:**s**int8 + coefficient:16-byte two's-complement **big-endian** |
+| 0x0B | Datetime | int64 nanos since Unix epoch UTC, **LE** |
+| 0x0C | UUID | 16 bytes, RFC-4122 field order (**big-endian**) |
+| 0x0D | BigInt | len:uvarint + two's-complement bytes **big-endian**, minimal length |
+| 0x0E | Extension | extType:uvarint + len:uvarint + payload |
+| 0x0F | Float (f32) | 4 bytes IEEE-754 binary32 **LE** |
+| 0x20 | Tensor | dtype:u8 + rank:u8 + dims:uvarint×rank + dataLen:uvarint + data (LE elements) |
+| 0x24 | Bitmask | count:uvarint + ⌈count/8⌉ bytes, LSB-first; trailing bits of last byte = 0 |
+| 0x40–0xBF | FIXINT | value = tag − 0x40 (0..127); single byte |
+| 0xC0–0xCF | FIXARRAY | count = tag − 0xC0 (0..15), then count values |
+| 0xD0–0xDF | FIXMAP | count = tag − 0xD0 (0..15), then count × (dictIdx:uvarint + value) |
+| 0xE0–0xEF | FIXNEG | value = −1 − (tag − 0xE0) (−1..−16); single byte |
+| all other tags | **reject** | `ERR_RESERVED_TAG` (incl. legacy 0x16–0x19, 0x21–0x23, 0x30–0x39, 0xF0–0xFF) |
+
+> Deleted vs legacy: proto-tensor arrays (0x16–0x19), TensorRef (0x21), Image/Audio (0x22/0x23 —
+> see §2.9), all graph/RichText/Delta tags (0x30–0x39). They are `ERR_RESERVED_TAG` in v1.
+
+### 2.4 Object & dictionary
+- An Object body (0x07 / FIXMAP) is `count` pairs `(dictIdx:uvarint, value)`. `dictIdx` indexes the
+  header Dict; out-of-range ⇒ `ERR_INVALID_FIELD_ID`. Canonical emits pairs in ascending dictIdx
+  (== byte-sorted key) order with unique keys (Appendix C.4); duplicate ⇒ `ERR_DUPLICATE_KEY`.
+
+### 2.5 DType enum (Tensor) — explicit values + element size
+| DType | val | bytes/elem | | DType | val | bytes/elem |
+|---|---|---|---|---|---|---|
+| Float32 | 0x01 | 4 | | Uint8 | 0x08 | 1 |
+| Float16 | 0x02 | 2 | | Uint16 | 0x09 | 2 |
+| BFloat16 | 0x03 | 2 | | Uint32 | 0x0A | 4 |
+| Int8 | 0x04 | 1 | | Uint64 | 0x0B | 8 |
+| Int16 | 0x05 | 2 | | Float64 | 0x0C | 8 |
+| Int32 | 0x06 | 4 | | Bool | 0x0D | 1 |
+| Int64 | 0x07 | 8 | | | | |
+| QINT4 | 0x10 | ½ (packed) | | Ternary | 0x13 | packed |
+| QINT2 | 0x11 | ¼ (packed) | | Binary | 0x14 | ⅛ (1 bit) |
+| QINT3 | 0x12 | ⅜ (packed) | | | | |
+- `dataLen` MUST equal `ceil(product(shape) × bits_per_elem / 8)`; mismatch ⇒ `ERR_TOO_LARGE`/length error.
+  Sub-byte dtypes (QINT*/Ternary/Binary) pack LSB-first; trailing bits of the final byte = 0. Unknown
+  dtype byte ⇒ `ERR_INVALID_TAG`. *(Sub-byte packing layout to be pinned with fixtures.)*
+
+### 2.6 Error codes (canonical) + precedence
+Existing: `ERR_INVALID_MAGIC, ERR_INVALID_VERSION, ERR_TRUNCATED, ERR_INVALID_TAG, ERR_TRAILING_DATA,
+ERR_INVALID_UTF8, ERR_INVALID_VARINT, ERR_INVALID_FIELD_ID, ERR_TOO_DEEP, ERR_TOO_LARGE,
+ERR_DICT_TOO_LARGE, ERR_STRING_TOO_LARGE, ERR_BYTES_TOO_LARGE, ERR_EXT_TOO_LARGE, ERR_RANK_TOO_LARGE,
+ERR_UNSUPPORTED_COMPRESSION, ERR_DECOMPRESSED_TOO_LARGE, ERR_DECOMPRESSED_MISMATCH, ERR_UNKNOWN_EXTENSION,
+ERR_INVALID_AUDIO_RATE, ERR_INVALID_AUDIO_CHANNELS`.
+**Added (normative):** `ERR_RESERVED_TAG`, `ERR_DUPLICATE_KEY`, `ERR_NON_CANONICAL` (strict mode), `ERR_INVALID_PADDING`.
+**Precedence** (first applicable wins): magic/version → truncation → varint validity → tag validity
+(reserved/unknown) → limit checks (depth/size) → UTF-8/field-id/dtype validity → duplicate-key →
+canonical-form violations (`ERR_NON_CANONICAL`) → trailing data.
+
+### 2.7 Limits (normative constants for conformance)
+MaxDepth 1000 · MaxArray/MaxObject 1,000,000 · MaxString 10MB · MaxBytes 50MB · MaxExt 1MB ·
+MaxDict 1,000,000 · MaxRank 32. Sizes count **decoded** bytes. Overrides are out-of-conformance.
+
+### 2.8 Streaming note (acknowledged constraint)
+The header dictionary forces a buffering pre-pass on encode (collect+sort all keys before byte 0 of
+the body). This is accepted for v1 (identity > single-pass streaming). A future frame/stream layer may
+relax it without changing per-value identity.
+
+### 2.9 Image / Audio / Video — DEFERRED decision
+Clean-room verdict: keep only as *opaque blob envelopes* (no codec modeling) or drop. Not in v1 core
+yet — expressible as `Extension` or `Object{format, bytes}` until a decision is made. Resolve before 1.0.
 
 ## 3. Canonical Encoding Profile
 Use `SPEC.md` Appendix C verbatim (already authored: integers, value-decidable floats, strings,
