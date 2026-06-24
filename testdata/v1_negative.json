@@ -1,0 +1,82 @@
+{
+  "bad_magic": {
+    "hex": "5858585801000000",
+    "expect": "ERR_INVALID_MAGIC",
+    "tier": "malformed"
+  },
+  "bad_version": {
+    "hex": "434f575202000000",
+    "expect": "ERR_INVALID_VERSION",
+    "tier": "malformed"
+  },
+  "truncated_string": {
+    "hex": "434f575201000005",
+    "expect": "ERR_TRUNCATED",
+    "tier": "malformed"
+  },
+  "reserved_tag_0f": {
+    "hex": "434f57520100000f",
+    "expect": "ERR_RESERVED_TAG",
+    "tier": "malformed"
+  },
+  "varint_overflow": {
+    "hex": "434f57520100000580808080808080808002",
+    "expect": "ERR_INVALID_VARINT",
+    "tier": "malformed"
+  },
+  "dictidx_oob": {
+    "hex": "434f57520100010161d10541",
+    "expect": "ERR_INVALID_FIELD_ID",
+    "tier": "malformed"
+  },
+  "trailing_data": {
+    "hex": "434f57520100000000",
+    "expect": "ERR_TRAILING_DATA",
+    "tier": "malformed"
+  },
+  "int_not_fixint": {
+    "hex": "434f57520100000302",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "uint_fits_int": {
+    "hex": "434f57520100000905",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "bigint_small": {
+    "hex": "434f57520100000d0105",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "array_not_fixarr": {
+    "hex": "434f575201000006024142",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "neg_zero": {
+    "hex": "434f5752010000040000000000000080",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "noncanonical_nan": {
+    "hex": "434f575201000004010000000000f87f",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "unsorted_dict": {
+    "hex": "434f5752010002017a0161d10041",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "nonascending_idx": {
+    "hex": "434f57520100010161d200410042",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  },
+  "bitmask_trailing": {
+    "hex": "434f575201000024030d",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
+  }
+}

@@ -444,14 +444,15 @@ impl<'a> Reader<'a> {
         let mut shift: u32 = 0;
         loop {
             let b = self.read_byte()?;
+            // 64-bit overflow: >10 bytes, or a 10th byte (shift 63) contributing bits above bit 63.
+            if shift >= 64 || (shift == 63 && (b & 0x7f) > 1) {
+                return Err(CowrieError::InvalidData("uvarint overflows 64 bits".into()));
+            }
             result |= ((b & 0x7f) as u64) << shift;
             if b & 0x80 == 0 {
                 break;
             }
             shift += 7;
-            if shift >= 64 {
-                return Err(CowrieError::TooLarge);
-            }
         }
         Ok(result)
     }
