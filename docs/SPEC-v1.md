@@ -346,3 +346,39 @@ schemas), RichText (text + token-span arrays), Eval, Trace, TrainingBatch, Datas
 **Before Core is frozen at 1.0**, the Embedding, Media, and Trace profiles MUST be fully expressible as
 schemas over the locked Core with no Core change required. If any profile needs a new Core capability,
 add it *before* freeze — thawing Core after 1.0 breaks determinism. This is a release gate, not advice.
+
+## 7. Files & Merkle file identity (NORMATIVE)
+A **Cowrie file** packages an ordered list of **frames** — each frame is one complete, canonical §2.2
+COWR value's wire bytes (uncompressed) — with a sealed footer index for O(1) random access and a
+**Merkle root** that is the file's content identity. Sealed (no append); growth = a new file. Compression,
+if any, sits *above* this layer (it changes file bytes, hence identity) — frames are always uncompressed.
+
+**Layout** (LE ints; uvarint = §2.1):
+```
+"CWRF" (0x43 0x57 0x52 0x46) · version u8(0x01) · reserved u8(0x00) · uvarint frame_count
+repeat frame_count:  uvarint frame_len · frame_bytes        (canonical COWR value)
+FOOTER @ footer_offset:
+    uvarint frame_count                                     (MUST equal the header count)
+    repeat:  uvarint frame_offset · uvarint frame_len       (MUST mirror the body layout exactly)
+    merkle_root  34 bytes                                   (multihash SHA-256, §3)
+u64 LE footer_offset · "CWRF"                               (seek-from-end trailer)
+```
+The **body is the source of truth**: a decoder reads frames sequentially via their length prefixes and
+MUST reject (`ERR_NON_CANONICAL`) any file whose footer count/offsets do not exactly mirror that layout,
+whose reserved byte ≠ 0, or whose body does not end exactly at `footer_offset`. Thus there is **exactly one
+canonical file byte-string per ordered value list**. `frame_count` MUST be ≤ 2³². Bad magic/version ⇒
+`ERR_INVALID_MAGIC`; truncation ⇒ `ERR_TRUNCATED`.
+
+**Merkle root (RFC 6962 domain separation, promote-odd — never duplicate; count-bound):**
+```
+leaf(f)     = SHA-256(0x00 || f)
+node(a, b)  = SHA-256(0x01 || a || b)
+tree_digest = promote-odd reduction of the leaves           (0 frames ⇒ SHA-256(""))
+root_digest = SHA-256(0x02 || uvarint(frame_count) || tree_digest)
+merkle_root = 0x12 0x20 || root_digest                      (multihash sha2-256)
+```
+Promote-odd (carry a lone node up unchanged) avoids the duplicate-leaf ambiguity (CVE-2012-2459); the
+`0x00/0x01/0x02` domain tags plus the bound `frame_count` make it impossible for two different frame lists
+to share a root. **File identity = `merkle_root`.** A verifying decoder recomputes it from the frames and
+rejects a mismatch (tamper detection). The Merkle *leaf* (`0x00`-prefixed) is deliberately distinct from a
+frame's per-value content address (§3, un-prefixed).
