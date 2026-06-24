@@ -69,7 +69,7 @@ def rand_value(rng: random.Random, depth: int):
     if k == "bytes":
         return bytes(rng.randint(0, 255) for _ in range(rng.randint(0, 8)))
     if k == "decimal":
-        return Decimal128(rng.randint(-(2**80), 2**80), rng.randint(-40, 40))
+        return Decimal128(rng.randint(-(2**80), 2**80), rng.randint(-300, 300))
     if k == "datetime":
         return Datetime(rng.randint(-(2**63), 2**63 - 1))
     if k == "uuid":
