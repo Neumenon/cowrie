@@ -12,8 +12,8 @@
  */
 
 // Wire format constants
-const MAGIC = new Uint8Array([0x53, 0x4a]); // 'SJ'
-const VERSION = 2;
+const MAGIC = new Uint8Array([0x43, 0x4f, 0x57, 0x52]); // 'COWR' (SPEC-v1 §2.2)
+const VERSION = 1;
 
 // Compression
 export enum Compression {
@@ -1174,16 +1174,16 @@ class Decoder {
   }
 
   decode(): Value {
-    // Header
-    const magic = this.read(2);
-    if (magic[0] !== MAGIC[0] || magic[1] !== MAGIC[1]) {
+    // Header (SPEC-v1 §2.2: COWR + version + compression byte)
+    const magic = this.read(4);
+    if (magic[0] !== MAGIC[0] || magic[1] !== MAGIC[1] || magic[2] !== MAGIC[2] || magic[3] !== MAGIC[3]) {
       throw new Error("Invalid magic bytes");
     }
     const version = this.readByte();
     if (version !== VERSION) {
       throw new Error(`Unsupported version: ${version}`);
     }
-    this.readByte(); // flags byte — bit 3 (ColumnHints) is reserved, silently ignored
+    this.readByte(); // compression byte (0x00 = none)
 
     // Dictionary
     const dictLen = this.readUvarintAsNumber();
