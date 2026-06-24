@@ -10,6 +10,26 @@ behavior across Python/Go/Rust/TS.
 **Honest framing of "market":** these are *positioning hypotheses*, not validated demand. The value
 is engineering — **deterministic identity for AI data** — so each section names the category, the real
 incumbents, and the specific **wedge** where Cowrie’s identity/determinism beats "just use the incumbent."
+
+---
+
+## Verdict — measured demos + adversarial panel (judged on usefulness, NOT adoption)
+Validated with `tools/demos/profile_value.py` (real numbers) and an adversarial Gemini+DeepSeek panel.
+**Adoption is uphill for every format — so adoption difficulty is discounted; the only question is "is it
+extremely useful."** Size is *not* the pitch and is not optimized yet (1.4× vs JSON) — correctness first,
+optimize later.
+
+| Profile | Verdict | Why (effectiveness, not adoption) |
+| --- | --- | --- |
+| **Embedding** | ✅ **proven, high** | canonical dedup JSON can't do (700/1000 unique), O(1) drift, cross-lang cache |
+| **Dataset manifest** | ✅ **proven, high** | one verifiable Merkle hash for a whole sharded dataset; verify a shard without the rest |
+| **Trace** | ✅ **kept** | byte-exact eval-CI reproducibility is real (OTLP "exists" is an *adoption* point, discounted) |
+| **Graph** | ✅ **kept — FIXED** | had a real correctness bug (reordered nodes → different hash); now nodes/edges are sorted by canonical encoding so the order-independent identity promise actually holds (verified) |
+| **Packed tensor-file** | ⏳ deferred (useful on merit) | content-identity + Merkle over aligned weights = real supply-chain integrity; not yet built |
+| **Media** | 🔬 **revisit later** | today thin (Core `Bytes` already content-addresses); kept for investigation, not blessed |
+| **TrainingBatch / Eval** | ➖ ignored (low) | batches are produced-once/consumed-once — content-addressing solves a non-problem |
+
+The one item that needed a fix regardless of keep/cut was **Graph** — an effectiveness bug, now closed.
 No invented dollar figures.
 
 ---

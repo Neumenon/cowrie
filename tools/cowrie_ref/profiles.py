@@ -40,8 +40,11 @@ def embedding(model: str, vector: m.Tensor, *, id: str | None = None, meta: dict
 
 
 def media(kind: str, fmt: str, data: bytes, **meta) -> dict:
-    """Image/Audio/Video as an OPAQUE blob envelope (§6.3) — Core models metadata only, never the
-    codec. The payload stays an opaque ``Bytes`` so identity is content-addressed and honest (§0.1)."""
+    """Image/Audio/Video as an OPAQUE blob envelope (§6.3) — Core models metadata only, never the codec.
+
+    REVISIT LATER (not blessed): currently this is thin — Core's Bytes already gives the content address,
+    so today it adds only a named-metadata convention. Worth revisiting if/when it earns a real capability
+    (e.g. perceptual/near-duplicate fingerprinting). Kept for investigation, not part of the proven set."""
     if kind not in ("image", "audio", "video"):
         raise ValueError("media kind must be image|audio|video")
     obj = {"kind": kind, "format": fmt, "bytes": bytes(data)}
@@ -56,19 +59,13 @@ def trace(trace_id: str, spans: list[dict]) -> dict:
 
 
 def graph(nodes: list[dict], edges: list[dict]) -> dict:
-    """A knowledge/agent-memory graph snapshot as Core objects/arrays (no graph wire variant). Two
-    graphs with the same content hash to the same address (keys globally byte-sorted in Core)."""
-    return {"nodes": list(nodes), "edges": list(edges)}
+    """A knowledge/agent-memory graph snapshot as Core objects/arrays (no graph wire variant).
 
-
-def training_batch(features: m.Tensor, labels: m.Tensor, meta: dict | None = None) -> dict:
-    """A training batch: aligned, zero-copy feature/label Tensors with optional metadata."""
-    if not isinstance(features, m.Tensor) or not isinstance(labels, m.Tensor):
-        raise TypeError("features and labels must be Core Tensors")
-    obj = {"features": features, "labels": labels}
-    if meta is not None:
-        obj["meta"] = meta
-    return obj
+    CANONICAL by construction: graphs have no inherent node/edge order, but Core arrays do — so nodes
+    and edges are sorted by their canonical Cowrie encoding. Any permutation of the same node/edge set
+    therefore yields the SAME content address (the promise now holds; verified by test_profiles)."""
+    from .encode import encode as _canon
+    return {"nodes": sorted(nodes, key=_canon), "edges": sorted(edges, key=_canon)}
 
 
 def dataset_manifest(shards: list[dict]) -> dict:

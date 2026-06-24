@@ -56,27 +56,23 @@ def test_media_is_opaque_envelope_over_core() -> None:
     assert c.content_address(img) == c.content_address(p.media("image", "png", b"\x89PNG\r\n", width=2, height=2))
 
 
-def test_trace_and_graph_expressible_and_addressed() -> None:
+def test_trace_expressible_and_byte_stable() -> None:
     tr = p.trace("t1", [{"name": "llm", "start": 0, "end": 5, "tokens": 12},
                         {"name": "tool", "start": 5, "end": 9}])
-    g = p.graph([{"id": "a", "labels": ["X"], "props": {"k": 1}}],
-                [{"src": "a", "dst": "a", "type": "self", "props": {}}])
-    for v in (tr, g):
-        assert _is_core(v)
-        assert c.encode(c.decode(c.encode(v))) == c.encode(v)  # byte-stable round-trip
-    # same graph content -> same address regardless of construction order (Core sorts keys)
-    g2 = p.graph([{"props": {"k": 1}, "labels": ["X"], "id": "a"}],
-                 [{"props": {}, "type": "self", "dst": "a", "src": "a"}])
-    assert c.content_address(g) == c.content_address(g2)
+    assert _is_core(tr)
+    assert c.encode(c.decode(c.encode(tr))) == c.encode(tr)
 
 
-def test_training_batch_tensors_zero_copy_aligned() -> None:
-    import struct
-    feats = Tensor(0x01, (2, 3), b"".join(struct.pack("<f", i) for i in range(6)))
-    labels = Tensor(0x04, (2,), b"\x00\x01")
-    batch = p.training_batch(feats, labels, meta={"epoch": 1})
-    blob = c.encode(batch)
-    assert all(off % 64 == 0 for (_d, _s, off, _l) in c.tensor_spans(blob))  # both tensors aligned
+def test_graph_is_canonical_under_node_reordering() -> None:
+    # The FIX: graphs have no inherent order; profile sorts nodes/edges by canonical encoding, so a
+    # permutation of the same node/edge set yields the SAME content address (the promise now holds).
+    g1 = p.graph([{"id": "a", "labels": ["X"]}, {"id": "b"}], [{"src": "a", "dst": "b", "type": "e"}])
+    g2 = p.graph([{"id": "b"}, {"id": "a", "labels": ["X"]}], [{"src": "a", "dst": "b", "type": "e"}])
+    assert _is_core(g1)
+    assert c.content_address(g1) == c.content_address(g2)
+    assert c.encode(c.decode(c.encode(g1))) == c.encode(g1)
+    # a genuinely different graph still differs
+    assert c.content_address(g1) != c.content_address(p.graph([{"id": "a"}], []))
 
 
 def test_dataset_manifest_is_merkle_dag_over_file_roots() -> None:
