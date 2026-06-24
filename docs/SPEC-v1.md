@@ -194,10 +194,27 @@ relax it without changing per-value identity.
 Clean-room verdict: keep only as *opaque blob envelopes* (no codec modeling) or drop. Not in v1 core
 yet — expressible as `Extension` or `Object{format, bytes}` until a decision is made. Resolve before 1.0.
 
-## 3. Canonical Encoding Profile
-Use `SPEC.md` Appendix C verbatim (already authored: integers, value-decidable floats, strings,
-byte-sorted keys/dictionary, decimal, tensor/bitmask, uncompressed identity, extensions, framing
-hygiene, conformance obligations). To be folded in here once §2 is settled.
+## 3. Canonical Encoding Profile (NORMATIVE)
+Exactly **one** canonical byte-string per value (§0.1). A strict decoder MUST `ERR_NON_CANONICAL`-reject
+well-formed-but-non-canonical input (it MUST NOT silently re-canonicalize). The rules live where each
+field is defined; this is the complete index:
+- **Integers / varints** (§2.1, §2.3.1): smallest form — FIXINT/FIXNEG → Int → Uint → BigInt; minimal LEB128.
+- **Float** (§2.3.1): single scalar float = Float64; `−0.0`→`+0.0`; canonical quiet NaN `0x7FF8000000000000`
+  (LE). **No scalar Float32** (§1.1) — f32 is a Tensor dtype only.
+- **Object keys & dictionary** (§2.4): header dict byte-sorted, unique, no unused entries; fields in
+  ascending dictIdx; duplicate ⇒ `ERR_DUPLICATE_KEY`.
+- **Decimal128** (§2.3): coefficient in lowest terms (no trailing-zero coefficient foldable into a smaller
+  scale); `0` = (coeff 0, scale 0).
+- **Strings** (§1.1): valid UTF-8, not Unicode-normalized.
+- **Tensor / Bitmask** (§2.5): little-endian; exact `dataLen`; sub-byte LSB-first; trailing bits zero.
+- **Compression** (§2.2): canonical form is **uncompressed** (flag `0x00`).
+- **Extensions** (§1.3): KEEP byte-exact.
+- **Framing** (§2.10/§2.6): trailing data ⇒ `ERR_TRAILING_DATA`; reserved/unknown tags ⇒ `ERR_RESERVED_TAG`.
+- **Identity:** content address = hash of the canonical, **uncompressed** bytes; file identity = Merkle
+  root over per-value/frame hashes (stream layer).
+- **Bijectivity invariant (MUST):** `canonical_encode(decode(canonical)) == canonical`.
+
+*(Supersedes the legacy `SPEC.md` Appendix C, which still carries the now-removed scalar-Float32 rule.)*
 
 ## 4. Schema fingerprint (NORMATIVE grammar)
 The fingerprint captures **type structure, not values**. It is `FNV-1a-64` over the byte sequence

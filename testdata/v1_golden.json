@@ -1,0 +1,127 @@
+{
+  "null": {
+    "value": null,
+    "canonical_hex": "434f575201000000",
+    "fingerprint64": 12638153115695167455,
+    "fingerprint32": 2248259551
+  },
+  "true": {
+    "value": true,
+    "canonical_hex": "434f575201000002",
+    "fingerprint64": 12638152016183539244,
+    "fingerprint32": 2248259116
+  },
+  "false": {
+    "value": false,
+    "canonical_hex": "434f575201000001",
+    "fingerprint64": 12638152016183539244,
+    "fingerprint32": 2248259116
+  },
+  "int_0": {
+    "value": 0,
+    "canonical_hex": "434f575201000040",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int_1": {
+    "value": 1,
+    "canonical_hex": "434f575201000041",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int_127": {
+    "value": 127,
+    "canonical_hex": "434f5752010000bf",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int_128": {
+    "value": 128,
+    "canonical_hex": "434f5752010000038002",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int_neg1": {
+    "value": -1,
+    "canonical_hex": "434f5752010000e0",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int_neg16": {
+    "value": -16,
+    "canonical_hex": "434f5752010000ef",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int_neg17": {
+    "value": -17,
+    "canonical_hex": "434f57520100000321",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "uint_big": {
+    "value": 9223372036854775813,
+    "canonical_hex": "434f57520100000985808080808080808001",
+    "fingerprint64": 12638154215206795666,
+    "fingerprint32": 2248259986
+  },
+  "float_1_5": {
+    "value": 1.5,
+    "canonical_hex": "434f575201000004000000000000f83f",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "float_zero": {
+    "value": 0.0,
+    "canonical_hex": "434f5752010000040000000000000000",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "str_hi": {
+    "value": "hi",
+    "canonical_hex": "434f575201000005026869",
+    "fingerprint64": 12638149817160282822,
+    "fingerprint32": 2248258246
+  },
+  "arr_123": {
+    "value": [
+      1,
+      2,
+      3
+    ],
+    "canonical_hex": "434f5752010000c3414243",
+    "fingerprint64": 11929433220588446507,
+    "fingerprint32": 753607467
+  },
+  "obj_a1": {
+    "value": {
+      "a": 1
+    },
+    "canonical_hex": "434f57520100010161d10041",
+    "fingerprint64": 9141471042555069906,
+    "fingerprint32": 3355690450
+  },
+  "obj_ba": {
+    "value": {
+      "b": 1,
+      "a": 2
+    },
+    "canonical_hex": "434f575201000201610162d200420141",
+    "fingerprint64": 7784927128986171104,
+    "fingerprint32": 1032173280
+  },
+  "nested": {
+    "value": {
+      "x": [
+        1,
+        2
+      ],
+      "y": {
+        "z": 3
+      }
+    },
+    "canonical_hex": "434f575201000301780179017ad200c2414201d10243",
+    "fingerprint64": 7225598578064645125,
+    "fingerprint32": 3072089093
+  }
+}
