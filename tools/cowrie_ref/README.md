@@ -32,5 +32,6 @@ python -m pytest cowrie_ref/tests  # 32 conformance tests
 ```
 
 ## Scope
-Covers the JSON-expressible Core (Null/Bool/Int/Uint/Float/String/Bytes/Array/Object) plus the header
-and dictionary. Tensor / Bitmask / Decimal128 / UUID / Datetime / Extension are the next additions.
+Covers the **full v1 Core**: Null, Bool, Int, Uint, BigInt, Float, Decimal128, String, Bytes, UUID,
+Datetime, Array, Object, Tensor, Bitmask, Extension — encode + strict decode + fingerprint, with
+32 round-trip-verified golden vectors and anti-malleability rejection across every type.

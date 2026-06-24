@@ -17,8 +17,12 @@ from .decode import decode
 from .encode import encode, encode_value
 from .errors import CowrieError
 from .fingerprint import fingerprint
+from .model import Bitmask, Decimal128, Datetime, Extension, Tensor, Uuid
 
-__all__ = ["encode", "encode_value", "decode", "fingerprint", "CowrieError", "roundtrip_ok"]
+__all__ = [
+    "encode", "encode_value", "decode", "fingerprint", "CowrieError", "roundtrip_ok",
+    "Bitmask", "Decimal128", "Datetime", "Extension", "Tensor", "Uuid",
+]
 __version__ = "0.1.0"
 
 

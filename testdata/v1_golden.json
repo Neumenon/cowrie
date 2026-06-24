@@ -65,6 +65,18 @@
     "fingerprint64": 12638154215206795666,
     "fingerprint32": 2248259986
   },
+  "bigint_pos": {
+    "value": 1180591620717411303424,
+    "canonical_hex": "434f57520100000d09000000000000000040",
+    "fingerprint64": 12638148717648654611,
+    "fingerprint32": 2248257811
+  },
+  "bigint_neg": {
+    "value": -1180591620717411303424,
+    "canonical_hex": "434f57520100000d090000000000000000c0",
+    "fingerprint64": 12638148717648654611,
+    "fingerprint32": 2248257811
+  },
   "float_1_5": {
     "value": 1.5,
     "canonical_hex": "434f575201000004000000000000f83f",
@@ -88,6 +100,60 @@
     "canonical_hex": "434f5752010000050668c3a96c6c6f",
     "fingerprint64": 12638149817160282822,
     "fingerprint32": 2248258246
+  },
+  "bytes_3": {
+    "value": "b'\\x01\\x02\\x03'",
+    "canonical_hex": "434f57520100000803010203",
+    "fingerprint64": 12638161911788193143,
+    "fingerprint32": 2248263031
+  },
+  "decimal_12345_2": {
+    "value": "Decimal128(coefficient=12345, scale=2)",
+    "canonical_hex": "434f57520100000a0439300000000000000000000000000000",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "decimal_zero": {
+    "value": "Decimal128(coefficient=0, scale=0)",
+    "canonical_hex": "434f57520100000a0000000000000000000000000000000000",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "datetime": {
+    "value": "Datetime(nanos=1700000000000000000)",
+    "canonical_hex": "434f57520100000b00002a36fe9c9717",
+    "fingerprint64": 12638164110811449565,
+    "fingerprint32": 2248263901
+  },
+  "uuid": {
+    "value": "Uuid(value=b'\\x00\\x11\"3DUfw\\x88\\x99\\xaa\\xbb\\xcc\\xdd\\xee\\xff')",
+    "canonical_hex": "434f57520100000c00112233445566778899aabbccddeeff",
+    "fingerprint64": 12638160812276564932,
+    "fingerprint32": 2248262596
+  },
+  "tensor_f32_2x3": {
+    "value": "Tensor(dtype=1, shape=(2, 3), data=b'\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00')",
+    "canonical_hex": "434f5752010000200102020318000000000000000000000000000000000000000000000000",
+    "fingerprint64": 11054613467196169288,
+    "fingerprint32": 3917093960
+  },
+  "tensor_scalar_f64": {
+    "value": "Tensor(dtype=12, shape=(), data=b'\\x00\\x00\\x00\\x00\\x00\\x00\\xf0?')",
+    "canonical_hex": "434f5752010000200c0008000000000000f03f",
+    "fingerprint64": 17526860865213275924,
+    "fingerprint32": 2059116308
+  },
+  "bitmask_101": {
+    "value": "Bitmask(bits=(True, False, True))",
+    "canonical_hex": "434f5752010000240305",
+    "fingerprint64": 12638159712764936721,
+    "fingerprint32": 2248262161
+  },
+  "extension": {
+    "value": "Extension(ext_type=7, payload=b'\\xde\\xad')",
+    "canonical_hex": "434f57520100000e0702dead",
+    "fingerprint64": 595461445844064059,
+    "fingerprint32": 3036272443
   },
   "arr_123": {
     "value": [

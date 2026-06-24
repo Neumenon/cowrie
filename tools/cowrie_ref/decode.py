@@ -10,8 +10,9 @@ import struct
 
 from . import model as m
 from .errors import (
-    CowrieError, ERR_INVALID_FIELD_ID, ERR_INVALID_MAGIC, ERR_INVALID_UTF8, ERR_INVALID_VERSION,
-    ERR_NON_CANONICAL, ERR_RESERVED_TAG, ERR_TRAILING_DATA, ERR_TRUNCATED, ERR_UNSUPPORTED_COMPRESSION,
+    CowrieError, ERR_INVALID_FIELD_ID, ERR_INVALID_MAGIC, ERR_INVALID_TAG, ERR_INVALID_UTF8,
+    ERR_INVALID_VERSION, ERR_NON_CANONICAL, ERR_RESERVED_TAG, ERR_TRAILING_DATA, ERR_TRUNCATED,
+    ERR_UNSUPPORTED_COMPRESSION,
 )
 from .varint import decode_svarint, decode_uvarint
 
@@ -105,6 +106,52 @@ class _Decoder:
                 raise self._bad(ERR_INVALID_UTF8)
         if tag == m.T_BYTES:
             return self._take(self._uvarint())
+        if tag == m.T_BIGINT:
+            raw = self._take(self._uvarint())
+            v = int.from_bytes(raw, "little", signed=True)
+            if self.strict:
+                if m.INT64_MIN <= v <= m.UINT64_MAX:
+                    raise self._bad(ERR_NON_CANONICAL, "bigint fits Int/Uint")
+                if raw != m.min_twos_complement_le(v):
+                    raise self._bad(ERR_NON_CANONICAL, "non-minimal bigint")
+            return v
+        if tag == m.T_DECIMAL:
+            scale = self._svarint()
+            coeff = int.from_bytes(self._take(16), "little", signed=True)
+            dec = m.Decimal128(coeff, scale)
+            if self.strict and dec != dec.canonical():
+                raise self._bad(ERR_NON_CANONICAL, "decimal not lowest terms")
+            return dec
+        if tag == m.T_DATETIME:
+            return m.Datetime(struct.unpack("<q", self._take(8))[0])
+        if tag == m.T_UUID:
+            return m.Uuid(self._take(16))
+        if tag == m.T_EXTENSION:
+            ext_type = self._uvarint()
+            return m.Extension(ext_type, self._take(self._uvarint()))
+        if tag == m.T_TENSOR:
+            dtype = self._take(1)[0]
+            if dtype not in m.DTYPE_BITS:
+                raise self._bad(ERR_INVALID_TAG, f"dtype 0x{dtype:02x}")
+            rank = self._take(1)[0]
+            shape = tuple(self._uvarint() for _ in range(rank))
+            nelem = 1
+            for d in shape:
+                nelem *= d
+            bits = nelem * m.DTYPE_BITS[dtype]
+            data = self._take(self._uvarint())
+            if len(data) != (bits + 7) // 8:
+                raise self._bad(ERR_NON_CANONICAL, "tensor dataLen mismatch")
+            if self.strict and bits % 8 and data and data[-1] >> (bits % 8):
+                raise self._bad(ERR_NON_CANONICAL, "tensor sub-byte padding not zero")
+            return m.Tensor(dtype, shape, data)
+        if tag == m.T_BITMASK:
+            count = self._uvarint()
+            data = self._take((count + 7) // 8)
+            if self.strict and count % 8 and data and data[-1] >> (count % 8):
+                raise self._bad(ERR_NON_CANONICAL, "bitmask trailing bits not zero")
+            bits = tuple(bool(data[i >> 3] >> (i & 7) & 1) for i in range(count))
+            return m.Bitmask(bits)
         if tag == m.T_ARRAY or m.FIXARRAY <= tag <= m.FIXARRAY + 15:
             count = (tag - m.FIXARRAY) if tag != m.T_ARRAY else self._uvarint()
             if self.strict and tag == m.T_ARRAY and count <= 15:

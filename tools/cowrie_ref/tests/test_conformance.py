@@ -70,6 +70,29 @@ def test_lenient_accepts_some_noncanonical() -> None:
         assert c.decode(blob, strict=False) == expect, name
 
 
+# strict rejections specific to the extended Core.
+CORE_NON_CANONICAL = {
+    "bigint_fits_int": "434f57520100 000d 01 05",                       # BigInt carrying 5 (fits Int)
+    "decimal_not_lowest": "434f57520100 000a 00 64000000000000000000000000000000",  # 100*10^0 (foldable)
+    "bitmask_trailing_bit": "434f57520100 0024 03 0d",                  # count 3 but bit 3 set
+}
+
+
+@pytest.mark.parametrize("name", list(CORE_NON_CANONICAL))
+def test_strict_rejects_core_noncanonical(name: str) -> None:
+    blob = _hx(CORE_NON_CANONICAL[name])
+    with pytest.raises(c.CowrieError) as ei:
+        c.decode(blob, strict=True)
+    assert ei.value.code == ERR_NON_CANONICAL
+
+
+def test_tensor_datalen_mismatch_rejected() -> None:
+    # Tensor f32 shape [2] needs 8 bytes; give 4 -> rejected even leniently (structural).
+    bad = _hx("434f57520100 0020 01 01 02 04 00000000")
+    with pytest.raises(c.CowrieError):
+        c.decode(bad, strict=False)
+
+
 def test_trailing_data_rejected() -> None:
     blob = c.encode({"a": 1}) + b"\x00"
     with pytest.raises(c.CowrieError) as ei:

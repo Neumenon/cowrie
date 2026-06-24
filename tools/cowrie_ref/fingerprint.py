@@ -33,6 +33,18 @@ def _fp(value: object) -> bytes:
         return bytes([m.FPC["string"]])
     if isinstance(value, (bytes, bytearray)):
         return bytes([m.FPC["bytes"]])
+    if isinstance(value, m.Decimal128):
+        return bytes([m.FPC["decimal"]])
+    if isinstance(value, m.Datetime):
+        return bytes([m.FPC["datetime"]])
+    if isinstance(value, m.Uuid):
+        return bytes([m.FPC["uuid"]])
+    if isinstance(value, m.Bitmask):
+        return bytes([m.FPC["bitmask"]])
+    if isinstance(value, m.Tensor):  # §4.2: dtype + rank + shape are type structure
+        return bytes([m.FPC["tensor"], value.dtype, len(value.shape)]) + b"".join(encode_uvarint(d) for d in value.shape)
+    if isinstance(value, m.Extension):  # §4.2: extType is structure, payload excluded
+        return bytes([m.FPC["extension"]]) + encode_uvarint(value.ext_type)
     if isinstance(value, list):
         return bytes([m.FPC["array"]]) + encode_uvarint(len(value)) + b"".join(_fp(x) for x in value)
     if isinstance(value, dict):

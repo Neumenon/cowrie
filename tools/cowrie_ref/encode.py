@@ -40,7 +40,8 @@ def encode_value(value: object, dict_index: dict[str, int]) -> bytes:
             return bytes([m.T_INT]) + encode_svarint(value)
         if domain == "uint":
             return bytes([m.T_UINT]) + encode_uvarint(value)
-        raise ValueError("BigInt is outside the current reference subset")
+        tc = m.min_twos_complement_le(value)  # BigInt
+        return bytes([m.T_BIGINT]) + encode_uvarint(len(tc)) + tc
     if isinstance(value, float):
         if value == 0.0:
             value = 0.0  # normalize -0.0 -> +0.0 (§3)
@@ -50,6 +51,34 @@ def encode_value(value: object, dict_index: dict[str, int]) -> bytes:
         return bytes([m.T_STRING]) + encode_uvarint(len(raw)) + raw
     if isinstance(value, (bytes, bytearray)):
         return bytes([m.T_BYTES]) + encode_uvarint(len(value)) + bytes(value)
+    if isinstance(value, m.Decimal128):
+        d = value.canonical()
+        return bytes([m.T_DECIMAL]) + encode_svarint(d.scale) + d.coefficient.to_bytes(16, "little", signed=True)
+    if isinstance(value, m.Datetime):
+        return bytes([m.T_DATETIME]) + struct.pack("<q", value.nanos)
+    if isinstance(value, m.Uuid):
+        if len(value.value) != 16:
+            raise ValueError("UUID must be 16 bytes")
+        return bytes([m.T_UUID]) + value.value
+    if isinstance(value, m.Extension):
+        return bytes([m.T_EXTENSION]) + encode_uvarint(value.ext_type) + encode_uvarint(len(value.payload)) + value.payload
+    if isinstance(value, m.Tensor):
+        nelem = 1
+        for d in value.shape:
+            nelem *= d
+        want = (nelem * m.DTYPE_BITS[value.dtype] + 7) // 8
+        if len(value.data) != want:
+            raise ValueError(f"tensor dataLen {len(value.data)} != expected {want}")
+        out = bytes([m.T_TENSOR, value.dtype, len(value.shape)])
+        out += b"".join(encode_uvarint(d) for d in value.shape)
+        return out + encode_uvarint(len(value.data)) + value.data
+    if isinstance(value, m.Bitmask):
+        count = len(value.bits)
+        buf = bytearray((count + 7) // 8)
+        for i, bit in enumerate(value.bits):
+            if bit:
+                buf[i >> 3] |= 1 << (i & 7)  # LSB-first
+        return bytes([m.T_BITMASK]) + encode_uvarint(count) + bytes(buf)
     if isinstance(value, list):
         body = b"".join(encode_value(item, dict_index) for item in value)
         head = bytes([m.FIXARRAY + len(value)]) if len(value) <= 15 else bytes([m.T_ARRAY]) + encode_uvarint(len(value))
