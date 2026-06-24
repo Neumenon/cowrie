@@ -26,8 +26,8 @@ func EncodeFramed(v *Value, comp Compression) ([]byte, error) {
 		return raw, nil
 	}
 
-	// Extract payload (skip 4-byte header)
-	payload := raw[4:]
+	// Extract payload (skip 6-byte header: COWR + version + compression byte)
+	payload := raw[6:]
 
 	// Compress
 	var compressed []byte
@@ -53,12 +53,13 @@ func EncodeFramed(v *Value, comp Compression) ([]byte, error) {
 	// Build framed output
 	var buf buffer
 
-	// Header with compression flag
-	flags := byte(FlagCompressed) | byte((comp&0x03)<<1)
+	// Header (§2.2): COWR + version + single compression byte (1=gzip, 2=zstd)
 	buf.writeByte(Magic0)
 	buf.writeByte(Magic1)
+	buf.writeByte(Magic2)
+	buf.writeByte(Magic3)
 	buf.writeByte(Version)
-	buf.writeByte(flags)
+	buf.writeByte(byte(comp))
 
 	// Original uncompressed length
 	buf.writeUvarint(uint64(len(payload)))
@@ -79,32 +80,29 @@ func DecodeFramed(data []byte) (*Value, error) {
 
 // DecodeFramedWithLimit decodes with automatic decompression and custom size limit.
 func DecodeFramedWithLimit(data []byte, maxDecompressedSize int) (*Value, error) {
-	if len(data) < 4 {
+	if len(data) < 6 {
 		return nil, ErrUnexpectedEOF
 	}
 
-	// Check magic
-	if data[0] != Magic0 || data[1] != Magic1 {
+	// Check magic (COWR) + version + compression byte (§2.2)
+	if data[0] != Magic0 || data[1] != Magic1 || data[2] != Magic2 || data[3] != Magic3 {
 		return nil, ErrInvalidMagic
 	}
-
-	// Check version
-	if data[2] != Version {
+	if data[4] != Version {
 		return nil, ErrInvalidVersion
 	}
 
-	flags := data[3]
+	compByte := data[5]
 
 	// Not compressed? Use regular decode
-	if flags&FlagCompressed == 0 {
+	if compByte == 0 {
 		return Decode(data)
 	}
 
-	// Extract compression type
-	compType := Compression((flags >> 1) & 0x03)
+	compType := Compression(compByte)
 
 	// Read original length
-	origLen, n := binary.Uvarint(data[4:])
+	origLen, n := binary.Uvarint(data[6:])
 	if n <= 0 {
 		return nil, ErrUnexpectedEOF
 	}
@@ -116,7 +114,7 @@ func DecodeFramedWithLimit(data []byte, maxDecompressedSize int) (*Value, error)
 		return nil, ErrDecompressedTooLarge
 	}
 
-	compressed := data[4+n:]
+	compressed := data[6+n:]
 
 	// Decompress
 	var decompressed []byte
@@ -140,12 +138,14 @@ func DecodeFramedWithLimit(data []byte, maxDecompressedSize int) (*Value, error)
 	}
 
 	// Reconstruct full message: header + decompressed payload
-	full := make([]byte, 4+len(decompressed))
+	full := make([]byte, 6+len(decompressed))
 	full[0] = Magic0
 	full[1] = Magic1
-	full[2] = Version
-	full[3] = 0 // no compression
-	copy(full[4:], decompressed)
+	full[2] = Magic2
+	full[3] = Magic3
+	full[4] = Version
+	full[5] = 0 // no compression
+	copy(full[6:], decompressed)
 
 	return Decode(full)
 }

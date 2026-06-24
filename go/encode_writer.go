@@ -23,8 +23,10 @@ func EncodeToWriter(w io.Writer, v *Value) error {
 
 	hdr.writeByte(Magic0)
 	hdr.writeByte(Magic1)
+	hdr.writeByte(Magic2)
+	hdr.writeByte(Magic3)
 	hdr.writeByte(Version)
-	hdr.writeByte(0) // flags
+	hdr.writeByte(0) // compression = none
 
 	hdr.writeUvarint(uint64(len(d.keys)))
 	for _, key := range d.keys {

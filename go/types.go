@@ -21,11 +21,13 @@ package cowrie
 
 import "unsafe"
 
-// Wire format constants
+// Wire format constants (SPEC-v1 §2.2: magic "COWR" + version 0x01)
 const (
-	Magic0  = 'S'
-	Magic1  = 'J'
-	Version = 2
+	Magic0  = 'C'
+	Magic1  = 'O'
+	Magic2  = 'W'
+	Magic3  = 'R'
+	Version = 1
 )
 
 // Flag bits

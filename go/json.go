@@ -530,6 +530,10 @@ func fromAnyStrict(v any) *Value {
 		if err == nil {
 			return Int64(i)
 		}
+		// Non-negative values in (Int64Max, Uint64Max] are Uint (SPEC-v1 §1.1/§2.3.1)
+		if u, err := strconv.ParseUint(x.String(), 10, 64); err == nil {
+			return Uint64(u)
+		}
 		// Try as big int
 		bi := new(big.Int)
 		bi.SetString(x.String(), 10)
@@ -616,6 +620,10 @@ func fromAnyEnriched(v any, hints map[string]Type) *Value {
 		i, err := x.Int64()
 		if err == nil {
 			return Int64(i)
+		}
+		// Non-negative values in (Int64Max, Uint64Max] are Uint (SPEC-v1 §1.1/§2.3.1)
+		if u, err := strconv.ParseUint(x.String(), 10, 64); err == nil {
+			return Uint64(u)
 		}
 		// Try as big int
 		bi := new(big.Int)
@@ -1120,7 +1128,20 @@ func formatUUID(uuid [16]byte) string {
 //   - Negative: compute the two's-complement representation by taking the
 //     absolute value, inverting all bits, and adding one. If the resulting top
 //     bit is not set (would be misread as positive) we prepend 0xFF.
+func reverseBytes(b []byte) []byte {
+	out := make([]byte, len(b))
+	for i, v := range b {
+		out[len(b)-1-i] = v
+	}
+	return out
+}
+
+// bigIntToTwosComplement returns minimal-length LITTLE-ENDIAN two's-complement (SPEC-v1 §2.3).
 func bigIntToTwosComplement(n *big.Int) []byte {
+	return reverseBytes(bigIntToTwosComplementBE(n))
+}
+
+func bigIntToTwosComplementBE(n *big.Int) []byte {
 	switch n.Sign() {
 	case 0:
 		return []byte{0x00}
@@ -1171,6 +1192,10 @@ func bigIntToTwosComplement(n *big.Int) []byte {
 // The high bit of b[0] is the sign bit: 0 = non-negative, 1 = negative.
 // An empty slice is treated as zero.
 func bigIntFromTwosComplement(b []byte) *big.Int {
+	return bigIntFromTwosComplementBE(reverseBytes(b))
+}
+
+func bigIntFromTwosComplementBE(b []byte) *big.Int {
 	if len(b) == 0 {
 		return new(big.Int)
 	}

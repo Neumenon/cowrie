@@ -494,7 +494,15 @@ func decode(r *reader) (*Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	if magic0 != Magic0 || magic1 != Magic1 {
+	magic2, err := r.readByte()
+	if err != nil {
+		return nil, err
+	}
+	magic3, err := r.readByte()
+	if err != nil {
+		return nil, err
+	}
+	if magic0 != Magic0 || magic1 != Magic1 || magic2 != Magic2 || magic3 != Magic3 {
 		return nil, ErrInvalidMagic
 	}
 

@@ -208,11 +208,13 @@ func encode(buf *buffer, v *Value) error {
 	d := newDict()
 	collectKeys(v, d)
 
-	// Write header
+	// Write header (SPEC-v1 §2.2: COWR + version + compression byte)
 	buf.writeByte(Magic0)
 	buf.writeByte(Magic1)
+	buf.writeByte(Magic2)
+	buf.writeByte(Magic3)
 	buf.writeByte(Version)
-	buf.writeByte(0) // flags = 0 (no compression)
+	buf.writeByte(0) // compression = none (0x00)
 
 	// Write dictionary
 	buf.writeUvarint(uint64(len(d.keys)))
