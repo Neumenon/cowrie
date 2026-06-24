@@ -69,7 +69,8 @@ gate's "semantic AST equality" uses.
 ### 1.3 Extension (forward-compat boundary)
 - **Extension** = (extType ∈ uvarint, payload = opaque bytes). The ONLY sanctioned growth path.
 - Decoders preserve unknown extensions byte-for-byte (KEEP). Two Extensions are equal iff equal
-  (extType, payload). Fingerprint contribution is a **fixed sentinel** (§4), never extType/payload.
+  (extType, payload). Fingerprint contribution is `uvarint(extType)` (§4) — structural and
+  decoder-independent; the payload is never hashed/recursed.
 
 > **Deliberately excluded** from the v1 value model (were in the legacy spec; cut on coherence
 > grounds — see clean-room verdict): Graph/Node/Edge/GraphShard/AdjList, GNN batches, RichText,
@@ -202,6 +203,11 @@ hygiene, conformance obligations). To be folded in here once §2 is settled.
 The fingerprint captures **type structure, not values**. It is `FNV-1a-64` over the byte sequence
 produced by `fp(value)` below. The contribution bytes use a **dedicated, spec-pinned fingerprint-code
 table** — NOT the wire tag and NOT any host-language enum/`iota` (binding to `iota` is the B4 root bug).
+All `uvarint(...)` below use the §2.1 minimal-LEB128 encoding. `fp` operates on the **abstract value model
+of §1.1**, never the wire form: a value encoded as FIXINT, `Int`, or `Uint` all route to the FPC of their
+§1.1 domain (`5` is always `Int`/0x02). FPC bytes are a **separate namespace** from wire tags — any numeric
+coincidence (e.g. Null=0x00) is incidental. Object keys are byte-lexicographically sorted *before* emitting
+their element fps.
 
 ### 4.1 Fingerprint codes (FPC) — frozen, append-only
 ```
@@ -216,10 +222,14 @@ Note: `Int`, `Uint`, `BigInt` are **distinct** FPCs (a schema's number width is 
 - **Array:** `0x0B` + `uvarint(len)` + `fp(eᵢ)` for each element in order. (So `[Int,String]` ≠ `[Int,Int]`.)
 - **Object:** `0x0C` + `uvarint(nKeys)` + for each key in **byte-sorted** order: `uvarint(keyLen)` +
   key UTF-8 bytes + `fp(value)`. (Keys + value-types; order canonical.)
-- **Tensor:** `0x0D` + `dtype:u8` + `rank:u8`. (dtype and rank are structure; shape *values* are not.)
+- **Tensor:** `0x0D` + `dtype:u8` + `rank:u8` + `uvarint(dimᵢ)` for each dim in order. (dtype, rank,
+  **and shape** are all type structure for a tensor — `[3]` ≠ `[3,4]` ≠ `[2,3]`. This is the one place a
+  "shape" is structural, unlike scalar values elsewhere.)
 - **Bitmask:** `0x0E`.
-- **Extension:** `0x0F` + the **fixed sentinel** `0x00` — never the `extType` or payload (per §1.3/K12),
-  so an unknown future extension never perturbs the fingerprint of documents that merely carry it.
+- **Extension:** `0x0F` + `uvarint(extType)`. The `extType` is stable type structure — read identically by
+  every decoder whether or not it *understands* the extension — and keeps extension routing/type-checking.
+  The **payload is excluded** (never recursed). (This also fixes B4's Go-includes-extType / TS-excludes split
+  by making inclusion normative.)
 
 ### 4.3 Computation
 ```
