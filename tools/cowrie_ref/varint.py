@@ -48,6 +48,9 @@ def decode_uvarint(data: bytes, pos: int) -> tuple[int, int]:
             # minimality: the final byte must be non-zero unless the value is the single byte 0x00.
             if byte == 0 and pos - start > 1:
                 raise CowrieError(ERR_INVALID_VARINT, "overlong varint")
+            # 64-bit overflow: minimality does NOT catch a 10-byte form with bits past bit 63.
+            if result > 0xFFFFFFFFFFFFFFFF:
+                raise CowrieError(ERR_INVALID_VARINT, "uvarint overflows 64 bits")
             return result, pos
         shift += 7
 

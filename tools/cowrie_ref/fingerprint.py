@@ -39,8 +39,8 @@ def _fp(value: object) -> bytes:
         return bytes([m.FPC["datetime"]])
     if isinstance(value, m.Uuid):
         return bytes([m.FPC["uuid"]])
-    if isinstance(value, m.Bitmask):
-        return bytes([m.FPC["bitmask"]])
+    if isinstance(value, m.Bitmask):  # §4.2: collection sizes are structural
+        return bytes([m.FPC["bitmask"]]) + encode_uvarint(len(value.bits))
     if isinstance(value, m.Tensor):  # §4.2: dtype + rank + shape are type structure
         return bytes([m.FPC["tensor"], value.dtype, len(value.shape)]) + b"".join(encode_uvarint(d) for d in value.shape)
     if isinstance(value, m.Extension):  # §4.2: extType is structure, payload excluded

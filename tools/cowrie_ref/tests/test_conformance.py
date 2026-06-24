@@ -100,6 +100,15 @@ def test_trailing_data_rejected() -> None:
     assert ei.value.code == ERR_TRAILING_DATA
 
 
+def test_uvarint_64bit_overflow_rejected() -> None:
+    # String length = 2**64 (10-byte uvarint, minimal but overflows 64 bits) -> ERR_INVALID_VARINT.
+    from cowrie_ref.varint import encode_uvarint
+    blob = _hx("434f57520100 0005") + bytes([0x80]*9 + [0x02])  # tag String + uvarint(2**64)
+    with pytest.raises(c.CowrieError) as ei:
+        c.decode(blob, strict=False)
+    assert ei.value.code == "ERR_INVALID_VARINT"
+
+
 def test_bad_magic_rejected() -> None:
     with pytest.raises(c.CowrieError) as ei:
         c.decode(b"XXXX\x01\x00\x00\x00")

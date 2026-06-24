@@ -53,7 +53,7 @@ gate's "semantic AST equality" uses.
 | **Uint** | ℤ ∩ [2⁶³, 2⁶⁴−1] | ONLY values above Int's range; values ≤ 2⁶³−1 are **Int**, never Uint (canonical disjointness) |
 | **BigInt** | ℤ outside [−2⁶³, 2⁶⁴−1] | arbitrary-precision; smaller integers are Int/Uint, never BigInt |
 | **Float** | IEEE-754 binary64 | `−0.0`≡`+0.0`; exactly one canonical quiet NaN; ±∞ allowed. **One scalar float type only** — no scalar f32 (bulk f32 lives in Tensor, §1.2). This deletes the K10 dual-encode ambiguity at the source: one wire form per float value. |
-| **Decimal128** | (coefficient ∈ ℤ∩[−2¹²⁷,2¹²⁷−1], scale ∈ ℤ) in lowest terms | canonical: no trailing-zero coefficient foldable into a smaller scale; 0 ≡ (coeff 0, scale 0) |
+| **Decimal128** | `value = coefficient × 10^(−scale)`; coefficient ∈ ℤ∩[−2¹²⁷,2¹²⁷−1], **scale ∈ int64** (svarint) | **Canonical = lowest terms:** while coefficient ≠ 0 and `coefficient mod 10 == 0`, divide coefficient by 10 and **decrement scale**; `0 ≡ (coeff 0, scale 0)`. Two values equal iff equal canonical `(coeff, scale)`. **NB:** this is a `(coeff, 10^−scale)` decimal, **not** IEEE-754 decimal128 (BID/DPD) — different format despite the name. |
 | **String** | finite sequences of Unicode scalar values, valid UTF-8 | NOT Unicode-normalized (byte-preserving) |
 | **Bytes** | finite byte sequences | — |
 | **UUID** | 128-bit | byte order per §2 (RFC-4122 big-endian) |
@@ -84,8 +84,10 @@ deferred decision, §2.9.)
 
 ### 2.1 Varints
 - **uvarint** = unsigned LEB128, little-endian groups, 7 bits/byte, MSB=continuation. MUST be
-  **minimal** (no trailing all-zero continuation) and **≤ 10 bytes** (a 64-bit value). Overlong or
-  >10 bytes ⇒ `ERR_INVALID_VARINT`. Used for all lengths, counts, dict indices, dims.
+  **minimal** (no trailing all-zero continuation), **≤ 10 bytes**, AND **MUST NOT overflow 64 bits**:
+  a 10-byte uvarint whose final group sets any bit above bit 63 ⇒ `ERR_INVALID_VARINT` (minimality alone
+  does not catch overflow). Overlong/over-length/overflow ⇒ `ERR_INVALID_VARINT`. Used for all lengths,
+  counts, dict indices, dims.
 - **svarint** = zigzag(`(n<<1) ^ (n>>63)`) then uvarint. Used by Int64 (0x03).
 
 ### 2.2 Stream header
@@ -170,13 +172,17 @@ COWR (0x43 0x4F 0x57 0x52) | version:u8 (0x01) | compression:u8 | DictLen:uvarin
   e₀ occupies the lowest `bits_per_elem` bits of byte 0, e₁ the next, crossing byte boundaries with no
   per-element padding. The final byte's unused high bits MUST be 0 (non-zero ⇒ `ERR_NON_CANONICAL`).
   Unknown dtype byte ⇒ `ERR_INVALID_TAG`.
+- **dtype names are NOMINAL.** Core defines only bit-width + packing + dataLen for each dtype; the
+  *numeric interpretation* of element bits (e.g. what QINT2 quantization means, or the meaning of
+  Ternary's unused 4th 2-bit code) is a **Profile** concern, not Core-observable (§0.1). Two impls
+  may interpret a dtype differently and both pass Core conformance — Core only fixes the byte layout.
 
 ### 2.6 Error codes (canonical) + precedence
 Existing: `ERR_INVALID_MAGIC, ERR_INVALID_VERSION, ERR_TRUNCATED, ERR_INVALID_TAG, ERR_TRAILING_DATA,
 ERR_INVALID_UTF8, ERR_INVALID_VARINT, ERR_INVALID_FIELD_ID, ERR_TOO_DEEP, ERR_TOO_LARGE,
 ERR_DICT_TOO_LARGE, ERR_STRING_TOO_LARGE, ERR_BYTES_TOO_LARGE, ERR_EXT_TOO_LARGE, ERR_RANK_TOO_LARGE,
-ERR_UNSUPPORTED_COMPRESSION, ERR_DECOMPRESSED_TOO_LARGE, ERR_DECOMPRESSED_MISMATCH, ERR_UNKNOWN_EXTENSION,
-ERR_INVALID_AUDIO_RATE, ERR_INVALID_AUDIO_CHANNELS`.
+ERR_UNSUPPORTED_COMPRESSION, ERR_DECOMPRESSED_TOO_LARGE, ERR_DECOMPRESSED_MISMATCH, ERR_UNKNOWN_EXTENSION`.
+*(Audio-specific codes removed — audio is deferred, §2.9.)*
 **Added (normative):** `ERR_RESERVED_TAG`, `ERR_DUPLICATE_KEY`, `ERR_NON_CANONICAL` (strict mode), `ERR_INVALID_PADDING`.
 **Precedence** (first applicable wins): magic/version → truncation → varint validity → tag validity
 (reserved/unknown) → limit checks (depth/size) → UTF-8/field-id/dtype validity → duplicate-key →
@@ -184,7 +190,9 @@ canonical-form violations (`ERR_NON_CANONICAL`) → trailing data.
 
 ### 2.7 Limits (normative constants for conformance)
 MaxDepth 1000 · MaxArray/MaxObject 1,000,000 · MaxString 10MB · MaxBytes 50MB · MaxExt 1MB ·
-MaxDict 1,000,000 · MaxRank 32. Sizes count **decoded** bytes. Overrides are out-of-conformance.
+MaxDict 1,000,000 · MaxRank 32 · **MaxTensorBytes 16 GiB** (`dataLen` ≤ 2³⁴; the format exists for
+model-scale tensors, so this is large but MUST be bounded — an unbounded `dataLen` is a DoS surface).
+Sizes count **decoded** bytes. Overrides are out-of-conformance.
 
 ### 2.8 Streaming note (acknowledged constraint)
 The header dictionary forces a buffering pre-pass on encode (collect+sort all keys before byte 0 of
@@ -211,16 +219,23 @@ field is defined; this is the complete index:
 - **Compression** (§2.2): canonical form is **uncompressed** (flag `0x00`).
 - **Extensions** (§1.3): KEEP byte-exact.
 - **Framing** (§2.6): trailing data ⇒ `ERR_TRAILING_DATA`; reserved/unknown tags ⇒ `ERR_RESERVED_TAG`.
-- **Identity:** content address = hash of the canonical, **uncompressed** bytes; file identity = Merkle
-  root over per-value/frame hashes (stream layer).
+- **Identity (per value):** content address = **SHA-256** of the canonical, **uncompressed** value bytes,
+  emitted as a **multihash** (`0x12 0x20` prefix + the 32 hash bytes) so the algorithm can rotate post-1.0.
+  This is the *only* identity v1 defines. **File-level identity (a Merkle root over many values/frames) is
+  DEFERRED** to the not-yet-specified stream/dataset layer — v1 makes no file-identity claim.
 - **Bijectivity invariant (MUST):** `canonical_encode(decode(canonical)) == canonical`.
 
 *(Supersedes the legacy `SPEC.md` Appendix C, which still carries the now-removed scalar-Float32 rule.)*
 
-## 4. Schema fingerprint (NORMATIVE grammar)
-The fingerprint captures **type structure, not values**. It is `FNV-1a-64` over the byte sequence
-produced by `fp(value)` below. The contribution bytes use a **dedicated, spec-pinned fingerprint-code
-table** — NOT the wire tag and NOT any host-language enum/`iota` (binding to `iota` is the B4 root bug).
+## 4. Structural fingerprint (NORMATIVE grammar)
+This is a **structural (shape) fingerprint**, NOT a value-independent declaration-level schema identity —
+be precise about what equality means. Two values share a fingerprint iff they have **identical shape up to
+scalar values within a variant**: same array lengths, same tensor shapes, same Bitmask counts, same Object
+key sets, the same integer **magnitude class** (Int vs Uint vs BigInt, decided by magnitude per §1.1), and
+the same variant otherwise. Consequences to know: `{n:5}` and `{n:2⁶³}` differ (Int vs Uint); a 1000-element
+array differs from a 1001-element one. It is excellent for routing/drift on **homogeneous** streams; it is
+**not** a column-schema hash. — It is `FNV-1a-64` over the bytes produced by `fp(value)` below, using a
+**spec-pinned fingerprint-code table** — NOT the wire tag and NOT any host enum/`iota` (the B4 root bug).
 All `uvarint(...)` below use the §2.1 minimal-LEB128 encoding. `fp` operates on the **abstract value model
 of §1.1**, never the wire form: a value encoded as FIXINT, `Int`, or `Uint` all route to the FPC of their
 §1.1 domain (`5` is always `Int`/0x02). FPC bytes are a **separate namespace** from wire tags — any numeric
@@ -233,7 +248,8 @@ Null 0x00  Bool 0x01  Int 0x02  Uint 0x03  BigInt 0x04  Float 0x05  Decimal128 0
 String 0x07  Bytes 0x08  UUID 0x09  Datetime 0x0A  Array 0x0B  Object 0x0C  Tensor 0x0D
 Bitmask 0x0E  Extension 0x0F
 ```
-Note: `Int`, `Uint`, `BigInt` are **distinct** FPCs (a schema's number width is part of its type).
+Note: `Int`/`Uint`/`BigInt` are **distinct** FPCs — but the boundary is **magnitude** (§1.1), so this
+deliberately leaks value into the fingerprint (see the §4 framing on shape-not-schema).
 
 ### 4.2 `fp(value)` → bytes
 - **Scalars** (Null…Datetime): the single FPC byte. (No value bytes — structure only.)
@@ -243,7 +259,8 @@ Note: `Int`, `Uint`, `BigInt` are **distinct** FPCs (a schema's number width is 
 - **Tensor:** `0x0D` + `dtype:u8` + `rank:u8` + `uvarint(dimᵢ)` for each dim in order. (dtype, rank,
   **and shape** are all type structure for a tensor — `[3]` ≠ `[3,4]` ≠ `[2,3]`. This is the one place a
   "shape" is structural, unlike scalar values elsewhere.)
-- **Bitmask:** `0x0E`.
+- **Bitmask:** `0x0E` + `uvarint(count)`. (Collection sizes are uniformly structural — consistent with
+  Array length and Tensor shape; previously Bitmask omitted its count, an inconsistency now fixed.)
 - **Extension:** `0x0F` + `uvarint(extType)`. The `extType` is stable type structure — read identically by
   every decoder whether or not it *understands* the extension — and keeps extension routing/type-checking.
   The **payload is excluded** (never recursed). (This also fixes B4's Go-includes-extType / TS-excludes split
@@ -300,8 +317,9 @@ but MUST NOT depend on external state to *decode* (per §0.1). Profiles live in 
 A pointer to a tensor stored elsewhere, expressed as an Object:
 ```
 TensorRef = Object{
-  hash:    Bytes,        // SHA-256 of the referenced tensor's CANONICAL bytes  ← the identity
-  dtype:   String,       // DType name, e.g. "Float32"
+  hash:    Bytes,        // multihash SHA-256 of the referenced tensor's CANONICAL bytes (§3)  ← the identity
+  dtype:   String,       // canonical §2.5 dtype name, LOWERCASE only: "float32","float16","bfloat16",
+                         //   "int8".."uint64","float64","bool","qint4","qint2","qint3","ternary","binary"
   shape:   Array<Int>,
   byteLen: Int,
   store:   String?       // OPTIONAL URI HINT only

@@ -146,8 +146,8 @@
   "bitmask_101": {
     "value": "Bitmask(bits=(True, False, True))",
     "canonical_hex": "434f5752010000240305",
-    "fingerprint64": 12638159712764936721,
-    "fingerprint32": 2248262161
+    "fingerprint64": 596424618030187670,
+    "fingerprint32": 3036464278
   },
   "extension": {
     "value": "Extension(ext_type=7, payload=b'\\xde\\xad')",
