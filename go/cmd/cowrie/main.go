@@ -201,13 +201,26 @@ func decodeCmd(args []string) {
 // Used by the cross-language identity gate: encode(decode(wire)) must be byte-identical
 // across Go/Rust/Python/TS. JSON-projection-independent — tests identity, not display.
 func recodeCmd(args []string) {
-	_ = args
+	fs := flag.NewFlagSet("recode", flag.ExitOnError)
+	strict := fs.Bool("strict", false, "Strict-decode mode (§5.3): reject non-canonical input")
+	fs.Parse(args)
+
+	// STRICT=1 env also enables strict mode (parity with cross-language harness).
+	if v := os.Getenv("STRICT"); v == "1" || v == "true" {
+		*strict = true
+	}
+
 	input, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
 		os.Exit(1)
 	}
-	val, err := cowrie.DecodeFramed(input)
+	var val *cowrie.Value
+	if *strict {
+		val, err = cowrie.DecodeFramedStrict(input)
+	} else {
+		val, err = cowrie.DecodeFramed(input)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
 		os.Exit(1)

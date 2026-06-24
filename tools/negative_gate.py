@@ -27,10 +27,12 @@ RUST = os.environ.get("RUST_RECODE", os.path.join(ROOT, "rust/target/release/exa
 TS_DIR = os.path.join(ROOT, "typescript")
 TSX = os.path.join(TS_DIR, "node_modules/.bin/tsx")
 
+STRICT = "--strict" in sys.argv
+_S = ["--strict"] if STRICT else []
 IMPLS = {
-    "go":   ([GO_CLI, "recode"], None),
-    "rust": ([RUST], None),
-    "ts":   ([TSX, "recode.ts"], TS_DIR),
+    "go":   ([GO_CLI, "recode", *_S], None),
+    "rust": ([RUST, *_S], None),
+    "ts":   ([TSX, "recode.ts", *_S], TS_DIR),
 }
 
 
@@ -42,7 +44,8 @@ def behavior(cmd: list[str], raw: bytes, cwd: str | None) -> str:
 
 
 def main() -> int:
-    print(f"Negative / anti-malleability gate — {len(NEG)} fixtures\n")
+    mode = "STRICT (§5.3)" if STRICT else "lenient (default decode)"
+    print(f"Negative / anti-malleability gate [{mode}] — {len(NEG)} fixtures\n")
     print(f"{'fixture':22}{'tier':14}{'go':>11}{'rust':>11}{'ts':>11}")
     hard_fail = False
     strict_gap = 0
@@ -52,21 +55,25 @@ def main() -> int:
         for lang, (cmd, cwd) in IMPLS.items():
             b = behavior(cmd, raw, cwd)
             row[lang] = b
-            if fx["tier"] == "malformed" and b != "REJECT":
-                hard_fail = True  # malformed input MUST be rejected by every decoder
-            if fx["tier"] == "non-canonical" and b != "REJECT":
-                strict_gap += 1   # lenient: NORMALIZE (canonicalizes) or ACCEPT (echoes non-canonical)
+            # malformed: must always reject. non-canonical: must reject IN STRICT mode.
+            if (fx["tier"] == "malformed" or STRICT) and b != "REJECT":
+                hard_fail = True
+            if not STRICT and fx["tier"] == "non-canonical" and b != "REJECT":
+                strict_gap += 1
         print(f"{name:22}{fx['tier']:14}{row['go']:>11}{row['rust']:>11}{row['ts']:>11}")
 
     print()
-    if hard_fail:
-        print("❌ HARD FAIL: a malformed fixture was not rejected by some decoder.")
+    if STRICT:
+        if hard_fail:
+            print("❌ HARD FAIL: some fixture was NOT rejected in strict mode (non-canonical leaked through).")
+        else:
+            print("✅ STRICT: every malformed AND non-canonical fixture rejected by all three decoders (§5.3).")
     else:
-        print("✅ malformed fixtures rejected by every decoder.")
-    if strict_gap:
-        print(f"⚠️  STRICT-MODE GAP: {strict_gap} non-canonical cases were NORMALIZED (not rejected) by a")
-        print("   lenient decoder. SPEC-v1 §5.3 wants strict decoders to REJECT these. Go/Rust/TS need a")
-        print("   strict decode mode to fully conform on negatives; the Python reference already does.")
+        print("❌ HARD FAIL: a malformed fixture was not rejected." if hard_fail
+              else "✅ malformed fixtures rejected by every decoder.")
+        if strict_gap:
+            print(f"⚠️  STRICT-MODE GAP: {strict_gap} non-canonical cases NORMALIZED/ACCEPTED by lenient decode.")
+            print("   Run with --strict to verify the strict decoders reject them (SPEC-v1 §5.3).")
     return 1 if hard_fail else 0
 
 

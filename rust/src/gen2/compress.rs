@@ -2,7 +2,7 @@
 //!
 //! Provides framed encoding/decoding with optional gzip or zstd compression.
 
-use super::decode::decode;
+use super::decode::{decode, decode_with_options, DecodeOptions};
 use super::encode::encode;
 use super::types::{CowrieError, Value};
 use crate::{MAGIC, VERSION};
@@ -73,8 +73,32 @@ pub fn decode_framed(data: &[u8]) -> Result<Value, CowrieError> {
     decode_framed_with_limit(data, 100 * 1024 * 1024) // 100MB default limit
 }
 
+/// Decode a framed Cowrie value in STRICT mode (SPEC-v1 §5.3): well-formed-but-non-canonical
+/// input is rejected with `CowrieError::NonCanonical`. Canonical input behaves identically
+/// to `decode_framed`.
+pub fn decode_framed_strict(data: &[u8]) -> Result<Value, CowrieError> {
+    decode_framed_inner(data, 100 * 1024 * 1024, true)
+}
+
 /// Decode a framed Cowrie value with a maximum decompressed size limit.
 pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, CowrieError> {
+    decode_framed_inner(data, max_size, false)
+}
+
+fn decode_framed_inner(data: &[u8], max_size: usize, strict: bool) -> Result<Value, CowrieError> {
+    let decode_payload = |bytes: &[u8]| -> Result<Value, CowrieError> {
+        if strict {
+            decode_with_options(
+                bytes,
+                &DecodeOptions {
+                    strict: true,
+                    ..DecodeOptions::default()
+                },
+            )
+        } else {
+            decode(bytes)
+        }
+    };
     if data.len() < 6 {
         return Err(CowrieError::Truncated);
     }
@@ -91,7 +115,7 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, C
 
     if comp_byte == 0 {
         // Not compressed, decode directly
-        return decode(data);
+        return decode_payload(data);
     }
 
     // Compression type from the compression byte (1=gzip, 2=zstd)
@@ -142,7 +166,7 @@ pub fn decode_framed_with_limit(data: &[u8], max_size: usize) -> Result<Value, C
     full.push(0); // compression = none
     full.extend_from_slice(&decompressed);
 
-    decode(&full)
+    decode_payload(&full)
 }
 
 fn compress_gzip(data: &[u8]) -> Result<Vec<u8>, CowrieError> {

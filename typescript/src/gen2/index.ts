@@ -46,6 +46,81 @@ export class SecurityLimitExceeded extends Error {
   }
 }
 
+/**
+ * A decode failure carrying a stable SPEC-v1 §2.6 error code. Strict decode raises this with
+ * code ERR_NON_CANONICAL when well-formed-but-non-canonical input is encountered (§5.3).
+ */
+export class CowrieError extends Error {
+  code: string;
+  constructor(code: string, detail = '') {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = 'CowrieError';
+    this.code = code;
+  }
+}
+
+export const ERR_NON_CANONICAL = 'ERR_NON_CANONICAL';
+
+// Strict-mode constants (SPEC-v1 §5.3), mirroring tools/cowrie_ref/model.py.
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+const UINT64_MAX = 2n ** 64n - 1n;
+const CANONICAL_NAN_BYTES = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]);
+const NEG_ZERO_BYTES = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]);
+// Bits-per-element for each DTYPE wire value (mirrors model.DTYPE_BITS); used for the
+// tensor sub-byte trailing-padding check. Sub-byte types are the ones whose bit width is < 8.
+const DTYPE_BITS: Record<number, number> = {
+  0x01: 32, 0x02: 16, 0x03: 16, 0x04: 8, 0x05: 16, 0x06: 32, 0x07: 64, 0x08: 8,
+  0x09: 16, 0x0a: 32, 0x0b: 64, 0x0c: 64, 0x0d: 8,
+  0x10: 4, 0x11: 2, 0x12: 3, 0x13: 2, 0x14: 1,
+};
+
+/** Minimal-length little-endian two's-complement bytes for a signed BigInt (model.min_twos_complement_le). */
+function minTwosComplementLE(n: bigint): Uint8Array {
+  const bitLen = (n < 0n ? -n - 1n : n).toString(2).length; // bit_length()
+  let length = Math.max(1, Math.floor((bitLen + 8) / 8));
+  // bigintToBytes here would be big-endian/sign-extended; build LE two's complement directly.
+  for (;;) {
+    const min = -(2n ** BigInt(length * 8 - 1));
+    const max = 2n ** BigInt(length * 8 - 1) - 1n;
+    if (n >= min && n <= max) {
+      const mask = (1n << BigInt(length * 8)) - 1n;
+      const u = n < 0n ? (n & mask) : n;
+      const out = new Uint8Array(length);
+      let v = u;
+      for (let i = 0; i < length; i++) {
+        out[i] = Number(v & 0xffn);
+        v >>= 8n;
+      }
+      return out;
+    }
+    length += 1;
+  }
+}
+
+/** Lexicographic byte comparison (like Python `bytes` comparison). <0, 0, >0. */
+function compareBytes(a: Uint8Array, b: Uint8Array): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return a.length - b.length;
+}
+
+/** Decode little-endian two's-complement bytes to a signed BigInt (Python int.from_bytes(.., 'little', signed=True)). */
+function bytesToBigintLESigned(bytes: Uint8Array): bigint {
+  if (bytes.length === 0) return 0n;
+  let result = 0n;
+  for (let i = bytes.length - 1; i >= 0; i--) {
+    result = (result << 8n) | BigInt(bytes[i]);
+  }
+  const signBit = 1n << BigInt(bytes.length * 8 - 1);
+  if (result & signBit) {
+    result -= 1n << BigInt(bytes.length * 8);
+  }
+  return result;
+}
+
 export enum UnknownExtBehavior {
   KEEP = 0,
   SKIP_AS_NULL = 1,
@@ -54,6 +129,12 @@ export enum UnknownExtBehavior {
 
 export interface DecodeOptions {
   onUnknownExt?: UnknownExtBehavior;
+  /**
+   * Strict canonical decode (SPEC-v1 §5.3). When true, well-formed-but-non-canonical
+   * input is rejected with ERR_NON_CANONICAL instead of silently accepted. This mirrors
+   * the Python reference (tools/cowrie_ref/decode.py) exactly. Default: false (lenient).
+   */
+  strict?: boolean;
   maxDepth?: number;
   maxArrayLen?: number;
   maxObjectLen?: number;
@@ -889,6 +970,7 @@ class Decoder {
     private data: Uint8Array,
     private onUnknownExt: UnknownExtBehavior = UnknownExtBehavior.KEEP,
     limits?: ResolvedLimits,
+    private strict: boolean = false,
   ) {
     this.limits = limits ?? resolveLimits();
   }
@@ -950,12 +1032,31 @@ class Decoder {
         return SJ.bool(false);
       case Tag.TRUE:
         return SJ.bool(true);
-      case Tag.INT64:
-        return SJ.int64(zigzagDecode(this.readUvarint()));
-      case Tag.UINT64:
-        return SJ.uint64(this.readUvarint());
+      case Tag.INT64: {
+        const v = zigzagDecode(this.readUvarint());
+        if (this.strict && v >= -16n && v <= 127n) {
+          throw new CowrieError(ERR_NON_CANONICAL, 'int in FIXINT/FIXNEG range');
+        }
+        return SJ.int64(v);
+      }
+      case Tag.UINT64: {
+        const v = this.readUvarint();
+        if (this.strict && v <= INT64_MAX) {
+          throw new CowrieError(ERR_NON_CANONICAL, 'uint fits Int');
+        }
+        return SJ.uint64(v);
+      }
       case Tag.FLOAT64: {
         const buf = this.read(8);
+        if (this.strict) {
+          if (compareBytes(buf, NEG_ZERO_BYTES) === 0) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'negative zero');
+          }
+          const fChk = new DataView(buf.buffer, buf.byteOffset).getFloat64(0, true);
+          if (Number.isNaN(fChk) && compareBytes(buf, CANONICAL_NAN_BYTES) !== 0) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'non-canonical NaN');
+          }
+        }
         const f = new DataView(buf.buffer, buf.byteOffset).getFloat64(0, true);
         return SJ.float64(f);
       }
@@ -967,6 +1068,14 @@ class Decoder {
       case Tag.DECIMAL128: {
         const scale = this.readByte();
         const coef = this.read(16);
+        if (this.strict) {
+          // Lowest-terms check (model.Decimal128.canonical): a non-zero coefficient
+          // divisible by 10 is non-canonical (should be scaled down).
+          const coeff = bytesToBigintLESigned(coef);
+          if (coeff !== 0n && coeff % 10n === 0n) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'decimal not lowest terms');
+          }
+        }
         return SJ.decimal128(scale > 127 ? scale - 256 : scale, coef);
       }
       case Tag.STRING:
@@ -987,7 +1096,18 @@ class Decoder {
         return SJ.uuid128(this.read(16));
       case Tag.BIGINT: {
         const len = this.readUvarintAsNumber();
-        return SJ.bigint(this.read(len));
+        const raw = this.read(len);
+        if (this.strict) {
+          const v = bytesToBigintLESigned(raw);
+          if (v >= INT64_MIN && v <= UINT64_MAX) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'bigint fits Int/Uint');
+          }
+          const minimal = minTwosComplementLE(v);
+          if (compareBytes(raw, minimal) !== 0) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'non-minimal bigint');
+          }
+        }
+        return SJ.bigint(raw);
       }
       case Tag.EXT: {
         const extType = this.readUvarint();
@@ -1006,6 +1126,9 @@ class Decoder {
       }
       case Tag.ARRAY: {
         const count = this.readUvarintAsNumber();
+        if (this.strict && count <= 15) {
+          throw new CowrieError(ERR_NON_CANONICAL, 'array should use FIXARRAY');
+        }
         if (count > this.limits.maxArrayLen) {
           throw new SecurityLimitExceeded(`Array too large: ${count} > ${this.limits.maxArrayLen}`);
         }
@@ -1019,16 +1142,24 @@ class Decoder {
       }
       case Tag.OBJECT: {
         const count = this.readUvarintAsNumber();
+        if (this.strict && count <= 15) {
+          throw new CowrieError(ERR_NON_CANONICAL, 'object should use FIXMAP');
+        }
         if (count > this.limits.maxObjectLen) {
           throw new SecurityLimitExceeded(`Object too large: ${count} > ${this.limits.maxObjectLen}`);
         }
         this.enterNested();
         const members: Record<string, Value> = {};
+        let lastIdx = -1;
         for (let i = 0; i < count; i++) {
           const fieldId = this.readUvarintAsNumber();
           if (fieldId >= this.dict.length) {
             throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
           }
+          if (this.strict && fieldId <= lastIdx) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'object fields not in ascending dictIdx');
+          }
+          lastIdx = fieldId;
           const key = this.dict[fieldId];
           members[key] = this.decodeValue();
         }
@@ -1056,6 +1187,26 @@ class Decoder {
           throw new Error(`cowrie: tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
         }
         const data = this.read(dataLen);
+        if (this.strict) {
+          // Sub-byte dtypes (qint4/qint2/qint3/ternary/binary): the unused high bits in the
+          // final packed byte must be zero (model: bits % 8 and data[-1] >> (bits % 8)).
+          const bitsPer = DTYPE_BITS[dtype];
+          if (bitsPer !== undefined && bitsPer < 8) {
+            let nelem = 1;
+            let safe = true;
+            for (const d of shape) {
+              nelem *= d;
+              if (nelem > Number.MAX_SAFE_INTEGER) { safe = false; break; }
+            }
+            if (safe) {
+              const totalBits = nelem * bitsPer;
+              const rem = totalBits % 8;
+              if (rem !== 0 && data.length > 0 && (data[data.length - 1] >> rem) !== 0) {
+                throw new CowrieError(ERR_NON_CANONICAL, 'tensor sub-byte padding not zero');
+              }
+            }
+          }
+        }
         return SJ.tensor(dtype, shape, data);
       }
       case Tag.IMAGE: {
@@ -1130,6 +1281,12 @@ class Decoder {
           throw new SecurityLimitExceeded(`Bitmask data too large: ${byteLen} > ${this.limits.maxBytesLen}`);
         }
         const bits = count > 0 ? this.read(byteLen) : new Uint8Array(0);
+        if (this.strict) {
+          const rem = count % 8;
+          if (rem !== 0 && bits.length > 0 && (bits[bits.length - 1] >> rem) !== 0) {
+            throw new CowrieError(ERR_NON_CANONICAL, 'bitmask trailing bits not zero');
+          }
+        }
         return SJ.bitmask(count, bits);
       }
       default:
@@ -1157,11 +1314,16 @@ class Decoder {
           }
           this.enterNested();
           const members: Record<string, Value> = {};
+          let lastIdx = -1;
           for (let i = 0; i < count; i++) {
             const fieldId = this.readUvarintAsNumber();
             if (fieldId >= this.dict.length) {
               throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
             }
+            if (this.strict && fieldId <= lastIdx) {
+              throw new CowrieError(ERR_NON_CANONICAL, 'object fields not in ascending dictIdx');
+            }
+            lastIdx = fieldId;
             const key = this.dict[fieldId];
             members[key] = this.decodeValue();
           }
@@ -1203,8 +1365,21 @@ class Decoder {
     if (dictLen > this.limits.maxDictLen) {
       throw new SecurityLimitExceeded('cowrie: dictionary too large');
     }
+    let prevKeyBytes: Uint8Array | null = null;
     for (let i = 0; i < dictLen; i++) {
-      this.dict.push(this.readString());
+      const startPos = this.pos;
+      const keyLen = this.readUvarintAsNumber();
+      if (keyLen > this.limits.maxStringLen) {
+        throw new SecurityLimitExceeded(`String too long: ${keyLen} > ${this.limits.maxStringLen}`);
+      }
+      const rawKey = this.read(keyLen);
+      const key = this.textDecoder.decode(rawKey);
+      if (this.strict && prevKeyBytes !== null && compareBytes(rawKey, prevKeyBytes) <= 0) {
+        throw new CowrieError(ERR_NON_CANONICAL, 'dictionary not byte-sorted / not unique');
+      }
+      prevKeyBytes = rawKey;
+      this.dict.push(key);
+      void startPos;
     }
 
     const result = this.decodeValue();
@@ -1265,6 +1440,7 @@ export function decode(data: Uint8Array, opts: DecodeOptions = {}): Value {
     data,
     opts.onUnknownExt ?? UnknownExtBehavior.KEEP,
     resolveLimits(opts),
+    opts.strict ?? false,
   ).decode();
 }
 

@@ -31,6 +31,11 @@ pub struct DecodeOptions {
     pub max_dict_len: usize,
     /// Maximum tensor rank (number of dimensions).
     pub max_rank: usize,
+    /// Strict decode mode (SPEC-v1 §5.3): reject well-formed-but-non-canonical input
+    /// with `CowrieError::NonCanonical` instead of silently accepting it. This mirrors
+    /// the Python reference decoder (`tools/cowrie_ref/decode.py`) exactly. Off by default
+    /// so existing decode behavior is unchanged unless explicitly opted in.
+    pub strict: bool,
 }
 
 impl Default for DecodeOptions {
@@ -44,6 +49,7 @@ impl Default for DecodeOptions {
             max_ext_len: 1_000_000,     // Tightened: was 100M
             max_dict_len: 1_000_000,    // Tightened: was 10M
             max_rank: 32,
+            strict: false,
         }
     }
 }
@@ -51,6 +57,17 @@ impl Default for DecodeOptions {
 /// Decode Cowrie bytes to a Value using default options.
 pub fn decode(data: &[u8]) -> Result<Value, CowrieError> {
     decode_with_options(data, &DecodeOptions::default())
+}
+
+/// Decode Cowrie bytes in STRICT mode (SPEC-v1 §5.3): non-canonical input is rejected.
+pub fn decode_strict(data: &[u8]) -> Result<Value, CowrieError> {
+    decode_with_options(
+        data,
+        &DecodeOptions {
+            strict: true,
+            ..DecodeOptions::default()
+        },
+    )
 }
 
 /// Decode Cowrie bytes to a Value with configurable limits.
@@ -103,8 +120,26 @@ impl<'a> Reader<'a> {
             return Err(CowrieError::TooLarge);
         }
         self.dict = Vec::with_capacity(dict_len);
+        let mut prev: Option<Vec<u8>> = None;
         for _ in 0..dict_len {
-            let key = self.read_string()?;
+            // Read the raw key bytes so the strict byte-ascending/uniqueness check (§5.3)
+            // compares raw UTF-8 exactly like the Python reference (`raw <= prev`).
+            let key_len = self.read_uvarint()? as usize;
+            if key_len > self.opts.max_string_len {
+                return Err(CowrieError::TooLarge);
+            }
+            let raw = self.read_bytes(key_len)?;
+            if self.opts.strict {
+                if let Some(prev) = &prev {
+                    if raw <= *prev {
+                        return Err(CowrieError::NonCanonical(
+                            "dictionary not byte-sorted / not unique".into(),
+                        ));
+                    }
+                }
+            }
+            let key = String::from_utf8(raw.clone()).map_err(|_| CowrieError::InvalidUtf8)?;
+            prev = Some(raw);
             self.dict.push(key);
         }
 
@@ -135,14 +170,34 @@ impl<'a> Reader<'a> {
             tags::FALSE => Value::Bool(false),
             tags::INT64 => {
                 let z = self.read_uvarint()?;
-                Value::Int(zigzag_decode(z))
+                let v = zigzag_decode(z);
+                if self.opts.strict && (-16..=127).contains(&v) {
+                    return Err(CowrieError::NonCanonical(
+                        "int in FIXINT/FIXNEG range".into(),
+                    ));
+                }
+                Value::Int(v)
             }
             tags::UINT64 => {
                 let u = self.read_uvarint()?;
+                if self.opts.strict && u <= i64::MAX as u64 {
+                    return Err(CowrieError::NonCanonical("uint fits Int".into()));
+                }
                 Value::Uint(u)
             }
             tags::FLOAT64 => {
                 let bytes = self.read_bytes_fixed::<8>()?;
+                if self.opts.strict {
+                    if bytes == [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80] {
+                        return Err(CowrieError::NonCanonical("negative zero".into()));
+                    }
+                    let v = f64::from_le_bytes(bytes);
+                    if v.is_nan()
+                        && bytes != [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]
+                    {
+                        return Err(CowrieError::NonCanonical("non-canonical NaN".into()));
+                    }
+                }
                 Value::Float(f64::from_le_bytes(bytes))
             }
             tags::FLOAT32 => {
@@ -151,8 +206,28 @@ impl<'a> Reader<'a> {
             }
             tags::DECIMAL128 => {
                 let mut data = vec![0u8; 17];
-                data[0] = self.read_byte()?; // scale
-                self.read_into(&mut data[1..])?; // 16-byte coef
+                data[0] = self.read_byte()?; // scale (svarint; single byte in canonical form)
+                self.read_into(&mut data[1..])?; // 16-byte coef (little-endian, signed)
+                if self.opts.strict {
+                    // Lowest-terms check (§3 / Python `dec != dec.canonical()`):
+                    // canonical() strips trailing-zero coefficient digits into a smaller
+                    // scale, and maps any zero coefficient to scale 0. So a value is
+                    // non-canonical iff (coeff != 0 && coeff % 10 == 0) OR (coeff == 0 && scale != 0).
+                    let scale = zigzag_decode(data[0] as u64);
+                    let mut coeff_bytes = [0u8; 16];
+                    coeff_bytes.copy_from_slice(&data[1..17]);
+                    let coeff = i128::from_le_bytes(coeff_bytes);
+                    let non_canonical = if coeff == 0 {
+                        scale != 0
+                    } else {
+                        coeff % 10 == 0
+                    };
+                    if non_canonical {
+                        return Err(CowrieError::NonCanonical(
+                            "decimal not lowest terms".into(),
+                        ));
+                    }
+                }
                 Value::Decimal(data)
             }
             tags::STRING => {
@@ -181,10 +256,18 @@ impl<'a> Reader<'a> {
                     return Err(CowrieError::TooLarge);
                 }
                 let data = self.read_bytes(len)?;
+                if self.opts.strict {
+                    check_bigint_canonical(&data)?;
+                }
                 Value::BigInt(data)
             }
             tags::ARRAY => {
                 let len = self.read_uvarint()? as usize;
+                if self.opts.strict && len <= 15 {
+                    return Err(CowrieError::NonCanonical(
+                        "array should use FIXARRAY".into(),
+                    ));
+                }
                 if len > self.opts.max_array_len {
                     return Err(CowrieError::TooLarge);
                 }
@@ -196,10 +279,14 @@ impl<'a> Reader<'a> {
             }
             tags::OBJECT => {
                 let len = self.read_uvarint()? as usize;
+                if self.opts.strict && len <= 15 {
+                    return Err(CowrieError::NonCanonical("object should use FIXMAP".into()));
+                }
                 if len > self.opts.max_object_len {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut obj = BTreeMap::new();
+                let mut last: i64 = -1;
                 for _ in 0..len {
                     let key_idx = self.read_uvarint()? as usize;
                     if key_idx >= self.dict.len() {
@@ -208,6 +295,12 @@ impl<'a> Reader<'a> {
                             dict_len: self.dict.len(),
                         });
                     }
+                    if self.opts.strict && (key_idx as i64) <= last {
+                        return Err(CowrieError::NonCanonical(
+                            "object fields not in ascending dictIdx".into(),
+                        ));
+                    }
+                    last = key_idx as i64;
                     let key = self.dict[key_idx].clone();
                     let val = self.decode_value()?;
                     obj.insert(key, val);
@@ -251,6 +344,23 @@ impl<'a> Reader<'a> {
                     }
                 }
                 let data = self.read_bytes(data_len)?;
+                if self.opts.strict {
+                    // Sub-byte dtype padding check (§5.3 / Python `data[-1] >> (bits % 8)`):
+                    // the final byte must have its unused high bits zeroed.
+                    let bits = tensor_total_bits(dtype, &shape);
+                    if let Some(total_bits) = bits {
+                        let rem = (total_bits % 8) as u32;
+                        if rem != 0 {
+                            if let Some(&last_byte) = data.last() {
+                                if last_byte >> rem != 0 {
+                                    return Err(CowrieError::NonCanonical(
+                                        "tensor sub-byte padding not zero".into(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
                 Value::Tensor(TensorData::new(dtype, shape, data))
             }
             tags::TENSOR_REF => {
@@ -340,6 +450,18 @@ impl<'a> Reader<'a> {
                     return Err(CowrieError::TooLarge);
                 }
                 let bits = self.read_bytes(byte_len)?;
+                if self.opts.strict {
+                    let rem = (count % 8) as u32;
+                    if rem != 0 {
+                        if let Some(&last_byte) = bits.last() {
+                            if last_byte >> rem != 0 {
+                                return Err(CowrieError::NonCanonical(
+                                    "bitmask trailing bits not zero".into(),
+                                ));
+                            }
+                        }
+                    }
+                }
                 Value::Bitmask { count, bits }
             }
             t if (tags::FIXINT_BASE..=tags::FIXINT_MAX).contains(&t) => {
@@ -362,6 +484,7 @@ impl<'a> Reader<'a> {
                     return Err(CowrieError::TooLarge);
                 }
                 let mut obj = BTreeMap::new();
+                let mut last: i64 = -1;
                 for _ in 0..len {
                     let key_idx = self.read_uvarint()? as usize;
                     if key_idx >= self.dict.len() {
@@ -370,6 +493,12 @@ impl<'a> Reader<'a> {
                             dict_len: self.dict.len(),
                         });
                     }
+                    if self.opts.strict && (key_idx as i64) <= last {
+                        return Err(CowrieError::NonCanonical(
+                            "object fields not in ascending dictIdx".into(),
+                        ));
+                    }
+                    last = key_idx as i64;
                     let key = self.dict[key_idx].clone();
                     let val = self.decode_value()?;
                     obj.insert(key, val);
@@ -546,6 +675,87 @@ fn dtype_elem_size(dtype: DType) -> Option<u64> {
         // Sub-byte packed types: skip validation
         DType::QINT4 | DType::QINT2 | DType::QINT3 | DType::Ternary | DType::Binary => None,
     }
+}
+
+/// Bits-per-element for a dtype, matching the Python reference `DTYPE_BITS` (§2.5).
+/// Sub-byte dtypes (<8 bits) are what drive the strict padding check.
+fn dtype_bits(dtype: DType) -> u64 {
+    match dtype {
+        DType::Float32 => 32,
+        DType::Float16 => 16,
+        DType::BFloat16 => 16,
+        DType::Int8 => 8,
+        DType::Int16 => 16,
+        DType::Int32 => 32,
+        DType::Int64 => 64,
+        DType::Uint8 => 8,
+        DType::Uint16 => 16,
+        DType::Uint32 => 32,
+        DType::Uint64 => 64,
+        DType::Float64 => 64,
+        DType::Bool => 8,
+        DType::QINT4 => 4,
+        DType::QINT2 => 2,
+        DType::QINT3 => 3,
+        DType::Ternary => 2,
+        DType::Binary => 1,
+    }
+}
+
+/// Total bit count for a tensor (`nelem * dtype_bits`), matching the Python reference.
+/// Returns None on overflow. A rank-0 tensor is a single element; a zero dimension
+/// yields zero elements.
+fn tensor_total_bits(dtype: DType, shape: &[u64]) -> Option<u64> {
+    let mut nelem: u64 = 1;
+    for &d in shape {
+        nelem = nelem.checked_mul(d)?;
+    }
+    nelem.checked_mul(dtype_bits(dtype))
+}
+
+/// Strict-mode canonical-form check for a BigInt's raw little-endian two's-complement
+/// bytes (SPEC-v1 §5.3), mirroring the Python reference:
+///   - reject if the value fits Int/Uint (INT64_MIN..=UINT64_MAX) — should use those tags
+///   - reject if the bytes are not the minimal two's-complement length
+fn check_bigint_canonical(raw: &[u8]) -> Result<(), CowrieError> {
+    if raw.is_empty() {
+        // Python int.from_bytes(b"", ...) == 0, whose minimal form is a single 0x00 byte;
+        // an empty payload is therefore non-minimal (and also "fits Int").
+        return Err(CowrieError::NonCanonical("bigint fits Int/Uint".into()));
+    }
+
+    // --- minimality: the top byte must not be a pure sign-extension of the next byte ---
+    if raw.len() >= 2 {
+        let last = raw[raw.len() - 1];
+        let prev = raw[raw.len() - 2];
+        let prev_sign = prev & 0x80 != 0;
+        if (last == 0x00 && !prev_sign) || (last == 0xFF && prev_sign) {
+            return Err(CowrieError::NonCanonical("non-minimal bigint".into()));
+        }
+    }
+
+    // --- fits Int/Uint check (INT64_MIN ..= UINT64_MAX) ---
+    let negative = raw[raw.len() - 1] & 0x80 != 0;
+    if negative {
+        // Minimal negative two's-complement: values in [-2^63, -1] need <= 8 bytes.
+        // -2^63 itself is exactly [00 00 00 00 00 00 00 80] (8 bytes, minimal).
+        if raw.len() <= 8 {
+            return Err(CowrieError::NonCanonical("bigint fits Int/Uint".into()));
+        }
+    } else {
+        // Non-negative. UINT64_MAX = 2^64-1 has minimal signed LE form
+        // [FF*8, 00] (9 bytes, trailing 0x00 sign byte). Strip a single 0x00
+        // sign byte, then anything occupying <= 8 magnitude bytes fits u64.
+        let mut sig = raw.len();
+        if raw[sig - 1] == 0x00 {
+            sig -= 1; // drop sign byte
+        }
+        if sig <= 8 {
+            return Err(CowrieError::NonCanonical("bigint fits Int/Uint".into()));
+        }
+    }
+
+    Ok(())
 }
 
 /// Computes the expected byte length for a tensor with the given dtype and shape.

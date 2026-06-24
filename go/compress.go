@@ -78,8 +78,24 @@ func DecodeFramed(data []byte) (*Value, error) {
 	return DecodeFramedWithLimit(data, DefaultMaxBytesLen)
 }
 
+// DecodeFramedStrict decodes with automatic decompression in strict mode
+// (SPEC-v1 §5.3): well-formed but non-canonical input is rejected with
+// ErrNonCanonical. The post-decompression body is decoded with Strict=true.
+func DecodeFramedStrict(data []byte) (*Value, error) {
+	opts := DefaultDecodeOptions()
+	opts.Strict = true
+	return DecodeFramedWithLimitAndOptions(data, DefaultMaxBytesLen, opts)
+}
+
 // DecodeFramedWithLimit decodes with automatic decompression and custom size limit.
 func DecodeFramedWithLimit(data []byte, maxDecompressedSize int) (*Value, error) {
+	return DecodeFramedWithLimitAndOptions(data, maxDecompressedSize, DefaultDecodeOptions())
+}
+
+// DecodeFramedWithLimitAndOptions decodes with automatic decompression, a custom
+// size limit, and explicit DecodeOptions (notably opts.Strict for §5.3
+// strict-decode). The post-decompression body is decoded with the same options.
+func DecodeFramedWithLimitAndOptions(data []byte, maxDecompressedSize int, opts DecodeOptions) (*Value, error) {
 	if len(data) < 6 {
 		return nil, ErrUnexpectedEOF
 	}
@@ -96,7 +112,7 @@ func DecodeFramedWithLimit(data []byte, maxDecompressedSize int) (*Value, error)
 
 	// Not compressed? Use regular decode
 	if compByte == 0 {
-		return Decode(data)
+		return DecodeWithOptions(data, opts)
 	}
 
 	compType := Compression(compByte)
@@ -147,7 +163,7 @@ func DecodeFramedWithLimit(data []byte, maxDecompressedSize int) (*Value, error)
 	full[5] = 0 // no compression
 	copy(full[6:], decompressed)
 
-	return Decode(full)
+	return DecodeWithOptions(full, opts)
 }
 
 // compressGzip compresses data using gzip.

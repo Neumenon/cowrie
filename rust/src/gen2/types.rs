@@ -18,6 +18,8 @@ pub enum CowrieError {
     TrailingData { pos: usize, remaining: usize },
     InvalidDictIndex { index: usize, dict_len: usize },
     RankExceeded { rank: usize, max: usize },
+    /// Strict-mode (SPEC-v1 §5.3) rejection of well-formed-but-non-canonical input.
+    NonCanonical(String),
 }
 
 impl fmt::Display for CowrieError {
@@ -44,6 +46,9 @@ impl fmt::Display for CowrieError {
             ),
             CowrieError::RankExceeded { rank, max } => {
                 write!(f, "tensor rank {} exceeds maximum {}", rank, max)
+            }
+            CowrieError::NonCanonical(detail) => {
+                write!(f, "non-canonical encoding (ERR_NON_CANONICAL): {}", detail)
             }
         }
     }

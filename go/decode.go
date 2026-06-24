@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"unsafe"
 )
 
@@ -34,6 +35,11 @@ var (
 	ErrInvalidVarint   = errors.New("cowrie: invalid or overflow varint encoding")
 	ErrDictTooLarge    = errors.New("cowrie: dictionary exceeds maximum size")
 	ErrTrailingData    = errors.New("cowrie: trailing data after root value")
+	// ErrNonCanonical is returned in strict-decode mode (§5.3) when input is
+	// well-formed but not in canonical form (e.g. an Int that should be a
+	// FIXINT, a non-minimal BigInt, a negative-zero Float, an unsorted header
+	// dictionary, etc.). Mirrors tools/cowrie_ref/decode.py ERR_NON_CANONICAL.
+	ErrNonCanonical = errors.New("cowrie: non-canonical encoding (strict mode)")
 )
 
 // Default security limits (can be overridden via DecodeOptions)
@@ -94,6 +100,12 @@ type DecodeOptions struct {
 	// instead of allocating a []byte for the tensor body.
 	// The sink MUST consume all bytes from the Reader.
 	TensorSink TensorSink
+
+	// Strict enables strict-decode mode (SPEC-v1 §5.3): well-formed but
+	// non-canonical input is REJECTED with ErrNonCanonical rather than
+	// silently accepted. This mirrors tools/cowrie_ref/decode.py strict=True.
+	// Default false (lenient) — behavior is unchanged when not set.
+	Strict bool
 }
 
 // TensorSink receives streamed tensor data during decode.
@@ -268,7 +280,7 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (*Value, error) {
 		opts.MaxRank = DefaultMaxRank
 	}
 
-	r := &reader{data: data, opts: opts}
+	r := &reader{data: data, opts: opts, strict: opts.Strict}
 	return decode(r)
 }
 
@@ -335,10 +347,11 @@ func DecodeFromWithOptions(rd io.Reader, opts DecodeOptions) (*Value, error) {
 
 // reader wraps a byte slice for reading with security limits.
 type reader struct {
-	data  []byte
-	pos   int
-	depth int           // Current nesting depth
-	opts  DecodeOptions // Security limits
+	data   []byte
+	pos    int
+	depth  int           // Current nesting depth
+	opts   DecodeOptions // Security limits
+	strict bool          // §5.3 strict-decode: reject non-canonical input
 }
 
 // remaining returns the number of bytes left to read.
@@ -543,6 +556,12 @@ func decode(r *reader) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		// §5.3 strict: header dictionary MUST be strictly byte-ascending and
+		// unique. Go string comparison is byte-lexicographic, which matches the
+		// reference's `raw <= prev` check on raw UTF-8 bytes.
+		if r.strict && i > 0 && s <= dict[i-1] {
+			return nil, fmt.Errorf("%w: dictionary not byte-sorted / not unique", ErrNonCanonical)
+		}
 		dict[i] = s
 	}
 
@@ -582,12 +601,22 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return Int64(zigzagDecode(u)), nil
+		v := zigzagDecode(u)
+		// §5.3 strict: an Int carrying a value in [-16,127] must use
+		// FIXINT/FIXNEG, not the Int(0x03) tag.
+		if r.strict && v >= -16 && v <= 127 {
+			return nil, fmt.Errorf("%w: int in FIXINT/FIXNEG range", ErrNonCanonical)
+		}
+		return Int64(v), nil
 
 	case TagUint64:
 		u, err := r.readUvarint()
 		if err != nil {
 			return nil, err
+		}
+		// §5.3 strict: a Uint carrying a value <= 2^63-1 must use Int(0x03).
+		if r.strict && u <= math.MaxInt64 {
+			return nil, fmt.Errorf("%w: uint fits Int", ErrNonCanonical)
 		}
 		return Uint64(u), nil
 
@@ -597,6 +626,17 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			return nil, err
 		}
 		bits := binary.LittleEndian.Uint64(b)
+		// §5.3 strict: reject negative zero (0x...0080 LE) and any NaN bit
+		// pattern other than the canonical quiet NaN 0x7FF8000000000000.
+		if r.strict {
+			if bits == 0x8000000000000000 {
+				return nil, fmt.Errorf("%w: negative zero", ErrNonCanonical)
+			}
+			f := math.Float64frombits(bits)
+			if f != f && bits != 0x7FF8000000000000 {
+				return nil, fmt.Errorf("%w: non-canonical NaN", ErrNonCanonical)
+			}
+		}
 		return Float64(math.Float64frombits(bits)), nil
 
 	case TagDecimal128:
@@ -610,6 +650,12 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		}
 		var coef [16]byte
 		copy(coef[:], coefBytes)
+		// §5.3 strict: a Decimal128 must be in lowest terms — a coefficient
+		// divisible by 10 (with coeff != 0) should have been normalized into a
+		// smaller scale.
+		if r.strict && decimalNotLowestTerms(coefBytes) {
+			return nil, fmt.Errorf("%w: decimal not lowest terms", ErrNonCanonical)
+		}
 		return NewDecimal128(int8(scale), coef), nil
 
 	case TagString:
@@ -668,6 +714,14 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		// §5.3 strict: a BigInt must not carry a value that fits Int/Uint
+		// ([-2^63, 2^64-1]) and must use minimal-length little-endian two's
+		// complement (no redundant sign-extension bytes).
+		if r.strict {
+			if err := strictCheckBigInt(b); err != nil {
+				return nil, err
+			}
+		}
 		return BigInt(b), nil
 
 	case TagArray:
@@ -688,6 +742,10 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		// Limit check
 		if r.opts.MaxArrayLen > 0 && count > uint64(r.opts.MaxArrayLen) {
 			return nil, ErrArrayTooLarge
+		}
+		// §5.3 strict: an Array(0x06) with count<=15 must use FIXARRAY.
+		if r.strict && count <= 15 {
+			return nil, fmt.Errorf("%w: array should use FIXARRAY", ErrNonCanonical)
 		}
 		items := make([]*Value, count)
 		for i := uint64(0); i < count; i++ {
@@ -718,7 +776,12 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if r.opts.MaxObjectLen > 0 && count > uint64(r.opts.MaxObjectLen) {
 			return nil, ErrObjectTooLarge
 		}
+		// §5.3 strict: an Object(0x07) with count<=15 must use FIXMAP.
+		if r.strict && count <= 15 {
+			return nil, fmt.Errorf("%w: object should use FIXMAP", ErrNonCanonical)
+		}
 		members := make([]Member, count)
+		lastIdx := int64(-1)
 		for i := uint64(0); i < count; i++ {
 			fieldID, err := r.readUvarint()
 			if err != nil {
@@ -727,6 +790,11 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			if fieldID >= uint64(len(dict)) {
 				return nil, ErrInvalidFieldID
 			}
+			// §5.3 strict: object fields MUST be in strictly ascending dictIdx.
+			if r.strict && int64(fieldID) <= lastIdx {
+				return nil, fmt.Errorf("%w: object fields not in ascending dictIdx", ErrNonCanonical)
+			}
+			lastIdx = int64(fieldID)
 			v, err := decodeValue(r, dict)
 			if err != nil {
 				return nil, err
@@ -778,6 +846,17 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if expected, ok := tensorExpectedBytes(DType(dtype), dims); ok {
 			if dataLen != expected {
 				return nil, fmt.Errorf("cowrie: tensor dataLen %d does not match shape/dtype (expected %d bytes)", dataLen, expected)
+			}
+		}
+		// §5.3 strict: for sub-byte dtypes the final byte's padding bits (above
+		// the last used bit) MUST be zero. Mirrors the reference's
+		// `data[-1] >> (bits % 8)` check.
+		if r.strict {
+			if bits, ok := tensorTotalBits(DType(dtype), dims); ok && bits%8 != 0 && dataLen > 0 {
+				last := r.data[r.pos+int(dataLen)-1]
+				if last>>(bits%8) != 0 {
+					return nil, fmt.Errorf("%w: tensor sub-byte padding not zero", ErrNonCanonical)
+				}
 			}
 		}
 		// Streaming tensor decode via TensorSink
@@ -969,6 +1048,14 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		// §5.3 strict: trailing (unused) bits in the final byte MUST be zero.
+		// Checked before Bitmask() masks them off. Mirrors the reference's
+		// `data[-1] >> (count % 8)` check.
+		if r.strict && count%8 != 0 && len(bits) > 0 {
+			if bits[len(bits)-1]>>(count%8) != 0 {
+				return nil, fmt.Errorf("%w: bitmask trailing bits not zero", ErrNonCanonical)
+			}
+		}
 		return Bitmask(count, bits), nil
 
 	case TagExt:
@@ -1062,6 +1149,7 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 			}
 			defer r.exitNested()
 			members := make([]Member, count)
+			lastIdx := int64(-1)
 			for i := 0; i < count; i++ {
 				fieldID, err := r.readUvarint()
 				if err != nil {
@@ -1070,6 +1158,11 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 				if fieldID >= uint64(len(dict)) {
 					return nil, ErrInvalidFieldID
 				}
+				// §5.3 strict: object fields MUST be in strictly ascending dictIdx.
+				if r.strict && int64(fieldID) <= lastIdx {
+					return nil, fmt.Errorf("%w: object fields not in ascending dictIdx", ErrNonCanonical)
+				}
+				lastIdx = int64(fieldID)
 				v, err := decodeValue(r, dict)
 				if err != nil {
 					return nil, err
@@ -1275,4 +1368,141 @@ func valueToAny(v *Value) any {
 	default:
 		return nil
 	}
+}
+
+// ============================================================
+// §5.3 strict-decode helpers (mirror tools/cowrie_ref/decode.py + model.py)
+// ============================================================
+
+// bigIntFromLE interprets little-endian two's-complement bytes as a signed
+// big.Int (equivalent to Python int.from_bytes(raw, "little", signed=True)).
+func bigIntFromLE(le []byte) *big.Int {
+	// Convert LE -> BE for big.Int.SetBytes (which is unsigned big-endian).
+	be := make([]byte, len(le))
+	for i := 0; i < len(le); i++ {
+		be[i] = le[len(le)-1-i]
+	}
+	v := new(big.Int).SetBytes(be)
+	// Apply sign: if the top bit of the most-significant byte is set, the value
+	// is negative: subtract 2^(8*len).
+	if len(le) > 0 && le[len(le)-1]&0x80 != 0 {
+		shift := new(big.Int).Lsh(big.NewInt(1), uint(8*len(le)))
+		v.Sub(v, shift)
+	}
+	return v
+}
+
+// minTwosComplementLE returns the minimal-length little-endian two's-complement
+// encoding of v. Mirrors model.min_twos_complement_le.
+func minTwosComplementLE(v *big.Int) []byte {
+	// length = max(1, (bitLen + 8) // 8); grow until it fits.
+	length := (v.BitLen() + 8) / 8
+	if length < 1 {
+		length = 1
+	}
+	for {
+		if b, ok := tryTwosComplementLE(v, length); ok {
+			return b
+		}
+		length++
+	}
+}
+
+// tryTwosComplementLE encodes v as signed little-endian in exactly `length`
+// bytes, returning ok=false if v does not fit (OverflowError analogue).
+func tryTwosComplementLE(v *big.Int, length int) ([]byte, bool) {
+	bits := uint(8 * length)
+	lo := new(big.Int).Lsh(big.NewInt(-1), bits-1)              // -2^(bits-1)
+	hi := new(big.Int).Sub(new(big.Int).Neg(lo), big.NewInt(1)) // 2^(bits-1)-1
+	if v.Cmp(lo) < 0 || v.Cmp(hi) > 0 {
+		return nil, false
+	}
+	mod := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
+	u := new(big.Int).Mod(v, mod)                // two's-complement bit pattern
+	be := u.Bytes()
+	out := make([]byte, length)
+	// be is big-endian, right-aligned into out, then reversed to little-endian.
+	copy(out[length-len(be):], be)
+	for i, j := 0, length-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, true
+}
+
+// strictCheckBigInt rejects a BigInt whose value fits Int/Uint, or whose
+// encoding is non-minimal two's complement. Mirrors decode.py T_BIGINT strict.
+func strictCheckBigInt(le []byte) error {
+	v := bigIntFromLE(le)
+	int64Min := new(big.Int).Lsh(big.NewInt(-1), 63)                                    // -2^63
+	uint64Max := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 64), big.NewInt(1))  // 2^64-1
+	if v.Cmp(int64Min) >= 0 && v.Cmp(uint64Max) <= 0 {
+		return fmt.Errorf("%w: bigint fits Int/Uint", ErrNonCanonical)
+	}
+	if !bytes.Equal(le, minTwosComplementLE(v)) {
+		return fmt.Errorf("%w: non-minimal bigint", ErrNonCanonical)
+	}
+	return nil
+}
+
+// decimalNotLowestTerms reports whether a Decimal128 coefficient (16-byte LE
+// signed) is non-canonical: non-zero and divisible by 10. Mirrors
+// model.Decimal128.canonical (the scale-stripping loop touches scale only, so
+// coeff%10==0 with coeff!=0 means the value is not in lowest terms).
+func decimalNotLowestTerms(coefLE []byte) bool {
+	c := bigIntFromLE(coefLE)
+	if c.Sign() == 0 {
+		return false
+	}
+	rem := new(big.Int).Mod(new(big.Int).Abs(c), big.NewInt(10))
+	return rem.Sign() == 0
+}
+
+// dtypeBits returns the bit-width per element for a dtype (including sub-byte
+// quantized types), mirroring model.DTYPE_BITS.
+func dtypeBits(d DType) (uint64, bool) {
+	switch d {
+	case DTypeFloat32:
+		return 32, true
+	case DTypeFloat16, DTypeBFloat16, DTypeInt16, DTypeUint16:
+		return 16, true
+	case DTypeInt8, DTypeUint8, DTypeBool:
+		return 8, true
+	case DTypeInt32, DTypeUint32:
+		return 32, true
+	case DTypeInt64, DTypeUint64, DTypeFloat64:
+		return 64, true
+	case DTypeQINT4:
+		return 4, true
+	case DTypeQINT2, DTypeTernary:
+		return 2, true
+	case DTypeQINT3:
+		return 3, true
+	case DTypeBinary:
+		return 1, true
+	default:
+		return 0, false
+	}
+}
+
+// tensorTotalBits computes nelem * bitsPerElem for a tensor, returning ok=false
+// on unknown dtype or multiplication overflow. Rank-0 is one element.
+func tensorTotalBits(d DType, dims []uint64) (uint64, bool) {
+	bpe, ok := dtypeBits(d)
+	if !ok {
+		return 0, false
+	}
+	nelem := uint64(1)
+	for _, dim := range dims {
+		if dim == 0 {
+			return 0, true
+		}
+		if nelem > (^uint64(0))/dim {
+			return 0, false
+		}
+		nelem *= dim
+	}
+	if bpe > 0 && nelem > (^uint64(0))/bpe {
+		return 0, false
+	}
+	return nelem * bpe, true
 }

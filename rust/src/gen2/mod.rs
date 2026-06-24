@@ -18,8 +18,8 @@ pub(crate) mod tags;
 pub mod types;
 
 // Re-export main types
-pub use compress::{decode_framed, encode_framed, Compression};
-pub use decode::{decode, decode_with_options, DecodeOptions};
+pub use compress::{decode_framed, decode_framed_strict, encode_framed, Compression};
+pub use decode::{decode, decode_strict, decode_with_options, DecodeOptions};
 pub use encode::{encode, encode_with_options, EncodeOptions};
 pub use json::{from_json, to_json, to_json_pretty};
 pub use master_stream::{read_frame, write_frame, MasterFrame, MasterWriterOptions};
