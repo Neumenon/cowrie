@@ -21,6 +21,22 @@
   via the Extension envelope (§1.3), never via unknown core tags.
 - **Always headered.** Every stream has the header; there is no headerless mode.
 
+### 0.1 Core-admission rule (standing law)
+> **A type may enter Core only if its value domain, equality, canonical encoding, error behavior, and
+> conformance fixtures are fully specified WITHOUT external state.** Otherwise it is a Profile, Stream-layer,
+> Dataset-layer, Tool, or Integration concern — never a Core wire variant.
+
+This is why `TensorRef` (needs an external store), graph/richtext/delta (application semantics), and
+media codecs (external codec ecosystems) are **not** Core. It is the rule that keeps Core deterministic
+and prevents a second source of spec entropy.
+
+### 0.2 Doctrine (organizing principle)
+**Core is physics · Profiles are chemistry · Applications are biology.** Core = a small set of strongly
+specified, composable primitives. Everything else is a **Profile** — a recommended *schema over Core
+types*, carrying no new wire tag. Build determinism-first: a layer (Core → Tensor → Stream → Profiles →
+Manifest → Tools) is "done" only when its canonical spec is frozen **and** the cross-language fixture
+gate is green. New use cases should *fall out of* strong primitives, not be predicted as new Core types.
+
 ## 1. The value model (the algebra)
 A Cowrie *value* is exactly one of the variants below, each with a precise **value domain**. Canonical
 encoding (§3) is a total function from this domain to bytes; decoding is its inverse. Two values are
@@ -182,12 +198,105 @@ Use `SPEC.md` Appendix C verbatim (already authored: integers, value-decidable f
 byte-sorted keys/dictionary, decimal, tensor/bitmask, uncompressed identity, extensions, framing
 hygiene, conformance obligations). To be folded in here once §2 is settled.
 
-## 4. Fingerprint grammar — TODO
-Replace `FNV-1a(type_structure)` hand-waving with a normative **per-variant contribution table**
-(decoupled from any host enum/`iota`; the B4 root) + golden test vectors. Unknown-extension
-contributes the fixed sentinel from §1.3.
+## 4. Schema fingerprint (NORMATIVE grammar)
+The fingerprint captures **type structure, not values**. It is `FNV-1a-64` over the byte sequence
+produced by `fp(value)` below. The contribution bytes use a **dedicated, spec-pinned fingerprint-code
+table** — NOT the wire tag and NOT any host-language enum/`iota` (binding to `iota` is the B4 root bug).
 
-## 5. Conformance — TODO
-Fixture manifest format; the cross-language gate obligations (C.11): byte-identical canonical
-re-encode, cross-language symmetry, idempotence, semantic AST equality, anti-malleability negative
-fixtures, fingerprint equality. A new-language port passing this suite is the definition of "done."
+### 4.1 Fingerprint codes (FPC) — frozen, append-only
+```
+Null 0x00  Bool 0x01  Int 0x02  Uint 0x03  BigInt 0x04  Float 0x05  Decimal128 0x06
+String 0x07  Bytes 0x08  UUID 0x09  Datetime 0x0A  Array 0x0B  Object 0x0C  Tensor 0x0D
+Bitmask 0x0E  Extension 0x0F
+```
+Note: `Int`, `Uint`, `BigInt` are **distinct** FPCs (a schema's number width is part of its type).
+
+### 4.2 `fp(value)` → bytes
+- **Scalars** (Null…Datetime): the single FPC byte. (No value bytes — structure only.)
+- **Array:** `0x0B` + `uvarint(len)` + `fp(eᵢ)` for each element in order. (So `[Int,String]` ≠ `[Int,Int]`.)
+- **Object:** `0x0C` + `uvarint(nKeys)` + for each key in **byte-sorted** order: `uvarint(keyLen)` +
+  key UTF-8 bytes + `fp(value)`. (Keys + value-types; order canonical.)
+- **Tensor:** `0x0D` + `dtype:u8` + `rank:u8`. (dtype and rank are structure; shape *values* are not.)
+- **Bitmask:** `0x0E`.
+- **Extension:** `0x0F` + the **fixed sentinel** `0x00` — never the `extType` or payload (per §1.3/K12),
+  so an unknown future extension never perturbs the fingerprint of documents that merely carry it.
+
+### 4.3 Computation
+```
+fingerprint64 = FNV1a64(concat of fp(root))     # offset basis 0xcbf29ce484222325, prime 0x100000001b3
+fingerprint32 = fingerprint64 & 0xFFFFFFFF
+```
+A `FINGERPRINT_VERSION` (currently 1) covers this grammar + the FPC table; bumping it is the only way
+the table changes, and the table is append-only.
+
+### 4.4 Conformance
+Golden fingerprint vectors live in `testdata/**/*.fingerprint`; every implementation MUST reproduce
+`fingerprint64`/`fingerprint32` **byte-identically** for every fixture, computed from the decoded value
+(structure) — this is the release gate that kills B4. *(Vectors to be generated from this grammar, not
+from any implementation.)*
+
+## 5. Conformance (NORMATIVE)
+A `manifest.json` lists cases. Fixtures are **generated from this spec**, never from an implementation.
+
+### 5.1 Case shape
+```
+{ id, kind: "decode"|"from_json", file: "<path>.cow",
+  expect: { ok: bool, json?: <value>, error?: "ERR_*", fingerprint64?: <u64>, canonical?: <hex> } }
+```
+
+### 5.2 Obligations a conformant implementation MUST satisfy (every positive fixture)
+1. **Round-trip identity:** `canonical_encode(decode(bytes)) == bytes` (byte-exact).
+2. **Cross-language byte-identity:** every language's canonical encoding of a value is identical.
+3. **Cross-language symmetry:** `EncodeₐReference == Encodeᵦ ∘ Decodeₐ` for all language pairs.
+4. **Idempotence:** `encode(decode(canonical)) == canonical`.
+5. **Semantic AST equality:** decoded values compare equal (per §1 domains) before byte comparison.
+6. **Fingerprint equality:** §4 `fingerprint64` matches the golden value across languages.
+
+### 5.3 Negative / anti-malleability fixtures (MUST reject in strict mode)
+Overlong varint, unsorted dict/keys, non-minimal int (e.g. `TagInt64` for a FIXINT value), duplicate
+key, `−0`/non-canonical NaN, compressed-as-identity, BigInt/Uint for a smaller-fitting value, non-zero
+sub-byte/bitmask trailing bits, trailing data, reserved/unknown core tag — each ⇒ the specific `ERR_*`
+of §2.6 (or `ERR_NON_CANONICAL`). The strict decoder MUST NOT silently re-canonicalize.
+
+### 5.4 Definition of "done"
+**A new-language implementation written from this document alone (no source reference) passes 5.2 + 5.3
+on the full fixture suite.** That, and only that, is conformance — and it is the meaning of "v1 done."
+
+## 6. Profiles (chemistry over physics)
+A **Profile** is a recommended **schema over Core types** (Object/Array/Tensor/Bytes/…) — it adds NO
+wire tag and needs NO new decoder code; any v1 implementation already decodes it. Profiles carry
+*meaning*; Core carries *bytes*. A Profile may define its own equality/identity rule layered on Core's,
+but MUST NOT depend on external state to *decode* (per §0.1). Profiles live in `docs/profiles/`.
+
+### 6.1 TensorRef Profile (pin carefully — it is the dangerous one)
+A pointer to a tensor stored elsewhere, expressed as an Object:
+```
+TensorRef = Object{
+  hash:    Bytes,        // SHA-256 of the referenced tensor's CANONICAL bytes  ← the identity
+  dtype:   String,       // DType name, e.g. "Float32"
+  shape:   Array<Int>,
+  byteLen: Int,
+  store:   String?       // OPTIONAL URI HINT only
+}
+```
+Normative rules (these prevent the nondeterminism a naive ref reintroduces):
+- **Identity = `hash`** (= hash of the referenced tensor's canonical bytes), never a hash of the ref
+  Object and never the fetched bytes at decode time.
+- `store` is a **hint, not semantics** — two refs with the same `hash` and different `store` are equal.
+- **No existence/resolution check at decode.** Resolution (fetch + verify `hash`) is an application step.
+
+### 6.2 Embedding Profile (the first killer profile)
+```
+EmbeddingRecord = Object{ id, vector: Tensor<f32>[D], model, modelVersion, metric, normalized: Bool,
+                          sourceRef?, createdAt: Datetime }
+```
+Vector is a real Tensor (not a JSON float array). Identity is the Core identity of the Object.
+
+### 6.3 Other profiles (stubs — schemas over Core, defined as needed)
+Media (Image/Audio/Video as `Object{format, bytes, ...}` opaque envelopes), Graph (Node/Edge as Object
+schemas), RichText (text + token-span arrays), Eval, Trace, TrainingBatch, DatasetManifest/Shards.
+
+### 6.4 Profile-simulation gate (de-risks the "emergence" bet)
+**Before Core is frozen at 1.0**, the Embedding, Media, and Trace profiles MUST be fully expressible as
+schemas over the locked Core with no Core change required. If any profile needs a new Core capability,
+add it *before* freeze — thawing Core after 1.0 breaks determinism. This is a release gate, not advice.
