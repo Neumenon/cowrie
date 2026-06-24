@@ -20,13 +20,25 @@ from .fingerprint import fingerprint
 from .model import Bitmask, Decimal128, Datetime, Extension, Tensor, Uuid
 
 __all__ = [
-    "encode", "encode_value", "decode", "fingerprint", "CowrieError", "roundtrip_ok",
+    "encode", "encode_value", "decode", "fingerprint", "CowrieError", "roundtrip_ok", "value_eq",
     "Bitmask", "Decimal128", "Datetime", "Extension", "Tensor", "Uuid",
 ]
 __version__ = "0.1.0"
 
 
+def value_eq(a: object, b: object) -> bool:
+    """Semantic equality (§1 domains), NaN-aware and structural."""
+    import math
+    if isinstance(a, float) and isinstance(b, float):
+        return a == b or (math.isnan(a) and math.isnan(b))
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(value_eq(x, y) for x, y in zip(a, b))
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(value_eq(a[k], b[k]) for k in a)
+    return a == b
+
+
 def roundtrip_ok(value: object) -> bool:
     """Bijectivity check (§3): ``encode`` is stable through a strict decode."""
     blob = encode(value)
-    return encode(decode(blob)) == blob and decode(blob) == value
+    return encode(decode(blob)) == blob and value_eq(decode(blob), value)

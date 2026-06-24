@@ -207,5 +207,291 @@
     "canonical_hex": "434f575201000301780179017ad200c2414201d10243",
     "fingerprint64": 7225598578064645125,
     "fingerprint32": 3072089093
+  },
+  "int64_min": {
+    "value": -9223372036854775808,
+    "canonical_hex": "434f575201000003ffffffffffffffffff01",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "int64_max": {
+    "value": 9223372036854775807,
+    "canonical_hex": "434f575201000003feffffffffffffffff01",
+    "fingerprint64": 12638155314718423877,
+    "fingerprint32": 2248260421
+  },
+  "uint64_max": {
+    "value": 18446744073709551615,
+    "canonical_hex": "434f575201000009ffffffffffffffffff01",
+    "fingerprint64": 12638154215206795666,
+    "fingerprint32": 2248259986
+  },
+  "bigint_above_uint64": {
+    "value": 18446744073709551616,
+    "canonical_hex": "434f57520100000d09000000000000000001",
+    "fingerprint64": 12638148717648654611,
+    "fingerprint32": 2248257811
+  },
+  "bigint_below_int64": {
+    "value": -9223372036854775809,
+    "canonical_hex": "434f57520100000d09ffffffffffffff7fff",
+    "fingerprint64": 12638148717648654611,
+    "fingerprint32": 2248257811
+  },
+  "float_neg": {
+    "value": -1.5,
+    "canonical_hex": "434f575201000004000000000000f8bf",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "float_nan": {
+    "value": NaN,
+    "canonical_hex": "434f575201000004000000000000f87f",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "float_inf": {
+    "value": Infinity,
+    "canonical_hex": "434f575201000004000000000000f07f",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "float_neg_inf": {
+    "value": -Infinity,
+    "canonical_hex": "434f575201000004000000000000f0ff",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "float_subnormal": {
+    "value": 5e-324,
+    "canonical_hex": "434f5752010000040100000000000000",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "float_max": {
+    "value": 1.7976931348623157e+308,
+    "canonical_hex": "434f575201000004ffffffffffffef7f",
+    "fingerprint64": 12638147618137026400,
+    "fingerprint32": 2248257376
+  },
+  "str_empty": {
+    "value": "",
+    "canonical_hex": "434f57520100000500",
+    "fingerprint64": 12638149817160282822,
+    "fingerprint32": 2248258246
+  },
+  "str_4byte": {
+    "value": "\ud800\udc00",
+    "canonical_hex": "434f57520100000504f0908080",
+    "fingerprint64": 12638149817160282822,
+    "fingerprint32": 2248258246
+  },
+  "bytes_empty": {
+    "value": "b''",
+    "canonical_hex": "434f57520100000800",
+    "fingerprint64": 12638161911788193143,
+    "fingerprint32": 2248263031
+  },
+  "decimal_neg_one": {
+    "value": "Decimal128(coefficient=-1, scale=0)",
+    "canonical_hex": "434f57520100000a00ffffffffffffffffffffffffffffffff",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "decimal_neg_scale": {
+    "value": "Decimal128(coefficient=123, scale=-2)",
+    "canonical_hex": "434f57520100000a037b000000000000000000000000000000",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "decimal_neg_coeff": {
+    "value": "Decimal128(coefficient=-12345, scale=2)",
+    "canonical_hex": "434f57520100000a04c7cfffffffffffffffffffffffffffff",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "decimal_max_coeff": {
+    "value": "Decimal128(coefficient=170141183460469231731687303715884105727, scale=0)",
+    "canonical_hex": "434f57520100000a00ffffffffffffffffffffffffffffff7f",
+    "fingerprint64": 12638150916671911033,
+    "fingerprint32": 2248258681
+  },
+  "datetime_epoch": {
+    "value": "Datetime(nanos=0)",
+    "canonical_hex": "434f57520100000b0000000000000000",
+    "fingerprint64": 12638164110811449565,
+    "fingerprint32": 2248263901
+  },
+  "datetime_neg": {
+    "value": "Datetime(nanos=-1)",
+    "canonical_hex": "434f57520100000bffffffffffffffff",
+    "fingerprint64": 12638164110811449565,
+    "fingerprint32": 2248263901
+  },
+  "datetime_max": {
+    "value": "Datetime(nanos=9223372036854775807)",
+    "canonical_hex": "434f57520100000bffffffffffffff7f",
+    "fingerprint64": 12638164110811449565,
+    "fingerprint32": 2248263901
+  },
+  "datetime_min": {
+    "value": "Datetime(nanos=-9223372036854775808)",
+    "canonical_hex": "434f57520100000b0000000000000080",
+    "fingerprint64": 12638164110811449565,
+    "fingerprint32": 2248263901
+  },
+  "arr_15": {
+    "value": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14
+    ],
+    "canonical_hex": "434f5752010000cf404142434445464748494a4b4c4d4e",
+    "fingerprint64": 10482182005259327015,
+    "fingerprint32": 779703847
+  },
+  "arr_16": {
+    "value": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "canonical_hex": "434f57520100000610404142434445464748494a4b4c4d4e4f",
+    "fingerprint64": 7119791634709934894,
+    "fingerprint32": 4256101166
+  },
+  "obj_15": {
+    "value": {
+      "k00": 0,
+      "k01": 1,
+      "k02": 2,
+      "k03": 3,
+      "k04": 4,
+      "k05": 5,
+      "k06": 6,
+      "k07": 7,
+      "k08": 8,
+      "k09": 9,
+      "k10": 10,
+      "k11": 11,
+      "k12": 12,
+      "k13": 13,
+      "k14": 14
+    },
+    "canonical_hex": "434f575201000f036b3030036b3031036b3032036b3033036b3034036b3035036b3036036b3037036b3038036b3039036b3130036b3131036b3132036b3133036b3134df00400141024203430444054506460747084809490a4a0b4b0c4c0d4d0e4e",
+    "fingerprint64": 5997776471692666564,
+    "fingerprint32": 1701832388
+  },
+  "obj_16": {
+    "value": {
+      "k00": 0,
+      "k01": 1,
+      "k02": 2,
+      "k03": 3,
+      "k04": 4,
+      "k05": 5,
+      "k06": 6,
+      "k07": 7,
+      "k08": 8,
+      "k09": 9,
+      "k10": 10,
+      "k11": 11,
+      "k12": 12,
+      "k13": 13,
+      "k14": 14,
+      "k15": 15
+    },
+    "canonical_hex": "434f5752010010036b3030036b3031036b3032036b3033036b3034036b3035036b3036036b3037036b3038036b3039036b3130036b3131036b3132036b3133036b3134036b3135071000400141024203430444054506460747084809490a4a0b4b0c4c0d4d0e4e0f4f",
+    "fingerprint64": 12476306175005681647,
+    "fingerprint32": 641329135
+  },
+  "tensor_int8_3": {
+    "value": "Tensor(dtype=4, shape=(3,), data=b'\\x01\\x02\\x03')",
+    "canonical_hex": "434f57520100002004010303010203",
+    "fingerprint64": 5746251832264630884,
+    "fingerprint32": 3021087332
+  },
+  "tensor_bool_4": {
+    "value": "Tensor(dtype=13, shape=(4,), data=b'\\x01\\x00\\x01\\x00')",
+    "canonical_hex": "434f5752010000200d01040401000100",
+    "fingerprint64": 1375189534952943946,
+    "fingerprint32": 2444521802
+  },
+  "tensor_empty_dim": {
+    "value": "Tensor(dtype=4, shape=(0, 3), data=b'')",
+    "canonical_hex": "434f5752010000200402000300",
+    "fingerprint64": 11242847766596097631,
+    "fingerprint32": 4290844255
+  },
+  "tensor_binary_9": {
+    "value": "Tensor(dtype=20, shape=(9,), data=b'\\xff\\x01')",
+    "canonical_hex": "434f57520100002014010902ff01",
+    "fingerprint64": 14206345094823554434,
+    "fingerprint32": 1704078722
+  },
+  "tensor_qint4_3": {
+    "value": "Tensor(dtype=16, shape=(3,), data=b'!\\x03')",
+    "canonical_hex": "434f575201000020100103022103",
+    "fingerprint64": 11709690638373109000,
+    "fingerprint32": 1374829832
+  },
+  "bitmask_0": {
+    "value": "Bitmask(bits=())",
+    "canonical_hex": "434f57520100002400",
+    "fingerprint64": 596423518518559459,
+    "fingerprint32": 3036463843
+  },
+  "bitmask_1": {
+    "value": "Bitmask(bits=(True,))",
+    "canonical_hex": "434f5752010000240101",
+    "fingerprint64": 596422419006931248,
+    "fingerprint32": 3036463408
+  },
+  "bitmask_8": {
+    "value": "Bitmask(bits=(True, True, True, True, True, True, True, True))",
+    "canonical_hex": "434f57520100002408ff",
+    "fingerprint64": 596432314611585147,
+    "fingerprint32": 3036467323
+  },
+  "bitmask_9": {
+    "value": "Bitmask(bits=(True, True, True, True, True, True, True, True, True))",
+    "canonical_hex": "434f57520100002409ff01",
+    "fingerprint64": 596431215099956936,
+    "fingerprint32": 3036466888
+  },
+  "dfs_global_sort": {
+    "value": {
+      "z": {
+        "a": 1
+      }
+    },
+    "canonical_hex": "434f57520100020161017ad101d10041",
+    "fingerprint64": 6580773593216541858,
+    "fingerprint32": 1928422562
   }
 }

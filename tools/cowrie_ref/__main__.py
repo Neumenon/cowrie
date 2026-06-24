@@ -10,7 +10,7 @@ import os
 import struct
 import sys
 
-from . import Bitmask, Datetime, Decimal128, Extension, Tensor, Uuid, decode, encode, fingerprint, roundtrip_ok
+from . import Bitmask, Datetime, Decimal128, Extension, Tensor, Uuid, decode, encode, fingerprint, roundtrip_ok, value_eq
 
 # Golden cases — exercise every canonical edge across the full Core.
 CASES: dict[str, object] = {
@@ -30,6 +30,26 @@ CASES: dict[str, object] = {
     "arr_123": [1, 2, 3], "arr_empty": [], "obj_empty": {},
     "obj_a1": {"a": 1}, "obj_ba": {"b": 1, "a": 2},
     "nested": {"x": [1, 2], "y": {"z": 3}},
+    # --- boundary / edge cases (coverage expansion) ---
+    "int64_min": -(2**63), "int64_max": 2**63 - 1, "uint64_max": 2**64 - 1,
+    "bigint_above_uint64": 2**64, "bigint_below_int64": -(2**63) - 1,
+    "float_neg": -1.5, "float_nan": float("nan"), "float_inf": float("inf"),
+    "float_neg_inf": float("-inf"), "float_subnormal": 5e-324, "float_max": 1.7976931348623157e308,
+    "str_empty": "", "str_4byte": "\U00010000", "bytes_empty": b"",
+    "decimal_neg_one": Decimal128(-1, 0), "decimal_neg_scale": Decimal128(123, -2),
+    "decimal_neg_coeff": Decimal128(-12345, 2), "decimal_max_coeff": Decimal128(2**127 - 1, 0),
+    "datetime_epoch": Datetime(0), "datetime_neg": Datetime(-1),
+    "datetime_max": Datetime(2**63 - 1), "datetime_min": Datetime(-(2**63)),
+    "arr_15": list(range(15)), "arr_16": list(range(16)),
+    "obj_15": {f"k{i:02d}": i for i in range(15)}, "obj_16": {f"k{i:02d}": i for i in range(16)},
+    "tensor_int8_3": Tensor(0x04, (3,), b"\x01\x02\x03"),
+    "tensor_bool_4": Tensor(0x0D, (4,), b"\x01\x00\x01\x00"),
+    "tensor_empty_dim": Tensor(0x04, (0, 3), b""),
+    "tensor_binary_9": Tensor(0x14, (9,), b"\xff\x01"),
+    "tensor_qint4_3": Tensor(0x10, (3,), b"\x21\x03"),
+    "bitmask_0": Bitmask(()), "bitmask_1": Bitmask((True,)),
+    "bitmask_8": Bitmask((True,) * 8), "bitmask_9": Bitmask((True,) * 9),
+    "dfs_global_sort": {"z": {"a": 1}},
 }
 
 
@@ -48,7 +68,7 @@ def _gen() -> int:
     for name, value in CASES.items():
         blob = encode(value)
         assert roundtrip_ok(value), f"round-trip failed: {name}"
-        assert decode(blob) == value, f"value mismatch: {name}"
+        assert value_eq(decode(blob), value), f"value mismatch: {name}"
         h64, h32 = fingerprint(value)
         out[name] = {"value": _safe(value), "canonical_hex": blob.hex(), "fingerprint64": h64, "fingerprint32": h32}
         print(f"{name:14} {blob.hex():<52} fp64={h64:016x}")

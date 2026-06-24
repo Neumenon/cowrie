@@ -20,7 +20,7 @@ from cowrie_ref.errors import ERR_NON_CANONICAL, ERR_TRAILING_DATA, ERR_INVALID_
 def test_roundtrip(name: str) -> None:
     value = CASES[name]
     blob = c.encode(value)
-    assert c.decode(blob) == value                  # value survives
+    assert c.value_eq(c.decode(blob), value)        # value survives (NaN-aware)
     assert c.encode(c.decode(blob)) == blob         # bytes are stable (bijectivity, §3)
     assert c.roundtrip_ok(value)
 
