@@ -78,6 +78,9 @@ run() {
   "$@" || fail "${label}"
 }
 
+# (0) Monotonic coverage floor — conformance corpus must only ever grow (1.0 freeze gate).
+run "count_guard" "${PY}" tools/count_guard.py
+
 # (a) Python reference unit tests (the executable spec).
 run "pytest cowrie_ref" "${PY}" -m pytest tools/cowrie_ref/tests -q
 
