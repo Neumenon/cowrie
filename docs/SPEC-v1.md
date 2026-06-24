@@ -35,7 +35,7 @@ gate's "semantic AST equality" uses.
 | **Int** | ℤ ∩ [−2⁶³, 2⁶³−1] | signed 64-bit |
 | **Uint** | ℤ ∩ [2⁶³, 2⁶⁴−1] | ONLY values above Int's range; values ≤ 2⁶³−1 are **Int**, never Uint (canonical disjointness) |
 | **BigInt** | ℤ outside [−2⁶³, 2⁶⁴−1] | arbitrary-precision; smaller integers are Int/Uint, never BigInt |
-| **Float** | IEEE-754 binary64 values, **plus** the marker that the value is exactly representable in binary32 | `−0.0`≡`+0.0`; exactly one canonical NaN; ±∞ allowed. Wire width is value-decidable (§3, C.2), not a separate type — so equality is over the normalized real/NaN/∞, and width follows from it. |
+| **Float** | IEEE-754 binary64 | `−0.0`≡`+0.0`; exactly one canonical quiet NaN; ±∞ allowed. **One scalar float type only** — no scalar f32 (bulk f32 lives in Tensor, §1.2). This deletes the K10 dual-encode ambiguity at the source: one wire form per float value. |
 | **Decimal128** | (coefficient ∈ ℤ∩[−2¹²⁷,2¹²⁷−1], scale ∈ ℤ) in lowest terms | canonical: no trailing-zero coefficient foldable into a smaller scale; 0 ≡ (coeff 0, scale 0) |
 | **String** | finite sequences of Unicode scalar values, valid UTF-8 | NOT Unicode-normalized (byte-preserving) |
 | **Bytes** | finite byte sequences | — |
@@ -91,33 +91,45 @@ COWR (0x43 0x4F 0x57 0x52) | version:u8 (0x01) | compression:u8 | DictLen:uvarin
 | 0x01 | Bool false | — |
 | 0x02 | Bool true | — |
 | 0x03 | Int | svarint |
-| 0x04 | Float (f64) | 8 bytes IEEE-754 binary64 **LE** |
+| 0x04 | Float | 8 bytes IEEE-754 binary64 **LE** — the only scalar float |
 | 0x05 | String | len:uvarint + UTF-8 |
 | 0x06 | Array | count:uvarint + count values |
 | 0x07 | Object | count:uvarint + count × (dictIdx:uvarint + value) |
 | 0x08 | Bytes | len:uvarint + raw bytes |
 | 0x09 | Uint | uvarint (no zigzag) |
-| 0x0A | Decimal128 | scale:**s**int8 + coefficient:16-byte two's-complement **big-endian** |
-| 0x0B | Datetime | int64 nanos since Unix epoch UTC, **LE** |
-| 0x0C | UUID | 16 bytes, RFC-4122 field order (**big-endian**) |
-| 0x0D | BigInt | len:uvarint + two's-complement bytes **big-endian**, minimal length |
+| 0x0A | Decimal128 | scale:svarint + coefficient:16-byte two's-complement **LE** |
+| 0x0B | Datetime | int64 nanos since Unix epoch UTC, **LE** (range ±2⁶³ ns ≈ ±292 yr; out of int64 ⇒ `ERR_TOO_LARGE`) |
+| 0x0C | UUID | 16 bytes, RFC-4122 field order (**big-endian**) — the sole BE field |
+| 0x0D | BigInt | len:uvarint + two's-complement bytes **LE**, minimal length |
 | 0x0E | Extension | extType:uvarint + len:uvarint + payload |
-| 0x0F | Float (f32) | 4 bytes IEEE-754 binary32 **LE** |
 | 0x20 | Tensor | dtype:u8 + rank:u8 + dims:uvarint×rank + dataLen:uvarint + data (LE elements) |
 | 0x24 | Bitmask | count:uvarint + ⌈count/8⌉ bytes, LSB-first; trailing bits of last byte = 0 |
 | 0x40–0xBF | FIXINT | value = tag − 0x40 (0..127); single byte |
 | 0xC0–0xCF | FIXARRAY | count = tag − 0xC0 (0..15), then count values |
 | 0xD0–0xDF | FIXMAP | count = tag − 0xD0 (0..15), then count × (dictIdx:uvarint + value) |
 | 0xE0–0xEF | FIXNEG | value = −1 − (tag − 0xE0) (−1..−16); single byte |
-| all other tags | **reject** | `ERR_RESERVED_TAG` (incl. legacy 0x16–0x19, 0x21–0x23, 0x30–0x39, 0xF0–0xFF) |
+| all other tags | **reject** | `ERR_RESERVED_TAG` (incl. legacy 0x0F, 0x16–0x19, 0x21–0x23, 0x30–0x39, 0xF0–0xFF) |
 
-> Deleted vs legacy: proto-tensor arrays (0x16–0x19), TensorRef (0x21), Image/Audio (0x22/0x23 —
-> see §2.9), all graph/RichText/Delta tags (0x30–0x39). They are `ERR_RESERVED_TAG` in v1.
+> Deleted vs legacy: **scalar Float32 (0x0F)** — see §1.1; bulk f32 → Tensor dtype Float32. Also
+> proto-tensor arrays (0x16–0x19), TensorRef (0x21), Image/Audio (0x22/0x23 — see §2.9), all
+> graph/RichText/Delta tags (0x30–0x39). All are `ERR_RESERVED_TAG` in v1.
+
+### 2.3.1 Endianness & canonical number form
+- **All multi-byte numeric fields are little-endian** (Float, Datetime, Decimal128 coefficient,
+  BigInt, Tensor elements). **UUID is the sole exception** (RFC-4122 big-endian field order). This
+  removes the LE/BE mix that breeds bugs.
+- **Canonical integer choice (governs which tag):** smallest valid form — `0..127` → FIXINT,
+  `−1..−16` → FIXNEG, values fitting Int64 → Int (0x03), non-negative > Int64::MAX → Uint (0x09),
+  else BigInt (0x0D). A decoder MUST reject (`ERR_NON_CANONICAL`) any BigInt/Uint/Int that encodes
+  a value representable in a smaller form. Likewise FIXARRAY/FIXMAP for ≤15 elements/fields.
+- **Float canonical bytes:** `+0.0` = `00 00 00 00 00 00 00 00`; `−0.0` MUST normalize to it; the one
+  canonical quiet NaN is `0x7FF8000000000000` (LE on the wire); any other NaN/`−0` ⇒ `ERR_NON_CANONICAL`.
 
 ### 2.4 Object & dictionary
-- An Object body (0x07 / FIXMAP) is `count` pairs `(dictIdx:uvarint, value)`. `dictIdx` indexes the
-  header Dict; out-of-range ⇒ `ERR_INVALID_FIELD_ID`. Canonical emits pairs in ascending dictIdx
-  (== byte-sorted key) order with unique keys (Appendix C.4); duplicate ⇒ `ERR_DUPLICATE_KEY`.
+- An Object body (0x07 / FIXMAP) is `count` pairs `(dictIdx:uvarint, value)`. **`dictIdx` is the
+  0-based positional index** of the key in the header Dict sequence; out-of-range ⇒ `ERR_INVALID_FIELD_ID`.
+  Canonical emits pairs in ascending dictIdx (== byte-sorted key, Appendix C.4) with unique keys;
+  duplicate ⇒ `ERR_DUPLICATE_KEY`.
 
 ### 2.5 DType enum (Tensor) — explicit values + element size
 | DType | val | bytes/elem | | DType | val | bytes/elem |
@@ -132,9 +144,14 @@ COWR (0x43 0x4F 0x57 0x52) | version:u8 (0x01) | compression:u8 | DictLen:uvarin
 | QINT4 | 0x10 | ½ (packed) | | Ternary | 0x13 | packed |
 | QINT2 | 0x11 | ¼ (packed) | | Binary | 0x14 | ⅛ (1 bit) |
 | QINT3 | 0x12 | ⅜ (packed) | | | | |
-- `dataLen` MUST equal `ceil(product(shape) × bits_per_elem / 8)`; mismatch ⇒ `ERR_TOO_LARGE`/length error.
-  Sub-byte dtypes (QINT*/Ternary/Binary) pack LSB-first; trailing bits of the final byte = 0. Unknown
-  dtype byte ⇒ `ERR_INVALID_TAG`. *(Sub-byte packing layout to be pinned with fixtures.)*
+- **Shape:** `rank` = number of dims. **rank 0 = scalar** (exactly 1 element, no dims; `product = 1`).
+  A dim MAY be 0 (empty tensor, 0 elements). `[1]` and `[1,1]` are distinct shapes (different rank).
+- **`bits_per_elem`:** full-byte dtypes per §2.5 table; sub-byte: Binary=1, QINT2=2, Ternary=2,
+  QINT3=3, QINT4=4. `dataLen` MUST equal `ceil(product(shape) × bits_per_elem / 8)`; mismatch ⇒ length error.
+- **Sub-byte packing:** elements are packed in row-major order, **LSB-first within each byte** — element
+  e₀ occupies the lowest `bits_per_elem` bits of byte 0, e₁ the next, crossing byte boundaries with no
+  per-element padding. The final byte's unused high bits MUST be 0 (non-zero ⇒ `ERR_NON_CANONICAL`).
+  Unknown dtype byte ⇒ `ERR_INVALID_TAG`.
 
 ### 2.6 Error codes (canonical) + precedence
 Existing: `ERR_INVALID_MAGIC, ERR_INVALID_VERSION, ERR_TRUNCATED, ERR_INVALID_TAG, ERR_TRAILING_DATA,
