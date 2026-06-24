@@ -25,6 +25,7 @@ class _Decoder:
         self.pos = 0
         self.strict = strict
         self.keys: list[str] = []
+        self.spans: list[tuple[int, tuple[int, ...], int, int]] = []  # (dtype, shape, data_offset, data_len)
 
     # -- low-level reads --
     def _take(self, n: int) -> bytes:
@@ -139,7 +140,10 @@ class _Decoder:
             for d in shape:
                 nelem *= d
             bits = nelem * m.DTYPE_BITS[dtype]
-            data = self._take(self._uvarint())
+            dlen = self._uvarint()
+            data_off = self.pos
+            data = self._take(dlen)
+            self.spans.append((dtype, shape, data_off, dlen))
             if len(data) != (bits + 7) // 8:
                 raise self._bad(ERR_NON_CANONICAL, "tensor dataLen mismatch")
             if self.strict and bits % 8 and data and data[-1] >> (bits % 8):
@@ -183,3 +187,17 @@ def decode(data: bytes, strict: bool = True) -> object:
     if dec.pos != len(data):
         raise CowrieError(ERR_TRAILING_DATA)
     return root
+
+
+def tensor_spans(data: bytes, strict: bool = True) -> list[tuple[int, tuple[int, ...], int, int]]:
+    """Locate every tensor's ``(dtype, shape, data_offset, data_len)`` within a canonical message, in
+    document order. ``data_offset`` is the ABSOLUTE byte offset of the tensor's contiguous little-endian
+    data run — a zero-copy reader mmaps the message and views ``data[data_offset : data_offset+data_len]``
+    with no decode/copy. Non-breaking: reads the existing canonical layout (no alignment yet, see
+    docs/PHASE2-TENSOR.md)."""
+    dec = _Decoder(data, strict=strict)
+    dec.header()
+    dec.value()
+    if dec.pos != len(data):
+        raise CowrieError(ERR_TRAILING_DATA)
+    return dec.spans
