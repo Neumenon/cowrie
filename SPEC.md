@@ -488,3 +488,88 @@ Gen2 supports schema fingerprinting using FNV-1a (64-bit):
 fingerprint = FNV-1a(type_structure)
 fingerprint32 = fingerprint & 0xFFFFFFFF
 ```
+
+---
+
+# Appendix C — Canonical Encoding Profile (NORMATIVE)
+
+> **Goal & completeness bar:** this appendix defines exactly ONE canonical byte-string per
+> logical value. It is written so a new-language implementation can be built and pass every
+> conformance fixture using **this document alone** — never by reading the Go, Rust, Python,
+> or TS source. If any rule here is ambiguous, that is a spec bug: file it; do not resolve it
+> by copying an implementation.
+>
+> **No legacy:** Cowrie has no shipped users. There is therefore NO backward-compatibility,
+> migration, or version-epoch obligation — the canonical form is defined correctly from the
+> start, and non-canonical input is simply rejected.
+
+## C.0 Modes
+- **Canonical encode (MUST):** every encoder produces the canonical byte-string for a value.
+- **Strict decode (MUST):** a strict decoder MUST `ERR_NON_CANONICAL`-reject input that is
+  well-formed but not canonical (it MUST NOT silently re-canonicalize). Lenient decode MAY
+  accept non-canonical input; the conformance gate runs strict mode.
+- **Identity:** content address = `hash(canonical, UNCOMPRESSED bytes)`. Compression is a
+  transport transform below the identity line (C.8).
+- **Bijectivity invariant (MUST hold):** `canonical_encode(decode(canonical_bytes)) == canonical_bytes`.
+
+## C.1 Integers
+- `0..127` MUST use FIXINT; `-1..-16` MUST use FIXNEG; else TagInt64 (zigzag); for non-negative
+  values > Int64::MAX use Uint64 (0x09). A value representable as FIXINT/FIXNEG MUST NOT use
+  TagInt64; a value representable as Int64 MUST NOT use Uint64.
+- All varints MUST be minimal length; overlong ⇒ `ERR_NON_CANONICAL`.
+- BigInt MUST use minimal two's-complement length (no redundant leading 0x00/0xFF).
+
+## C.2 Floats
+- A value MUST use exactly one wire type, **decidable from the value alone** (never from a
+  producer "source type", which a decoder cannot see): encode as Float32 (0x0F) iff the value
+  round-trips exactly through binary32 — `widen(narrow(v)) == v`, i.e. every bit beyond the
+  binary32 mantissa/exponent is zero — otherwise Float64 (0x04). A decoder re-derives the same
+  wire type from the decoded value, so the C.0 bijectivity invariant holds. Identity is over the
+  chosen wire-type + bits. *(NaN and ±0 are normalized first, below, before this test.)*
+- `-0.0` MUST normalize to `+0.0`. NaN MUST be the single canonical quiet pattern
+  (binary64 `0x7FF8000000000000`, binary32 `0x7FC00000`); other payload/signaling ⇒ `ERR_NON_CANONICAL`.
+  ±Infinity allowed with their exact IEEE bit patterns.
+
+## C.3 Strings
+- MUST be valid UTF-8 (invalid ⇒ `ERR_INVALID_UTF8`); MUST NOT be Unicode-normalized.
+
+## C.4 Object keys & the Gen2 dictionary
+- Header dictionary MUST be sorted ascending by **raw UTF-8 key bytes** (unsigned lexicographic),
+  unique, with **no unused entries** (matches the fingerprint sort rule above).
+- Object/FIXMAP fields MUST be emitted in ascending dict-index order (== sorted key order).
+- Duplicate keys in one object ⇒ `ERR_DUPLICATE_KEY`.
+
+## C.5 Arrays
+- Element order is semantic and preserved. `0..15` elements MUST use FIXARRAY; else TagArray.
+
+## C.6 Decimal128
+- Canonical (coefficient, scale): no trailing decimal zeros foldable into a smaller scale; `0`
+  encodes as coefficient 0, scale 0.
+
+## C.7 Tensors / Image / Audio / Bitmask
+- Raw byte buffers are **little-endian**. Tensor data length MUST equal `product(shape) × dtype_size`;
+  no implicit padding (deterministic alignment padding for guaranteed zero-copy is added in a later
+  rev; until then padding is forbidden).
+- Bitmask: unused trailing bits in the final byte MUST be zero (non-zero ⇒ `ERR_NON_CANONICAL`).
+
+## C.8 Compression
+- Canonical form is **UNCOMPRESSED** (Compressed flag = 0). Compressed framing is valid transport
+  but NOT canonical and MUST NOT be hashed for identity.
+
+## C.9 Extensions (TagExt 0x0E)
+- Overrides the lenient "implementation-defined" rule: in canonical/strict mode unknown ExtType
+  MUST be **KEEP** (payload + ExtType preserved byte-for-byte). Fingerprint contribution is a fixed
+  sentinel — never the ExtType or recursive payload.
+
+## C.10 Framing hygiene
+- Trailing bytes after a complete value ⇒ `ERR_TRAILING_DATA`. Reserved tags (0xF0–0xFF and any
+  deprecated tag) ⇒ `ERR_RESERVED_TAG`. Decode limits are NORMATIVE constants for conformance.
+
+## C.11 Conformance obligations (the cross-language gate enforces)
+1. Per fixture, every language's `canonical_encode(decode(fixture))` is byte-identical.
+2. Cross-language symmetry: `GoEncode(RustDecode(x)) == RustEncode(GoDecode(x))` for all pairs.
+3. Idempotence: `encode(decode(canonical)) == canonical`.
+4. Semantic AST equality of decoded values across languages (before byte comparison).
+5. Negative/anti-malleability fixtures (overlong varint, unsorted keys/dict, non-minimal int,
+   duplicate key, `-0`/non-canonical NaN, trailing data, reserved tag) ⇒ strict reject on every decoder.
+6. Schema fingerprint equal across languages from both the decoded value and canonical bytes.

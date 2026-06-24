@@ -43,6 +43,8 @@ func main() {
 		encodeCmd(os.Args[2:])
 	case "decode":
 		decodeCmd(os.Args[2:])
+	case "recode":
+		recodeCmd(os.Args[2:])
 	case "info":
 		infoCmd(os.Args[2:])
 	case "help", "-h", "--help":
@@ -193,6 +195,29 @@ func decodeCmd(args []string) {
 
 	os.Stdout.Write(output)
 	os.Stdout.Write([]byte("\n"))
+}
+
+// recodeCmd decodes framed Gen2 from stdin and re-encodes RAW canonical bytes to stdout.
+// Used by the cross-language identity gate: encode(decode(wire)) must be byte-identical
+// across Go/Rust/Python/TS. JSON-projection-independent — tests identity, not display.
+func recodeCmd(args []string) {
+	_ = args
+	input, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+		os.Exit(1)
+	}
+	val, err := cowrie.DecodeFramed(input)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
+		os.Exit(1)
+	}
+	output, err := cowrie.Encode(val)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
+		os.Exit(1)
+	}
+	os.Stdout.Write(output)
 }
 
 func infoCmd(args []string) {
