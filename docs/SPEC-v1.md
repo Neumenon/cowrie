@@ -1,14 +1,15 @@
-# Cowrie v1 — Wire Format Specification (clean-room rewrite, draft)
+# Cowrie v1 — Wire Format Specification (clean-room rewrite)
 
-> **Status: DRAFT foundation.** Greenfield (no shipped users → no back-compat). The completeness
-> bar: a new-language implementation must be buildable, and pass every conformance fixture, from
-> **this document alone** — never by reading any existing implementation. Any ambiguity here is a
-> spec bug to fix, not a thing to resolve by copying code.
+> **Status: spine complete (§0–§6), panel-vetted, reference-executable.** Greenfield (no shipped users
+> → no back-compat). The completeness bar: a new-language implementation must be buildable, and pass
+> every conformance fixture, from **this document alone** — never by reading any existing implementation.
+> Any ambiguity here is a spec bug to fix, not a thing to resolve by copying code.
 >
-> This rewrite supersedes the legacy two-format (Gen1/Gen2) `SPEC.md`. It is built in the order the
-> clean-room panel prescribed: **(1) value model → (2) wire encoding → (3) canonical profile →
-> (4) fingerprint grammar → (5) conformance**. This draft lands §1–§2; §3 reuses `SPEC.md` Appendix C
-> (already authored); §4–§5 are the remaining backlog (see `PHASE0-FINDINGS.md`).
+> This supersedes the legacy two-format (Gen1/Gen2) `SPEC.md`. Order: **(0) decisions → (1) value model →
+> (2) wire encoding → (3) canonical profile → (4) fingerprint grammar → (5) conformance → (6) profiles.**
+> The Python reference `tools/cowrie_ref/` implements the full Core from this document alone and generates
+> the golden vectors (`testdata/v1_golden.json`); it is the conformance oracle. Remaining: conform Go/Rust/TS
+> to the golden vectors (in progress), then the cross-language gate goes green.
 
 ## 0. Greenfield decisions (settled)
 - **One format.** No Gen1, no proto-tensors, no "v3 inline" label, no Gen1/Gen2 reserved-tag split.
@@ -209,7 +210,7 @@ field is defined; this is the complete index:
 - **Tensor / Bitmask** (§2.5): little-endian; exact `dataLen`; sub-byte LSB-first; trailing bits zero.
 - **Compression** (§2.2): canonical form is **uncompressed** (flag `0x00`).
 - **Extensions** (§1.3): KEEP byte-exact.
-- **Framing** (§2.10/§2.6): trailing data ⇒ `ERR_TRAILING_DATA`; reserved/unknown tags ⇒ `ERR_RESERVED_TAG`.
+- **Framing** (§2.6): trailing data ⇒ `ERR_TRAILING_DATA`; reserved/unknown tags ⇒ `ERR_RESERVED_TAG`.
 - **Identity:** content address = hash of the canonical, **uncompressed** bytes; file identity = Merkle
   root over per-value/frame hashes (stream layer).
 - **Bijectivity invariant (MUST):** `canonical_encode(decode(canonical)) == canonical`.
