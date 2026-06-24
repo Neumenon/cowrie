@@ -1,0 +1,96 @@
+name: conformance
+
+# The single source-of-truth conformance CI. It builds every implementation
+# (Go / Rust / TypeScript / Python reference) and then runs the one gate runner
+# — tools/run_all_gates.sh — that is also used locally. If that script exits
+# non-zero, this job fails. The gates are LAW: no merge while this is red.
+
+on:
+  push:
+  pull_request:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: run_all_gates
+    runs-on: ubuntu-latest
+    env:
+      GO_CLI: /tmp/cowrie-cli
+      RUST_RECODE: ${{ github.workspace }}/rust/target/release/examples/recode
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- toolchains -----------------------------------------------------
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache-dependency-path: go/go.sum
+
+      - name: Set up Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: typescript/package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ---- build the recode tools -----------------------------------------
+      - name: Build Go CLI
+        working-directory: go
+        run: go build -o "$GO_CLI" ./cmd/cowrie
+
+      - name: Build Rust recode example
+        working-directory: rust
+        run: cargo build --release --example recode
+
+      # ---- install TS deps ------------------------------------------------
+      - name: Install TypeScript deps
+        working-directory: typescript
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      # ---- python reference: venv + editable install ----------------------
+      - name: Create Python venv and install reference
+        run: |
+          python3 -m venv /tmp/cowrie-venv
+          /tmp/cowrie-venv/bin/python -m pip install --upgrade pip
+          # Install the clean-room reference (cowrie_ref) plus its test extra (pytest).
+          /tmp/cowrie-venv/bin/python -m pip install -e "tools[test]"
+
+      # ---- THE GATE -------------------------------------------------------
+      # run_all_gates.sh prefers /tmp/cowrie-venv/bin/python and exports
+      # PYTHONPATH=tools itself, so the gates and pytest both see cowrie_ref.
+      - name: Run all conformance gates
+        run: bash tools/run_all_gates.sh

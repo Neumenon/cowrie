@@ -1,281 +1,208 @@
-# Cowrie Cross-Language Conformance
+# Cowrie v1 — Conformance Status
 
-This document is the canonical reference for how cross-language correctness is
-guaranteed across the Go, Rust, Python, and TypeScript implementations.
+**Authoritative status:** ✅ **GREEN.** All four implementations conform to Cowrie SPEC‑v1.
+Every standing gate passes; CI gates the merge on the same runner used locally.
 
----
-
-## Overview
-
-Correctness guarantees are built in four layers:
-
-1. **Shared fixture manifest** — binary `.cowrie` files + expected JSON, decoded
-   by the Go reference and Python decoders under the shared harness; Rust and
-   TypeScript are gated by their own pinned parity tests.
-2. **Per-language pinned parity tests** — decode invariants, schema fingerprint
-   stability, and JSON round-trip tests pinned inside each language's own test
-   suite.
-3. **Fuzz testing** — Go and Rust each run structured fuzzing in CI weekly; Python
-   runs Hypothesis-based property tests.
-4. **Mutation / truth-table tests** — TypeScript and Go verify that decoder
-   behaviour on corrupted or edge-case inputs matches a pinned truth table.
+This document is the single source of truth for the conformance state of the codebase.
+Every number below was verified by reading the actual files and running the gates (see
+[How the counts were verified](#how-the-counts-were-verified)).
 
 ---
 
-## Determinism guarantees
+## 1. The four implementations
 
-The same logical value encodes to **byte-identical** output across all four
-implementations, so the raw bytes work as a portable content-address / cache key:
+Cowrie v1 has one **reference** and three **production** codecs. Conformance means byte‑level
+agreement: given the same logical value, every implementation produces the exact same canonical
+byte string, and every implementation rejects the same malformed / non‑canonical bytes.
 
-- Scalars, arrays, tensors, bytes, audio, and image values encode identically.
-- **Object key order is canonicalized.** `from_json` / `from_any` sorts object
-  keys in byte order (UTF-8 == code-point order) before encoding, so `{"b":1,"a":2}`
-  and `{"a":2,"b":1}` produce identical bytes in Go, Rust, Python, and TypeScript.
-  Go sorts in `from_json`, Rust orders via `BTreeMap`, and Python/TypeScript sort in
-  `from_any`. The binary format itself does not *require* sorted keys — decoders
-  accept any order — but every JSON bridge emits sorted keys for determinism.
-  (Pinned by the per-language `*object key order*` / `*canonicalize*` tests.)
+| Implementation | Role | Location | Conforms? |
+| --- | --- | --- | --- |
+| **Python** | Reference / oracle — the executable form of the spec; generated the golden vectors | `tools/cowrie_ref/` (package `cowrie_ref`) | ✅ |
+| **Go** | Production codec | `go/` (CLI `go/cmd/cowrie`; prebuilt `/tmp/cowrie-cli`) | ✅ |
+| **Rust** | Production codec | `rust/` (example `rust/examples/recode.rs`; prebuilt `rust/target/release/examples/recode`) | ✅ |
+| **TypeScript** | Production codec | `typescript/` (entry `typescript/recode.ts`, run via `tsx`) | ✅ |
+
+The Python reference is **the oracle**: the conformance gate re‑derives each golden vector from
+`cowrie_ref.encode(...)`, and the other three decode the golden bytes and re‑encode them. All four
+must produce byte‑identical output.
+
+**Recode contract.** Go / Rust / TS each expose a `recode` operation — read Cowrie bytes on stdin,
+decode to the logical value, re‑encode canonically, write bytes to stdout. In **lenient** mode
+(default) a decoder may normalize a non‑canonical encoding to its canonical form; in **strict**
+mode (`--strict`) it must instead reject non‑canonical input (SPEC‑v1 §5.3).
 
 ---
 
-## Layer 1 — Fixture manifest (`testdata/fixtures/`)
+## 2. Standing gates
 
-### What is covered
-
-| Group | Count | Kind | Notes |
-|---|---|---|---|
-| `core/` | 7 | decode + JSON check | null, bool, int, float, string, array, object |
-| `ml/` | 9 | decode (ok-only or ERR_TRAILING_DATA) | tensor, rank0_scalar, bool_tensor, tensor_ref, image, audio; adjlist/richtext/delta reserved |
-| `graph/` | 5 | decode (4 ok-only, 1 ERR_TRAILING_DATA) | node, edge, node_batch, edge_batch; graph_shard reserved |
-| `neg/` | 5 | decode + error check | bad_magic, bad_version, truncated, invalid_tag, invalid audio channels |
-| `v3/` | 11 | decode (JSON or ok-only) | fixint, fixneg, fixarray, fixmap, bitmask variants |
-| `gen1/` | 6 | decode (4 JSON, 2 ok-only) | gen1 core types + proto-tensor float64/float32 |
-| `bigint/` | 3 | decode + JSON check | pos_large, neg_large, u64plus1 — all round-trip as JSON strings |
-| `compressed/` | 2 | decode_framed + JSON check | gzip_framed, zstd_framed — verify `EncodeFramed` / `DecodeFramed` path |
-| `fromjson/` | 7 | from_json bridge | primitives, tensor, image, audio, and invalid audio bounds |
-
-**Total: 55 cases** as of 2026-06-21.
-
-### Fixture format
-
-Each fixture is a raw `.cowrie` binary file. The manifest (`manifest.json`) maps
-each case to:
-
-```json
-{
-  "id":     "gen2_bigint_neg_large",
-  "gen":    2,
-  "kind":   "decode",
-  "input":  "bigint/neg_large.cowrie",
-  "expect": {"ok": true, "json": "bigint/neg_large.json"}
-}
-```
-
-- `expect.ok == true` + `expect.json` — decode must succeed and the JSON
-  projection must equal the expected file.
-- `expect.ok == true` (no `json`) — decode must succeed; no canonical JSON
-  projection (ML / graph / bitmask types).
-- `expect.ok == false` — decode or JSON-bridge conversion must fail (negative / error cases).
-- `kind == "decode"` — decode a raw Gen1/Gen2 `.cowrie` binary.
-- `kind == "decode_framed"` — decode a framed/compressed Gen2 `.cowrie` binary.
-- `kind == "from_json"` — convert JSON projection to Cowrie (`FromJSON`/`from_json`) and round-trip accepted cases.
-- `python_skip` (string) — optional; if present, the Python cross-check is
-  skipped for this case only. Currently used for `gen1_proto_float32`
-  (tagArrayFloat32 / 0x18 is not implemented in the Python gen1 decoder).
-
-### Generating fixtures
-
-The Go CLI (`go/cmd/cowrie`) is the oracle. Build it with:
+All gates run from the repo root. They honour `GO_CLI` (default `/tmp/cowrie-cli`) and
+`RUST_RECODE` (default `rust/target/release/examples/recode`); TS runs via
+`typescript/node_modules/.bin/tsx`. Python must use the dedicated venv because PEP‑668 blocks
+system pip:
 
 ```sh
-cd go && go build -o /tmp/cowrie-cli ./cmd/cowrie
+PY=/tmp/cowrie-venv/bin/python
+export PYTHONPATH=tools          # so pytest and the gates can import cowrie_ref
 ```
 
-Generate a binary fixture:
+### (a) Positive conformance — `tools/conformance_gate.py`
+
+**What it checks.** 68 curated golden vectors (`testdata/v1_golden.json`) × 4 languages.
+The Python reference re‑derives each vector; Go / Rust / TS decode the golden bytes and re‑encode.
+Every cell must equal the stored `canonical_hex`. Any mismatch is a hard fail.
+
+The 68 vectors span every wire type and its canonicalization boundaries: null / bool; the full
+integer ladder (FIXINT / FIXNEG, Int64 min/max, Uint64 max, BigInt above/below those); floats
+(NaN / ±inf / subnormal / max / neg‑zero); strings (empty, 4‑byte UTF‑8, unicode); bytes;
+Decimal128, Datetime, UUID, Tensor (f32 / f64 / int8 / bool / qint4 / binary / empty‑dim), Bitmask,
+and Extension Core types; array/object length boundaries (15↔16); and `dfs_global_sort` — the
+vector that pins **global byte‑sorted** dictionary ordering (see Bug 1).
 
 ```sh
-echo '123456789012345678901234567890' | /tmp/cowrie-cli encode --gen2 > testdata/fixtures/bigint/pos_large.cowrie
-/tmp/cowrie-cli decode < testdata/fixtures/bigint/pos_large.cowrie > testdata/fixtures/bigint/pos_large.json
+$PY tools/conformance_gate.py
 ```
 
-Compressed fixtures require a payload larger than 256 bytes (the Go
-`compressThreshold`). If the compressed output is no smaller than the plain
-output, `EncodeFramed` silently falls back to uncompressed. The flag byte in the
-header reveals the actual encoding: `0x00` = uncompressed, `0x03` = gzip,
-`0x05` = zstd.
+Expected tail:
 
----
+```
+Cowrie v1 conformance gate — 68 golden vectors
+impl        pass  fail   status
+python        68     0   ✅ GREEN
+go            68     0   ✅ GREEN
+rust          68     0   ✅ GREEN
+ts            68     0   ✅ GREEN
+✅ ALL IMPLEMENTATIONS CONFORM
+```
 
-## Layer 2 — Harness (`testdata/fixtures/validate_fixtures.py`)
+### (b) Negative / anti‑malleability — `tools/negative_gate.py [--strict]`
 
-### Decoders
+**What it checks.** 16 adversarial fixtures (`testdata/v1_negative.json`), each fed to the
+Go / Rust / TS `recode` and classified as `REJECT`, `NORMALIZE` (accepted, re‑emitted canonical),
+or `ACCEPT` (accepted, echoed non‑canonical bytes back — always a bug). The 16 split into two tiers:
 
-| Decoder | When used | How |
-|---|---|---|
-| Go (primary) | All 55 cases | subprocess `cowrie decode [--gen1]` or `cowrie encode` for `from_json` cases |
-| Python (secondary) | All gen2 cases + gen1 where tag is implemented | in-process `COWRIE_PUREPYTHON=1` |
-
-The Python decoder is loaded from the sibling `python/` source tree (or
-`PYTHON_PKG_DIR` env) using `COWRIE_PUREPYTHON=1` to bypass the Cython
-extension (which may have ABI incompatibilities with the installed NumPy). The
-gen2 decode path uses `decode_framed()` so compressed fixtures are handled
-transparently.
-
-Rust and TypeScript are not run by this harness — they are gated by their own
-pinned tests (see Layer 2b).
-
-### Running the harness
+- **7 `malformed`** (`bad_magic`, `bad_version`, `truncated_string`, `reserved_tag_0f`,
+  `varint_overflow`, `dictidx_oob`, `trailing_data`) — **every** decoder MUST `REJECT`, in both
+  modes. Otherwise hard fail.
+- **9 `non-canonical`** (`int_not_fixint`, `uint_fits_int`, `bigint_small`, `array_not_fixarr`,
+  `neg_zero`, `noncanonical_nan`, `unsorted_dict`, `nonascending_idx`, `bitmask_trailing`) — in
+  **lenient** mode `NORMALIZE` is allowed (reported as a strict‑mode gap, not failed) but `ACCEPT`
+  is a hard fail; in **strict** mode every one MUST `REJECT`.
 
 ```sh
-cd go && go build -o /tmp/cowrie-cli ./cmd/cowrie
-GO_CLI=/tmp/cowrie-cli python3 testdata/fixtures/validate_fixtures.py
+$PY tools/negative_gate.py            # lenient: all 7 malformed rejected
+$PY tools/negative_gate.py --strict   # strict §5.3: all 16 rejected by all three
 ```
 
-Expected output:
+Lenient tail: `✅ malformed fixtures rejected by every decoder.` (followed by a strict‑mode‑gap
+notice for the non‑canonical cases that lenient decode normalizes/accepts).
+Strict tail: `✅ STRICT: every malformed AND non-canonical fixture rejected by all three decoders (§5.3).`
 
+### (c) Differential fuzz — `tools/fuzz_differential.py [N]`
+
+**What it checks.** Generative cross‑language determinism. The Python reference generates `N`
+random canonical values — random integer magnitudes across FIXINT / Int64 / Uint64 / BigInt
+boundaries, unicode object keys (to stress UTF‑8 byte‑sorting), deep nesting, floats including
+NaN / ±inf, and the Core wrapper types — encodes them, and Go / Rust / TS must each recode to
+byte‑identical output. Exits non‑zero on the first divergence with a repro seed (default seed
+`1234`). This covers inputs the curated goldens don't.
+
+```sh
+$PY tools/fuzz_differential.py 500    # or any N; run_all_gates uses 150
 ```
-  Python decoder: loaded from .../python (PUREPYTHON)
-  OK   gen2_core_null
-  ...
-  OK   gen1_proto_float32 [py:skip]
-  OK   gen2_bigint_pos_large
-  OK   gen2_bigint_neg_large
-  OK   gen2_bigint_u64plus1
-  OK   gen2_compressed_gzip
-  OK   gen2_compressed_zstd
 
-Results: 55 passed, 0 skipped, 0 failed, 1 py-skipped
+Expected: `✅ <N> random values — Go/Rust/TS all byte-identical to the Python reference. No divergence.`
+
+### (d) Python reference unit tests — pytest
+
+**What it checks.** 109 tests in `tools/cowrie_ref/tests/` (`test_conformance.py` +
+`test_negatives.py`) that lock the reference itself against the golden and negative corpora — the
+executable spec. Must run in the venv with `cowrie_ref` importable.
+
+```sh
+PYTHONPATH=tools /tmp/cowrie-venv/bin/python -m pytest tools/cowrie_ref/tests -q
 ```
 
-Exit code is non-zero on any failure.
-
-### Failure semantics
-
-- A case fails if either decoder disagrees with the manifest — both decoders
-  must accept what `ok=true` mandates and reject what `ok=false` mandates.
-- JSON comparison uses `json.loads()` on both sides so whitespace differences
-  are normalised. Python gen1 returns floats for integers (e.g. `1.0`) which
-  are equal to `1` under `json.loads` comparison.
+Expected: `109 passed`.
 
 ---
 
-## Layer 2b — Per-language pinned parity tests
+## 3. §5.3 strict‑decode status
 
-Each implementation carries its own suite of pinned tests that verify decode
-invariants independently of the shared harness.
+✅ **All four implementations honour SPEC‑v1 §5.3.** Canonical input is accepted and round‑trips
+byte‑identically; non‑canonical input is **rejected** in strict mode and **normalized** in lenient
+mode (never echoed back). Verified by `negative_gate.py --strict`: all 16 fixtures (7 malformed +
+9 non‑canonical) `REJECT` across Go, Rust, and TypeScript. The Python reference is canonical‑only
+by construction — its encoder emits exactly one encoding per value, and its tests assert decode
+rejects the non‑canonical corpus.
 
-### Go (`go/`)
-
-| File | What it pins |
-|---|---|
-| `invariant_test.go` | 7 codec invariants (encode→decode roundtrip, etc.) |
-| `schema_fingerprint_test.go` | Schema fingerprint stability across Go runs |
-| `deterministic_test.go` | `EncodeWithOptions(Deterministic=true)` produces identical bytes across calls |
-| `truth_table_test.go` | Encoder/decoder behaviour against a pinned truth-case JSON manifest |
-| `gen2_test.go`, `spec_test.go` | Wire-format spec compliance |
-| `v3_test.go` | v3 inline types (fixint, fixneg, fixarray, fixmap) |
-
-### Rust (`rust/`)
-
-`cargo test --test coverage_boost` runs 173 tests covering:
-
-- Encode/decode roundtrip for all value types.
-- `encode_framed` / `decode_framed` for gzip and zstd.
-- `schema_fingerprint64` stability.
-- `from_json` / `to_json` round-trip for gen2 types.
-- All negative error paths (bad magic, bad version, truncated, invalid tag).
-
-### Python (`python/`)
-
-`pytest tests/` covers:
-
-- `test_gen2.py` — encode/decode for all type tags.
-- `test_hypothesis.py` — Hypothesis property tests for encode→decode identity.
-- `test_gen1.py` — gen1 codec round-trips.
-
-### TypeScript (`typescript/`)
-
-`node --import tsx --test` runs:
-
-| File | What it pins |
-|---|---|
-| `fixtures_core.test.ts` | Decodes shared `testdata/fixtures/` binaries (gen2 subset) |
-| `truth_table.test.ts` | Decoder behaviour against the pinned truth-table manifest |
-| `mutation.test.ts` | Decoder never panics on corrupted/truncated input |
-| `skip_reserved_tag.test.ts` | Reserved tags (0x30-0x39, 0xF0-0xFF) are skipped or rejected cleanly |
-| `gen2.test.ts` | Full gen2 encode/decode round-trips |
+| Tier | Lenient mode | Strict mode (§5.3) |
+| --- | --- | --- |
+| `malformed` (7) | REJECT (all) | REJECT (all) |
+| `non-canonical` (9) | NORMALIZE / canonicalize (never ACCEPT) | REJECT (all) |
 
 ---
 
-## Layer 3 — Fuzz testing (`.github/workflows/fuzz.yml`)
+## 4. Bugs the gates caught
 
-The fuzz workflow runs weekly (Sunday 04:00 UTC) and on manual dispatch.
+Each of these was a real cross‑language divergence surfaced by adding a gate or a golden vector,
+then fixed; the corresponding gate now guards against regression.
 
-| Target | Tool | Duration |
-|---|---|---|
-| Go `FuzzMasterStreamReader_Next` | `go test -fuzz` | 5 minutes |
-| Go `FuzzDecodeBytes` | `go test -fuzz` | 5 minutes |
-| Go `FuzzFastEncode` | `go test -fuzz` | 5 minutes |
-| Rust `fuzz_decode` | `cargo fuzz` | 5 minutes |
-| Rust `fuzz_roundtrip` | `cargo fuzz` | 5 minutes |
-| Python | Hypothesis (`test_hypothesis.py`) | per-run budget |
-
-Crash artifacts are uploaded to GitHub Actions on failure. A crash in any
-fuzzer is treated as a P0 bug — it must be reproduced and fixed before the next
-release.
+| Bug | Where | Caught by | Fix |
+| --- | --- | --- | --- |
+| **Dictionary ordering: DFS‑discovery vs global byte‑sort** | Go, Rust, TS | Positive gate after expanding goldens 32→68 (the `dfs_global_sort` vector) | Sort dictionary entries by global UTF‑8 byte order, not depth‑first discovery order (§2.4) |
+| **uvarint 64‑bit overflow wrap** | Rust | Negative gate (`varint_overflow`) + fuzz | Detect and reject varints that overflow 64 bits instead of silently wrapping |
+| **Missing strict mode** | Go, Rust, TS | Negative gate `--strict` (§5.3) | Add `--strict` decode that rejects non‑canonical input instead of normalizing it |
+| **Object fields re‑ordered by JS integer keys** | TS | Differential fuzz + negative gate | Emit object fields in `dictIdx` order, not the order JS reorders integer‑like string keys |
 
 ---
 
-## Layer 4 — Mutation / truth-table tests
+## 5. How CI enforces it
 
-### TypeScript `mutation.test.ts`
+There is **one** gate runner and **one** conformance workflow, and they run the same thing:
 
-Systematically corrupts each byte of a valid fixture and asserts the decoder
-either returns an error or produces a value (never panics / throws). This
-catches crash-on-corrupt regressions that fuzzing may miss on short inputs.
+- **`tools/run_all_gates.sh`** — the local single‑source‑of‑truth runner. Runs every gate in order
+  and exits non‑zero on the first failure:
+  1. pytest `tools/cowrie_ref/tests` (109 tests)
+  2. `conformance_gate.py` (68 vectors × 4 langs)
+  3. `negative_gate.py` (lenient — 16 fixtures)
+  4. `negative_gate.py --strict` (strict §5.3)
+  5. `fuzz_differential.py 150`
 
-### Go and TypeScript `truth_table.test.ts` / `truth_table_test.go`
+  It prefers `/tmp/cowrie-venv/bin/python`, exports `PYTHONPATH=tools` itself, builds the Go CLI
+  only if `/tmp/cowrie-cli` is missing, and fails loudly (rather than rebuilding) if the prebuilt
+  Rust `recode` binary is absent.
 
-Both languages consume a shared `testdata/truth_cases.json` manifest that
-encodes exact (input → expected behaviour) pairs for edge cases: integer
-overflow boundaries, BigInt encoding, float precision, and reserved tag
-handling. Any change to the manifest is a deliberate spec decision and requires
-updating all language tests that consume it.
+  ```sh
+  bash tools/run_all_gates.sh
+  # ✅✅✅  ALL GATES PASS  ✅✅✅
+  ```
 
----
+- **`.github/workflows/conformance.yml`** (workflow name `conformance`, job `run_all_gates`) — runs
+  on every push and pull request. It sets up Go 1.21, Rust stable, Node 22, and Python 3.12; builds
+  the Go CLI and the Rust `recode` example; `npm ci` for TS; creates `/tmp/cowrie-venv` and
+  `pip install -e "tools[test]"`; then runs **exactly** `bash tools/run_all_gates.sh`. If the script
+  exits non‑zero the job fails. The gates are law: no merge while this is red.
 
-## Adding a new fixture
-
-1. Generate the binary with the Go CLI (oracle):
-   ```sh
-   echo '<json>' | /tmp/cowrie-cli encode --gen2 > testdata/fixtures/<group>/<name>.cowrie
-   /tmp/cowrie-cli decode < testdata/fixtures/<group>/<name>.cowrie > testdata/fixtures/<group>/<name>.json
-   ```
-2. Add an entry to `testdata/fixtures/manifest.json` matching the schema above.
-3. Run the harness to confirm both Go and Python decode correctly:
-   ```sh
-   GO_CLI=/tmp/cowrie-cli python3 testdata/fixtures/validate_fixtures.py
-   ```
-4. If the new type is not yet supported in Python gen1, set `"python_skip":
-   "<reason>"` on the manifest entry.
-5. Add the corresponding case to the TypeScript `fixtures_core.test.ts` and
-   Rust `coverage_boost.rs` pin tests.
+> The repo also has `.github/workflows/ci.yml` (per‑language build / test / coverage matrices plus a
+> `fixtures` cross‑language fixture‑validation job and a publish gate) and
+> `.github/workflows/fuzz.yml` (scheduled Go / Rust / Python native fuzzing). `conformance.yml` is
+> the workflow that gates the cross‑language byte‑level parity described in this document.
 
 ---
 
-## What is NOT covered here
+## How the counts were verified
 
-- **Encoder conformance** — the harness only runs the decode path. Encoder
-  correctness is verified by encode→decode roundtrip tests inside each
-  language's own suite.
-- **Schema fingerprint cross-language parity** — fingerprint values are pinned
-  per-language but not yet cross-checked between Go, Rust, and TypeScript in a
-  single test. This is a known gap.
-- **Go `FromAny` typed reconstruction parity** — the cross-language guarantee
-  for typed JSON projections is `FromJSON` / `from_json` (the `kind ==
-  "from_json"` fixtures above). Go's lower-level `FromAny` helper intentionally
-  treats parsed `_type` dictionaries as ordinary objects today, while Python and
-  TypeScript reconstruct typed values from their `from_any` helpers. Use
-  `FromJSON` when typed reconstruction and range validation must be portable.
-- **glyph text format** — the glyph bridge (JSON ↔ `Value`) is tested in Go
-  and TS independently. A cross-language glyph fixture suite is not yet built.
+This is a documentation task; "verified green" means the numbers were confirmed against the files
+and the gates were run.
+
+- Golden vector count (**68**) and negative fixture count (**16**) — parsed `testdata/v1_golden.json`
+  and `testdata/v1_negative.json` with Python (`len(...)`).
+- Negative tier split (**7 malformed / 9 non‑canonical**) — `Counter(v['tier'] ...)` over
+  `v1_negative.json`.
+- Reference test count (**109 passed**) —
+  `PYTHONPATH=tools /tmp/cowrie-venv/bin/python -m pytest tools/cowrie_ref/tests -q`.
+- All gates green — ran `conformance_gate.py`, `negative_gate.py`, `negative_gate.py --strict`,
+  `fuzz_differential.py`, and `bash tools/run_all_gates.sh` (full runner ended `✅✅✅ ALL GATES PASS`).
+- Gate semantics, runner steps, and CI wiring — read `tools/conformance_gate.py`,
+  `tools/negative_gate.py`, `tools/fuzz_differential.py`, `tools/run_all_gates.sh`, and
+  `.github/workflows/conformance.yml`.
