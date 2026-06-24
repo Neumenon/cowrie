@@ -85,9 +85,27 @@ def dataset_manifest(shards: list[dict]) -> dict:
 
 
 def dataset_root(file_roots: list[bytes]) -> bytes:
-    """Dataset identity = a Merkle root over the ordered per-file roots (a DAG: dataset -> files ->
-    frames). Reuses the §7 Merkle construction so the whole tree is one consistent multihash."""
+    """Dataset identity = a Merkle root over the ORDERED per-file roots (a DAG: dataset -> files ->
+    frames). Reuses the §7 Merkle construction so the whole tree is one consistent multihash. Order-
+    sensitive + count-bound: reorder/add/drop any shard ⇒ a different root."""
     from . import file as _file
-    # Treat each 34-byte file multihash as a frame; merkle_root binds count + domain-separates.
-    return _file.merkle_root(file_roots)
+    return _file.merkle_root([bytes(r) for r in file_roots])
+
+
+def verify_dataset(file_roots: list[bytes], trusted_root: bytes) -> bool:
+    """Lazy-verify step 1: recompute dataset_root over the ordered shard roots (34 B each — cheap, no
+    shard data) and require it to equal the trusted dataset identity. Binds ORDER + COUNT, so a swapped,
+    inserted, or dropped shard is caught here before any shard data is fetched."""
+    return dataset_root(file_roots) == bytes(trusted_root)
+
+
+def verify_shard(shard_file_bytes: bytes, expected_root: bytes) -> bool:
+    """Lazy-verify step 2: a downloaded shard FILE's §7 Merkle identity must equal the root the manifest
+    lists for that position. Returns False on a tampered/malformed shard rather than raising."""
+    from . import file as _file
+    from .errors import CowrieError
+    try:
+        return _file.file_identity(shard_file_bytes) == bytes(expected_root)
+    except CowrieError:
+        return False
 

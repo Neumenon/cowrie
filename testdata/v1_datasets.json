@@ -1,0 +1,31 @@
+{
+  "ds_single": {
+    "shard_roots": [
+      "1220da3e430acb9ba011421a026168dec3f130026f1607fff024f453a34e645b3ba5"
+    ],
+    "dataset_root": "12200eb8d96c81e3eb8c741ce04440484e15e230e90b0124a17e6165a1c457553f92"
+  },
+  "ds_three": {
+    "shard_roots": [
+      "1220da3e430acb9ba011421a026168dec3f130026f1607fff024f453a34e645b3ba5",
+      "12202dbc6adb83ba9671c5c7ef3301400da5d5b9e51dbd118eac946938e80aefdbbe",
+      "12208096ddc6e0ad3ed18f67f368fa0693b508286ccaf36da5233d02fe4ae7d57b7a"
+    ],
+    "dataset_root": "1220829320765f917469087985d25c2091f815b222068829fdc5db593fb56a4de67b"
+  },
+  "ds_dup": {
+    "shard_roots": [
+      "1220da3e430acb9ba011421a026168dec3f130026f1607fff024f453a34e645b3ba5",
+      "1220da3e430acb9ba011421a026168dec3f130026f1607fff024f453a34e645b3ba5"
+    ],
+    "dataset_root": "1220766dd2942ae2f77604c88cae320f6232c33e7aa8a088c63df8294c8565bc7338"
+  },
+  "ds_order": {
+    "shard_roots": [
+      "12208096ddc6e0ad3ed18f67f368fa0693b508286ccaf36da5233d02fe4ae7d57b7a",
+      "1220da3e430acb9ba011421a026168dec3f130026f1607fff024f453a34e645b3ba5",
+      "12202dbc6adb83ba9671c5c7ef3301400da5d5b9e51dbd118eac946938e80aefdbbe"
+    ],
+    "dataset_root": "122042e2d7c7d7e7c61afdc84097be6c43738c7154607eebfd328a7191b60d7dea45"
+  }
+}
