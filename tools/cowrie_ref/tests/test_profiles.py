@@ -69,8 +69,9 @@ def test_graph_builder_convention_and_its_limits() -> None:
     g2 = p.graph([{"id": "b"}, {"id": "a", "labels": ["X"]}], [{"src": "a", "dst": "b", "type": "e"}])
     assert c.content_address(g1) == c.content_address(g2)
     assert c.content_address(g1) != c.content_address(p.graph([{"id": "a"}], []))
-    # ...BUT this is NOT format-enforced (the known limitation, pinned so it can't silently regress):
-    hand = {"nodes": [{"id": "b"}, {"id": "a", "labels": ["X"]}], "edges": [{"src": "a", "dst": "b", "type": "e"}]}
+    # ...BUT this is NOT format-enforced (the known limitation, pinned so it can't silently regress).
+    # Build the unsorted graph as the REVERSE of the builder's canonical node order (guaranteed non-canonical).
+    hand = {"nodes": list(reversed(g1["nodes"])), "edges": g1["edges"]}
     assert c.content_address(hand) != c.content_address(g1)   # unsorted hand-built graph differs
     c.decode(c.encode(hand), strict=True)                    # ...and strict decode ACCEPTS it (no enforcement)
 
