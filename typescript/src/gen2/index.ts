@@ -775,7 +775,12 @@ class Encoder {
       }
       case Type.OBJECT: {
         const obj = v.data as Record<string, Value>;
-        const entries = Object.entries(obj);
+        // Emit fields in ascending dictIdx order (§2.4). MUST sort explicitly: JS object
+        // iteration hoists integer-like keys ("0","9") to the front in numeric order, which
+        // is NOT the canonical (global byte-sorted dict) order. dictLookup is UTF-8-canonical.
+        const entries = Object.entries(obj).sort(
+          (a, b) => (this.dictLookup.get(a[0]) ?? 0) - (this.dictLookup.get(b[0]) ?? 0)
+        );
         // v3 inline encoding: FIXMAP for count 0-15
         if (entries.length <= 15) {
           this.writeByte(Tag.FIXMAP_BASE + entries.length);
