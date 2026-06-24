@@ -35,6 +35,14 @@ var (
 	ErrInvalidVarint   = errors.New("cowrie: invalid or overflow varint encoding")
 	ErrDictTooLarge    = errors.New("cowrie: dictionary exceeds maximum size")
 	ErrTrailingData    = errors.New("cowrie: trailing data after root value")
+	// ErrDuplicateKey is returned when a header dictionary contains two identical
+	// keys (§2.4). Distinct from ErrNonCanonical (key < previous = not sorted) so
+	// the conformance gate sees ERR_DUPLICATE_KEY. Mirrors decode.py.
+	ErrDuplicateKey = errors.New("cowrie: duplicate dictionary key")
+	// ErrTooLarge is returned for §2.7 size limits (e.g. tensor rank > MAX_RANK).
+	ErrTooLarge = errors.New("cowrie: value exceeds §2.7 size limit")
+	// ErrTooDeep is returned when nesting depth exceeds §2.7 MAX_DEPTH.
+	ErrTooDeep = errors.New("cowrie: nesting depth exceeds §2.7 MAX_DEPTH")
 	// ErrNonCanonical is returned in strict-decode mode (§5.3) when input is
 	// well-formed but not in canonical form (e.g. an Int that should be a
 	// FIXINT, a non-minimal BigInt, a negative-zero Float, an unsorted header
@@ -413,17 +421,42 @@ func (r *reader) read(n int) ([]byte, error) {
 	return b, nil
 }
 
+// maxUvarintBytes is the maximum LEB128 length of a 64-bit value (§2.1).
+const maxUvarintBytes = 10
+
 func (r *reader) readUvarint() (uint64, error) {
-	v, n := binary.Uvarint(r.data[r.pos:])
-	if n == 0 {
-		return 0, ErrUnexpectedEOF
+	// Strict, minimal LEB128 decode (§2.1). Mirrors tools/cowrie_ref/varint.py:
+	// reject over-length (>10 bytes), truncation, 64-bit overflow, AND non-minimal
+	// (overlong) encodings — a final continuation-terminating byte of 0x00 with
+	// length>1 carries no bits and is overlong (e.g. 82 00 for value 2).
+	var result uint64
+	var shift uint
+	start := r.pos
+	for {
+		if r.pos-start >= maxUvarintBytes {
+			return 0, ErrInvalidVarint
+		}
+		if r.pos >= len(r.data) {
+			return 0, ErrUnexpectedEOF
+		}
+		b := r.data[r.pos]
+		r.pos++
+		// Overflow guard: bits shifted past bit 63 must be zero. shift can be up to
+		// 63 here (10th byte at shift 63); only the low bit is valid in that byte.
+		if shift >= 64 || (shift == 63 && b&0x7F > 1) {
+			return 0, ErrInvalidVarint
+		}
+		result |= uint64(b&0x7F) << shift
+		if b&0x80 == 0 {
+			// Minimality: the final byte must be non-zero unless the value is the
+			// single byte 0x00.
+			if b == 0 && r.pos-start > 1 {
+				return 0, ErrInvalidVarint
+			}
+			return result, nil
+		}
+		shift += 7
 	}
-	if n < 0 {
-		// n < 0 means overflow (varint too large for uint64)
-		return 0, ErrInvalidVarint
-	}
-	r.pos += n
-	return v, nil
 }
 
 func (r *reader) readString() (string, error) {
@@ -594,9 +627,15 @@ func decode(r *reader) (*Value, error) {
 		}
 		// §5.3 strict: header dictionary MUST be strictly byte-ascending and
 		// unique. Go string comparison is byte-lexicographic, which matches the
-		// reference's `raw <= prev` check on raw UTF-8 bytes.
-		if r.strict && i > 0 && s <= dict[i-1] {
-			return nil, fmt.Errorf("%w: dictionary not byte-sorted / not unique", ErrNonCanonical)
+		// reference's raw-UTF-8 byte comparison. Distinguish (mirrors decode.py):
+		// key == previous -> ERR_DUPLICATE_KEY; key < previous -> ERR_NON_CANONICAL.
+		if r.strict && i > 0 {
+			if s == dict[i-1] {
+				return nil, fmt.Errorf("%w: duplicate dictionary key", ErrDuplicateKey)
+			}
+			if s < dict[i-1] {
+				return nil, fmt.Errorf("%w: dictionary not byte-sorted", ErrNonCanonical)
+			}
 		}
 		dict[i] = s
 	}
@@ -848,9 +887,10 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		// Enforce rank limit
+		// §2.7: enforce rank limit. rank > MAX_RANK -> ERR_TOO_LARGE (mirrors
+		// decode.py "tensor rank > MAX_RANK").
 		if r.opts.MaxRank > 0 && int(rank) > r.opts.MaxRank {
-			return nil, ErrMalformedLength
+			return nil, ErrTooLarge
 		}
 		dims := make([]uint64, rank)
 		for i := uint8(0); i < rank; i++ {

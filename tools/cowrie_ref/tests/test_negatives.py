@@ -25,3 +25,14 @@ def test_strict_rejects_with_expected_code(name: str) -> None:
 def test_lenient_accepts_noncanonical(name: str) -> None:
     # non-canonical fixtures are well-formed: lenient decode must not raise.
     c.decode(bytes.fromhex(NEGATIVES[name]["hex"]), strict=False)
+
+
+def test_encode_normalizes_neg_zero_and_nan() -> None:
+    """Encoders MUST emit the one canonical form for -0.0 and any NaN (§3)."""
+    import struct
+    nz = struct.unpack("<d", bytes.fromhex("0000000000000080"))[0]
+    snan = struct.unpack("<d", bytes.fromhex("010000000000f07f"))[0]
+    assert c.encode(nz) == c.encode(0.0)
+    assert c.encode(snan) == c.encode(float("nan"))
+    # and the normalized output is accepted by the strict decoder
+    assert c.decode(c.encode(nz), strict=True) == 0.0

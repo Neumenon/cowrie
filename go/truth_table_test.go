@@ -32,6 +32,7 @@ type truthExpect struct {
 	IsPositiveInf bool            `json:"is_positive_inf"`
 	IsNegativeInf bool            `json:"is_negative_inf"`
 	NegativeZero  bool            `json:"negative_zero"`
+	PositiveZero  bool            `json:"positive_zero"`
 	ValueBase64   *string         `json:"value_base64"`
 }
 
@@ -482,6 +483,18 @@ func testRoundtrip(t *testing.T, tc truthCase) {
 		f := decoded.Float64()
 		if f != 0 || !math.Signbit(f) {
 			t.Fatalf("expected -0.0, got %v (signbit=%v)", f, math.Signbit(f))
+		}
+		return
+	}
+	if tc.Expect.PositiveZero {
+		// §3: -0.0 canonicalizes to +0.0 on encode, so the round-trip yields +0.0
+		// (zero value with the sign bit cleared).
+		if decoded.Type() != TypeFloat64 {
+			t.Fatalf("expected float64, got %v", decoded.Type())
+		}
+		f := decoded.Float64()
+		if f != 0 || math.Signbit(f) {
+			t.Fatalf("expected +0.0, got %v (signbit=%v)", f, math.Signbit(f))
 		}
 		return
 	}

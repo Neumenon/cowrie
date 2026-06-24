@@ -47,6 +47,8 @@ def encode_value(value: object, dict_index: dict[str, int], base: int = 0) -> by
     if isinstance(value, float):
         if value == 0.0:
             value = 0.0  # normalize -0.0 -> +0.0 (§3)
+        elif value != value:
+            value = m.CANONICAL_NAN  # normalize any NaN -> the one canonical quiet NaN (§3)
         return bytes([m.T_FLOAT]) + struct.pack("<d", value)
     if isinstance(value, str):
         raw = value.encode("utf-8")

@@ -162,7 +162,18 @@ fn encode_value(
         }
         Value::Float(f) => {
             buf.push(tags::FLOAT64);
-            buf.extend_from_slice(&f.to_le_bytes());
+            // Normalize on encode (SPEC-v1 §3) so we never emit bytes our own strict decoder
+            // would reject: any zero (incl. -0.0) -> +0.0 (all-zero 8 bytes); any NaN (incl.
+            // signaling / non-canonical payloads) -> the one canonical quiet NaN. Matches the
+            // Python reference `encode.py`.
+            let bytes: [u8; 8] = if *f == 0.0 {
+                [0, 0, 0, 0, 0, 0, 0, 0]
+            } else if f.is_nan() {
+                [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]
+            } else {
+                f.to_le_bytes()
+            };
+            buf.extend_from_slice(&bytes);
         }
         Value::Decimal(data) => {
             buf.push(tags::DECIMAL128);

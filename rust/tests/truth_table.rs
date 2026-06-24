@@ -331,6 +331,19 @@ fn run_roundtrip(id: &str, input: &serde_json::Value, expect: &serde_json::Value
             }
             other => panic!("{}: expected Float(-0.0), got {:?}", id, other),
         }
+    } else if expect.get("positive_zero") == Some(&serde_json::Value::Bool(true)) {
+        // §3: -0.0 canonicalizes to +0.0 on encode, so the round-trip yields +0.0.
+        match &decoded {
+            Value::Float(f) => {
+                assert!(
+                    *f == 0.0 && f.is_sign_positive(),
+                    "{}: expected +0.0, got {}",
+                    id,
+                    f
+                );
+            }
+            other => panic!("{}: expected Float(+0.0), got {:?}", id, other),
+        }
     } else {
         assert!(
             values_equal(&val, &decoded),

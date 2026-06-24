@@ -74,6 +74,9 @@ export const ERR_RESERVED_TAG = 'ERR_RESERVED_TAG';
 export const ERR_INVALID_VARINT = 'ERR_INVALID_VARINT';
 export const ERR_INVALID_FIELD_ID = 'ERR_INVALID_FIELD_ID';
 export const ERR_TRAILING_DATA = 'ERR_TRAILING_DATA';
+export const ERR_DUPLICATE_KEY = 'ERR_DUPLICATE_KEY';
+export const ERR_TOO_LARGE = 'ERR_TOO_LARGE';
+export const ERR_TOO_DEEP = 'ERR_TOO_DEEP';
 
 // Strict-mode constants (SPEC-v1 §5.3), mirroring tools/cowrie_ref/model.py.
 const INT64_MIN = -(2n ** 63n);
@@ -81,6 +84,26 @@ const INT64_MAX = 2n ** 63n - 1n;
 const UINT64_MAX = 2n ** 64n - 1n;
 const CANONICAL_NAN_BYTES = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf8, 0x7f]);
 const NEG_ZERO_BYTES = new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80]);
+
+/**
+ * Encode a float64 to its 8 canonical little-endian bytes (§3). Normalizes on
+ * encode so the output is something the strict decoder accepts: -0.0 (and +0.0)
+ * become all-zero bytes, and ANY NaN (including signaling / non-canonical bit
+ * patterns) becomes the one canonical quiet NaN 0x000000000000f87f. Mirrors the
+ * Python reference encode.py.
+ */
+function encodeFloat64Bytes(value: number): Uint8Array {
+  if (value === 0) {
+    // covers both +0.0 and -0.0 (=== treats them as equal) -> +0.0
+    return new Uint8Array([0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  }
+  if (Number.isNaN(value)) {
+    return CANONICAL_NAN_BYTES.slice();
+  }
+  const buf = new ArrayBuffer(8);
+  new DataView(buf).setFloat64(0, value, true);
+  return new Uint8Array(buf);
+}
 // Bits-per-element for each DTYPE wire value (mirrors model.DTYPE_BITS); used for the
 // tensor sub-byte trailing-padding check. Sub-byte types are the ones whose bit width is < 8.
 const DTYPE_BITS: Record<number, number> = {
@@ -743,9 +766,7 @@ class Encoder {
       }
       case Type.FLOAT64: {
         this.writeByte(Tag.FLOAT64);
-        const buf = new ArrayBuffer(8);
-        new DataView(buf).setFloat64(0, v.data as number, true);
-        this.write(new Uint8Array(buf));
+        this.write(encodeFloat64Bytes(v.data as number));
         break;
       }
       case Type.DECIMAL128: {
@@ -1066,8 +1087,10 @@ class Decoder {
 
   private enterNested(): void {
     this.depth++;
+    // §2.7: nesting depth > MAX_DEPTH is a clean decode error (ERR_TOO_DEEP), checked
+    // BEFORE recursing so over-deep input never overflows the native stack.
     if (this.depth > this.limits.maxDepth) {
-      throw new SecurityLimitExceeded(`Maximum nesting depth exceeded: ${this.limits.maxDepth}`);
+      throw new CowrieError(ERR_TOO_DEEP, `nesting depth > ${this.limits.maxDepth}`);
     }
   }
 
@@ -1217,8 +1240,9 @@ class Decoder {
       case Tag.TENSOR: {
         const dtype = this.readByte() as DType;
         const rank = this.readByte();
+        // §2.7: tensor rank > MAX_RANK is a clean decode error (ERR_TOO_LARGE).
         if (rank > this.limits.maxRank) {
-          throw new SecurityLimitExceeded(`Tensor rank too large: ${rank} > ${this.limits.maxRank}`);
+          throw new CowrieError(ERR_TOO_LARGE, `tensor rank > ${this.limits.maxRank}`);
         }
         const shape: number[] = [];
         for (let i = 0; i < rank; i++) {
@@ -1435,15 +1459,32 @@ class Decoder {
       }
       const rawKey = this.read(keyLen);
       const key = this.textDecoder.decode(rawKey);
-      if (this.strict && prevKeyBytes !== null && compareBytes(rawKey, prevKeyBytes) <= 0) {
-        throw new CowrieError(ERR_NON_CANONICAL, 'dictionary not byte-sorted / not unique');
+      if (this.strict && prevKeyBytes !== null) {
+        const cmp = compareBytes(rawKey, prevKeyBytes);
+        if (cmp === 0) {
+          throw new CowrieError(ERR_DUPLICATE_KEY, 'duplicate dictionary key');
+        }
+        if (cmp < 0) {
+          throw new CowrieError(ERR_NON_CANONICAL, 'dictionary not byte-sorted');
+        }
       }
       prevKeyBytes = rawKey;
       this.dict.push(key);
       void startPos;
     }
 
-    const result = this.decodeValue();
+    let result: Value;
+    try {
+      result = this.decodeValue();
+    } catch (e) {
+      // §2.7 native-stack guard: a deeply nested message can overflow the JS engine's
+      // call stack (RangeError) before our explicit depth counter trips. Surface that as
+      // a clean ERR_TOO_DEEP rather than a crash — the input is over-deep by definition.
+      if (e instanceof RangeError && /call stack/i.test(e.message)) {
+        throw new CowrieError(ERR_TOO_DEEP, 'nesting depth exceeds native stack');
+      }
+      throw e;
+    }
 
     // Verify all input consumed — trailing bytes indicate corruption or concatenated data
     if (this.pos < this.data.length) {
@@ -2401,9 +2442,7 @@ class DeterministicEncoder extends Encoder {
       }
       case Type.FLOAT64: {
         this.writeByteSorted(Tag.FLOAT64);
-        const buf = new ArrayBuffer(8);
-        new DataView(buf).setFloat64(0, v.data as number, true);
-        this.writeSorted(new Uint8Array(buf));
+        this.writeSorted(encodeFloat64Bytes(v.data as number));
         break;
       }
       case Type.DECIMAL128: {

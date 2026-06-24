@@ -34,10 +34,10 @@
       },
       {
         "id": "negative_zero_float",
-        "description": "-0.0 roundtrips as -0.0 in binary (IEEE 754 sign bit preserved)",
+        "description": "-0.0 canonicalizes to +0.0 on encode (§3); roundtrips as +0.0 (no negative-zero in canonical bytes)",
         "action": "roundtrip",
         "input": {"type": "float64", "value": "-0.0"},
-        "expect": {"ok": true, "negative_zero": true}
+        "expect": {"ok": true, "positive_zero": true}
       },
       {
         "id": "nan_binary_roundtrip",

@@ -46,6 +46,11 @@ NEGATIVES: list[tuple[str, bytes, str, str]] = [
     ("unsorted_dict",    H + b"\x02\x01z\x01a" + b"\xd1\x00\x41",   "ERR_NON_CANONICAL",   "non-canonical"),  # dict [z,a]
     ("nonascending_idx", H + b"\x01\x01a" + b"\xd2\x00\x41\x00\x42","ERR_NON_CANONICAL",   "non-canonical"),  # idx 0 twice
     ("bitmask_trailing", D0 + b"\x24\x03\x0d",                      "ERR_NON_CANONICAL",   "non-canonical"),  # count 3, bit 3 set
+    # --- added after the 1.0-candidate adversarial review (gate blind spots) ---
+    ("overlong_varint",  D0 + b"\x07\x82\x00ab",                    "ERR_INVALID_VARINT",  "malformed"),     # String len 2 encoded overlong (82 00)
+    ("duplicate_key",    H + b"\x02\x01a\x01a" + b"\xd1\x00\x41",   "ERR_DUPLICATE_KEY",   "non-canonical"),     # dict ["a","a"]
+    ("rank_too_large",   D0 + b"\x20\x04\x21",                      "ERR_TOO_LARGE"    ,  "malformed"),     # tensor rank 33 > MAX_RANK
+    ("too_deep",         D0 + b"\xc1" * 1001 + b"\x00",             "ERR_TOO_DEEP"     ,  "malformed"),     # 1001 nested arrays > MAX_DEPTH
 ]
 
 

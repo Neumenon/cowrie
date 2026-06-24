@@ -461,8 +461,21 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 	return nil
 }
 
-// uint64FromFloat64 converts a float64 to its bit representation.
+// uint64FromFloat64 converts a float64 to its canonical bit representation (§3).
+// Normalizes on encode so the encoder never emits bytes its own strict decoder
+// would reject: -0.0 is written as +0.0 (all-zero 8 bytes) and any NaN
+// (including signaling / non-canonical bit patterns) is written as the one
+// canonical quiet NaN 0x7FF8000000000000 (LE bytes 000000000000f87f).
+// Mirrors tools/cowrie_ref/encode.py encode_value float branch.
 func uint64FromFloat64(f float64) uint64 {
+	if f == 0.0 {
+		// covers +0.0 and -0.0 -> canonical +0.0
+		return 0
+	}
+	if f != f {
+		// any NaN -> canonical quiet NaN
+		return 0x7FF8000000000000
+	}
 	return math.Float64bits(f)
 }
 

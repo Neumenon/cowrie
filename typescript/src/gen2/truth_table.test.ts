@@ -119,6 +119,12 @@ function assertExpect(decoded: Value, expect: any): void {
     assert.ok(Object.is(native, -0), "expected -0");
     return;
   }
+  if (expect.positive_zero === true) {
+    // §3: -0.0 canonicalizes to +0.0 on encode, so the round-trip yields +0.0.
+    const native = toAny(decoded) as number;
+    assert.ok(Object.is(native, 0), "expected +0");
+    return;
+  }
   if ("value_base64" in expect) {
     // bytes comparison — toAny may return empty string for empty bytes
     const native = toAny(decoded);

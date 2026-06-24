@@ -7,12 +7,19 @@ this is what makes ``encode(decode(x)) == x`` a real conformance gate.
 from __future__ import annotations
 
 import struct
+import sys
+
+from . import model as _m0
+
+# Ensure our explicit MAX_DEPTH check (ERR_TOO_DEEP) fires before CPython's own recursion limit,
+# so over-deep input is a clean decode error, never a RecursionError crash.
+sys.setrecursionlimit(max(sys.getrecursionlimit(), _m0.MAX_DEPTH * 8 + 1000))
 
 from . import model as m
 from .errors import (
-    CowrieError, ERR_INVALID_FIELD_ID, ERR_INVALID_MAGIC, ERR_INVALID_TAG, ERR_INVALID_UTF8,
-    ERR_INVALID_VERSION, ERR_NON_CANONICAL, ERR_RESERVED_TAG, ERR_TRAILING_DATA, ERR_TRUNCATED,
-    ERR_UNSUPPORTED_COMPRESSION,
+    CowrieError, ERR_DUPLICATE_KEY, ERR_INVALID_FIELD_ID, ERR_INVALID_MAGIC, ERR_INVALID_TAG,
+    ERR_INVALID_UTF8, ERR_INVALID_VERSION, ERR_NON_CANONICAL, ERR_TOO_DEEP, ERR_TOO_LARGE, ERR_RESERVED_TAG,
+    ERR_TRAILING_DATA, ERR_TRUNCATED, ERR_UNSUPPORTED_COMPRESSION,
 )
 from .varint import decode_svarint, decode_uvarint
 
@@ -62,13 +69,18 @@ class _Decoder:
                 key = raw.decode("utf-8")
             except UnicodeDecodeError:
                 raise self._bad(ERR_INVALID_UTF8, "dict key")
-            if self.strict and prev is not None and raw <= prev:
-                raise self._bad(ERR_NON_CANONICAL, "dictionary not byte-sorted / not unique")
+            if self.strict and prev is not None:
+                if raw == prev:
+                    raise self._bad(ERR_DUPLICATE_KEY, "duplicate dictionary key")
+                if raw < prev:
+                    raise self._bad(ERR_NON_CANONICAL, "dictionary not byte-sorted")
             prev = raw
             self.keys.append(key)
 
     # -- values (§2.3) --
-    def value(self) -> object:
+    def value(self, depth: int = 0) -> object:
+        if depth > m.MAX_DEPTH:
+            raise self._bad(ERR_TOO_DEEP, "nesting depth > MAX_DEPTH")
         tag = self._take(1)[0]
         if tag == m.T_NULL:
             return None
@@ -135,6 +147,8 @@ class _Decoder:
             if dtype not in m.DTYPE_BITS:
                 raise self._bad(ERR_INVALID_TAG, f"dtype 0x{dtype:02x}")
             rank = self._take(1)[0]
+            if rank > m.MAX_RANK:
+                raise self._bad(ERR_TOO_LARGE, "tensor rank > MAX_RANK")
             shape = tuple(self._uvarint() for _ in range(rank))
             nelem = 1
             for d in shape:
@@ -164,7 +178,7 @@ class _Decoder:
             count = (tag - m.FIXARRAY) if tag != m.T_ARRAY else self._uvarint()
             if self.strict and tag == m.T_ARRAY and count <= 15:
                 raise self._bad(ERR_NON_CANONICAL, "array should use FIXARRAY")
-            return [self.value() for _ in range(count)]
+            return [self.value(depth + 1) for _ in range(count)]
         if tag == m.T_OBJECT or m.FIXMAP <= tag <= m.FIXMAP + 15:
             count = (tag - m.FIXMAP) if tag != m.T_OBJECT else self._uvarint()
             if self.strict and tag == m.T_OBJECT and count <= 15:
@@ -178,7 +192,7 @@ class _Decoder:
                 if self.strict and idx <= last:
                     raise self._bad(ERR_NON_CANONICAL, "object fields not in ascending dictIdx")
                 last = idx
-                obj[self.keys[idx]] = self.value()
+                obj[self.keys[idx]] = self.value(depth + 1)
             return obj
         raise self._bad(ERR_RESERVED_TAG, f"0x{tag:02x}")
 

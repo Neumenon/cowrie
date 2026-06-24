@@ -18,6 +18,8 @@ pub enum CowrieError {
     TrailingData { pos: usize, remaining: usize },
     InvalidDictIndex { index: usize, dict_len: usize },
     RankExceeded { rank: usize, max: usize },
+    /// A dictionary header contains the same key twice (SPEC-v1 §2.6 ERR_DUPLICATE_KEY).
+    DuplicateKey,
     /// Strict-mode (SPEC-v1 §5.3) rejection of well-formed-but-non-canonical input.
     NonCanonical(String),
 }
@@ -47,6 +49,7 @@ impl fmt::Display for CowrieError {
             CowrieError::RankExceeded { rank, max } => {
                 write!(f, "tensor rank {} exceeds maximum {}", rank, max)
             }
+            CowrieError::DuplicateKey => write!(f, "duplicate dictionary key"),
             CowrieError::NonCanonical(detail) => {
                 write!(f, "non-canonical encoding (ERR_NON_CANONICAL): {}", detail)
             }
@@ -71,18 +74,18 @@ impl CowrieError {
             CowrieError::InvalidDictIndex { .. } => "ERR_INVALID_FIELD_ID",
             CowrieError::TrailingData { .. } => "ERR_TRAILING_DATA",
             CowrieError::NonCanonical(_) => "ERR_NON_CANONICAL",
-            // `InvalidData` covers varint overflow (overlong/overflow uvarint) as well as
+            // Duplicate dictionary key (§2.6).
+            CowrieError::DuplicateKey => "ERR_DUPLICATE_KEY",
+            // `InvalidData` covers varint overflow / overlong (non-minimal) uvarint as well as
             // structural validation failures (e.g. tensor dataLen mismatch). The varint
-            // overflow message is the one exercised by the negative-fixture gate
-            // (ERR_INVALID_VARINT); other InvalidData failures are likewise structural
-            // varint/length problems.
+            // problems are the ones exercised by the negative-fixture gate (ERR_INVALID_VARINT);
+            // other InvalidData failures are likewise structural varint/length problems.
             CowrieError::InvalidData(_) => "ERR_INVALID_VARINT",
-            // UTF-8 / depth / size limits are not part of the 8 canonical negative-fixture
-            // codes; surface them as truncation/structural problems by closest fit.
-            CowrieError::InvalidUtf8 => "ERR_TRUNCATED",
-            CowrieError::TooDeep => "ERR_TRUNCATED",
-            CowrieError::TooLarge => "ERR_TRUNCATED",
-            CowrieError::RankExceeded { .. } => "ERR_TRUNCATED",
+            CowrieError::InvalidUtf8 => "ERR_INVALID_UTF8",
+            // §2.7 limits.
+            CowrieError::TooDeep => "ERR_TOO_DEEP",
+            CowrieError::TooLarge => "ERR_TOO_LARGE",
+            CowrieError::RankExceeded { .. } => "ERR_TOO_LARGE",
         }
     }
 }

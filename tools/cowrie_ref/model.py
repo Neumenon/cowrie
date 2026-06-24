@@ -26,6 +26,10 @@ MAGIC = b"COWR"
 VERSION = 0x01
 COMPRESSION_NONE = 0x00
 TENSOR_ALIGN = 64  # §2.5: tensor data starts at a 64-byte boundary (canonical, zero-padded, verified)
+import struct as _struct
+CANONICAL_NAN = _struct.unpack("<d", bytes.fromhex("000000000000f87f"))[0]  # the one canonical quiet NaN (§3)
+MAX_RANK = 32       # §2.7
+MAX_DEPTH = 1000    # §2.7
 
 # §2.5 DType -> (wire value, bytes_per_elem | None for sub-byte) ; sub-byte handled separately
 DTYPE = {

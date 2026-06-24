@@ -175,9 +175,14 @@ impl<'a> Reader<'a> {
             let raw = self.read_bytes(key_len)?;
             if self.opts.strict {
                 if let Some(prev) = &prev {
-                    if raw <= *prev {
+                    // Distinguish duplicate from mis-ordered (ref decode.py):
+                    //   key == prev -> ERR_DUPLICATE_KEY; key < prev -> ERR_NON_CANONICAL.
+                    if raw == *prev {
+                        return Err(CowrieError::DuplicateKey);
+                    }
+                    if raw < *prev {
                         return Err(CowrieError::NonCanonical(
-                            "dictionary not byte-sorted / not unique".into(),
+                            "dictionary not byte-sorted".into(),
                         ));
                     }
                 }
@@ -202,10 +207,15 @@ impl<'a> Reader<'a> {
     }
 
     fn decode_value(&mut self) -> Result<Value, CowrieError> {
-        self.depth += 1;
+        // `self.depth` is the depth of THIS value (root = 0), matching the Python reference
+        // `value(depth)` which checks `depth > MAX_DEPTH` on entry and recurses with `depth + 1`.
+        // So a chain of MAX_DEPTH nested containers with a leaf at depth == MAX_DEPTH is accepted;
+        // one level deeper (depth == MAX_DEPTH + 1) is rejected — before recursing, guarding the
+        // native stack.
         if self.depth > self.opts.max_depth {
             return Err(CowrieError::TooDeep);
         }
+        self.depth += 1;
 
         let tag = self.read_byte()?;
         let value = match tag {
@@ -634,14 +644,22 @@ impl<'a> Reader<'a> {
     fn read_uvarint(&mut self) -> Result<u64, CowrieError> {
         let mut result: u64 = 0;
         let mut shift: u32 = 0;
+        let mut nbytes: usize = 0;
         loop {
             let b = self.read_byte()?;
+            nbytes += 1;
             // 64-bit overflow: >10 bytes, or a 10th byte (shift 63) contributing bits above bit 63.
             if shift >= 64 || (shift == 63 && (b & 0x7f) > 1) {
                 return Err(CowrieError::InvalidData("uvarint overflows 64 bits".into()));
             }
             result |= ((b & 0x7f) as u64) << shift;
             if b & 0x80 == 0 {
+                // Minimality (SPEC-v1 §2.1, ref varint.py): the terminating byte must be non-zero
+                // unless the whole varint is the single byte 0x00. A trailing 0x00 with length > 1
+                // is an overlong/non-minimal encoding (e.g. `82 00` for value 2) -> ERR_INVALID_VARINT.
+                if b == 0 && nbytes > 1 {
+                    return Err(CowrieError::InvalidData("overlong varint".into()));
+                }
                 break;
             }
             shift += 7;

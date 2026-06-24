@@ -220,6 +220,14 @@ func specErrorCode(err error) string {
 	case errors.Is(err, cowrie.ErrInvalidFieldID):
 		// dict index out of range / non-ascending field id (§2.6)
 		return "ERR_INVALID_FIELD_ID"
+	case errors.Is(err, cowrie.ErrDuplicateKey):
+		return "ERR_DUPLICATE_KEY"
+	case errors.Is(err, cowrie.ErrTooLarge):
+		// §2.7 size limit (e.g. tensor rank > MAX_RANK)
+		return "ERR_TOO_LARGE"
+	case errors.Is(err, cowrie.ErrDepthExceeded), errors.Is(err, cowrie.ErrTooDeep):
+		// §2.7 nesting depth > MAX_DEPTH
+		return "ERR_TOO_DEEP"
 	case errors.Is(err, cowrie.ErrUnexpectedEOF), errors.Is(err, cowrie.ErrMalformedLength):
 		// truncation / premature EOF / declared length past end of buffer
 		return "ERR_TRUNCATED"
