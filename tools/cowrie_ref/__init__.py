@@ -21,6 +21,7 @@ from .model import Bitmask, Decimal128, Datetime, Extension, Tensor, Uuid
 
 __all__ = [
     "encode", "encode_value", "decode", "fingerprint", "CowrieError", "roundtrip_ok", "value_eq",
+    "content_address", "address_of_bytes",
     "Bitmask", "Decimal128", "Datetime", "Extension", "Tensor", "Uuid",
 ]
 __version__ = "0.1.0"
@@ -36,6 +37,20 @@ def value_eq(a: object, b: object) -> bool:
     if isinstance(a, dict) and isinstance(b, dict):
         return a.keys() == b.keys() and all(value_eq(a[k], b[k]) for k in a)
     return a == b
+
+
+def address_of_bytes(canonical: bytes) -> bytes:
+    """Content address (§3) of already-canonical, uncompressed wire bytes: a **multihash** SHA-256
+    — ``b'\\x12\\x20'`` (sha2-256, 32-byte length) followed by the 32 digest bytes."""
+    import hashlib
+    return b"\x12\x20" + hashlib.sha256(canonical).digest()
+
+
+def content_address(value: object) -> bytes:
+    """Content address (§3) of a value: encode it canonically, then ``address_of_bytes``. This is the
+    v1 per-value identity — equal canonical bytes ⇒ equal address, across every conforming impl.
+    (A Bytes value is itself a Python ``bytes``, so we MUST encode, never hash the value directly.)"""
+    return address_of_bytes(encode(value))
 
 
 def roundtrip_ok(value: object) -> bool:

@@ -4,16 +4,26 @@
 // Strict mode (SPEC-v1 §5.3): pass --strict or set STRICT=1 to reject well-formed-but-
 // non-canonical input (decode raises ERR_NON_CANONICAL -> non-zero exit). Without it,
 // behavior is unchanged (lenient decode).
-import { encode, decode } from "./src/gen2/index";
+//
+// Address mode (SPEC-v1 §3): pass --addr to print the content address (multihash SHA-256
+// of the canonical wire bytes) as lowercase hex instead of the canonical bytes. Combines
+// with --strict.
+import { encode, decode, addressOfBytes } from "./src/gen2/index";
 
 const strict = process.argv.includes("--strict") || process.env.STRICT === "1";
+const addr = process.argv.includes("--addr");
 
 const chunks: Buffer[] = [];
 process.stdin.on("data", (c: Buffer) => chunks.push(c));
 process.stdin.on("end", () => {
   const data = new Uint8Array(Buffer.concat(chunks));
   try {
-    process.stdout.write(Buffer.from(encode(decode(data, { strict }))));
+    const canonical = encode(decode(data, { strict }));
+    if (addr) {
+      process.stdout.write(Buffer.from(addressOfBytes(canonical)).toString("hex") + "\n");
+    } else {
+      process.stdout.write(Buffer.from(canonical));
+    }
   } catch (e) {
     process.stderr.write(String(e));
     process.exit(1);

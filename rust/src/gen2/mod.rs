@@ -8,6 +8,7 @@
 //! - Compression (gzip, optional zstd)
 //! - JSON bridge
 
+pub mod address;
 pub mod compress;
 pub mod decode;
 pub mod encode;
@@ -18,6 +19,7 @@ pub(crate) mod tags;
 pub mod types;
 
 // Re-export main types
+pub use address::{address_of_bytes, content_address, content_address_hex, to_hex};
 pub use compress::{decode_framed, decode_framed_strict, encode_framed, Compression};
 pub use decode::{decode, decode_strict, decode_with_options, DecodeOptions};
 pub use encode::{encode, encode_with_options, EncodeOptions};

@@ -1950,6 +1950,38 @@ export function loads(data: Uint8Array): unknown {
 }
 
 // ============================================================
+// Content Address (SPEC-v1 §3)
+// ============================================================
+
+import { createHash } from 'node:crypto';
+
+/**
+ * Content address (§3) of already-canonical, uncompressed wire bytes: a multihash
+ * SHA-256 — 0x12 0x20 (sha2-256 code, 32-byte length) followed by the 32 digest bytes.
+ */
+export function addressOfBytes(canonical: Uint8Array): Uint8Array {
+  const digest = createHash('sha256').update(canonical).digest();
+  const out = new Uint8Array(34);
+  out[0] = 0x12;
+  out[1] = 0x20;
+  out.set(digest, 2);
+  return out;
+}
+
+/**
+ * Content address (§3) of a value: encode it canonically, then addressOfBytes.
+ * Equal canonical bytes => equal address, across every conforming impl.
+ */
+export function contentAddress(value: Value): Uint8Array {
+  return addressOfBytes(encode(value));
+}
+
+/** Lowercase hex (68 chars) of a content address. */
+export function contentAddressHex(value: Value): string {
+  return Buffer.from(contentAddress(value)).toString('hex');
+}
+
+// ============================================================
 // Deterministic Encoding
 // ============================================================
 

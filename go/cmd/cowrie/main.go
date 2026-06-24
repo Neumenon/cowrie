@@ -203,6 +203,7 @@ func decodeCmd(args []string) {
 func recodeCmd(args []string) {
 	fs := flag.NewFlagSet("recode", flag.ExitOnError)
 	strict := fs.Bool("strict", false, "Strict-decode mode (§5.3): reject non-canonical input")
+	addr := fs.Bool("addr", false, "Print the content-address (§3) multihash SHA-256 hex of the canonical bytes")
 	fs.Parse(args)
 
 	// STRICT=1 env also enables strict mode (parity with cross-language harness).
@@ -229,6 +230,11 @@ func recodeCmd(args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
 		os.Exit(1)
+	}
+	if *addr {
+		// Content address (§3): multihash SHA-256 of the canonical bytes.
+		fmt.Println(cowrie.AddressOfBytesHex(output))
+		return
 	}
 	os.Stdout.Write(output)
 }
