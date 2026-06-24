@@ -76,12 +76,51 @@ pub fn decode_with_options(data: &[u8], opts: &DecodeOptions) -> Result<Value, C
     reader.decode()
 }
 
+/// Locate every tensor's `(dtype, shape, data_offset, data_len)` span within a canonical Cowrie
+/// message, in document order (Phase 2 zero-copy tensor locator). `data_offset` is the ABSOLUTE
+/// byte offset (from byte 0 of `data`) of the tensor's contiguous little-endian data run — a
+/// zero-copy reader views `data[data_offset .. data_offset + data_len]` with no decode/copy.
+///
+/// Captures spans *during* decode (it does not re-walk or guess offsets), mirroring the Python
+/// oracle `cowrie_ref.tensor_spans` exactly. Decodes in STRICT mode so it rejects
+/// non-canonical input identically to the reference.
+pub fn tensor_spans(data: &[u8]) -> Result<Vec<TensorSpan>, CowrieError> {
+    let opts = DecodeOptions {
+        strict: true,
+        ..DecodeOptions::default()
+    };
+    let mut reader = Reader::new(data, &opts);
+    reader.spans = Some(Vec::new());
+    reader.decode()?;
+    Ok(reader.spans.take().unwrap_or_default())
+}
+
+/// A located tensor data run within a canonical Cowrie message (Phase 2 zero-copy locator).
+///
+/// `data_offset` is the ABSOLUTE byte offset (from byte 0 of the message) of the tensor's
+/// contiguous little-endian data run — the decoder position *after* the `dataLen` uvarint and
+/// at the start of the data bytes. `data_len` is its byte length. Mirrors the Python oracle's
+/// `(dtype, shape, data_offset, data_len)` span tuple (`tools/cowrie_ref/decode.py`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TensorSpan {
+    /// Wire dtype byte (e.g. `0x01` = Float32).
+    pub dtype: u8,
+    /// Tensor shape dims; empty for a rank-0 scalar.
+    pub shape: Vec<u64>,
+    /// Absolute byte offset of the data run from byte 0 of the message.
+    pub data_offset: usize,
+    /// Byte length of the data run.
+    pub data_len: usize,
+}
+
 struct Reader<'a> {
     data: &'a [u8],
     pos: usize,
     dict: Vec<String>,
     depth: usize,
     opts: &'a DecodeOptions,
+    /// When `Some`, every tensor's data run is recorded here in document order during decode.
+    spans: Option<Vec<TensorSpan>>,
 }
 
 impl<'a> Reader<'a> {
@@ -92,6 +131,7 @@ impl<'a> Reader<'a> {
             dict: Vec::new(),
             depth: 0,
             opts,
+            spans: None,
         }
     }
 
@@ -342,6 +382,17 @@ impl<'a> Reader<'a> {
                             data_len, expected
                         )));
                     }
+                }
+                // Record this tensor's data span in document order (Phase 2 zero-copy locator).
+                // `self.pos` here is the absolute offset of the data bytes — exactly after the
+                // dataLen uvarint — matching the Python oracle's `data_off = self.pos`.
+                if let Some(spans) = self.spans.as_mut() {
+                    spans.push(TensorSpan {
+                        dtype: dtype as u8,
+                        shape: shape.clone(),
+                        data_offset: self.pos,
+                        data_len,
+                    });
                 }
                 let data = self.read_bytes(data_len)?;
                 if self.opts.strict {

@@ -13,19 +13,30 @@
 //   --file-id     : decode+verify, print the merkle_root as one line of lowercase hex (68 chars).
 //   --file-recode : decode, RE-ENCODE the file, write raw bytes to stdout (reproduces input
 //                   byte-for-byte for canonical files).
-import { encode, decode, addressOfBytes, decodeFile, encodeFile, fileIdentity } from "./src/gen2/index";
+import { encode, decode, addressOfBytes, decodeFile, encodeFile, fileIdentity, tensorSpans } from "./src/gen2/index";
 
 const strict = process.argv.includes("--strict") || process.env.STRICT === "1";
 const addr = process.argv.includes("--addr");
 const fileId = process.argv.includes("--file-id");
 const fileRecode = process.argv.includes("--file-recode");
+const tensorSpansMode = process.argv.includes("--tensor-spans");
 
 const chunks: Buffer[] = [];
 process.stdin.on("data", (c: Buffer) => chunks.push(c));
 process.stdin.on("end", () => {
   const data = new Uint8Array(Buffer.concat(chunks));
   try {
-    if (fileId) {
+    if (tensorSpansMode) {
+      // Phase 2 zero-copy tensor locator: one line per tensor in document order,
+      // "<data_offset> <data_len> <dtype> <shape>" (shape comma-joined or "-" for rank-0).
+      const spans = tensorSpans(data, { strict });
+      let out = "";
+      for (const s of spans) {
+        const shape = s.shape.length === 0 ? "-" : s.shape.join(",");
+        out += `${s.dataOffset} ${s.dataLen} ${s.dtype} ${shape}\n`;
+      }
+      process.stdout.write(out);
+    } else if (fileId) {
       process.stdout.write(Buffer.from(fileIdentity(data)).toString("hex") + "\n");
     } else if (fileRecode) {
       const frames = decodeFile(data, true);

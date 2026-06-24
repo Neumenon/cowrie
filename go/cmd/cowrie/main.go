@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 
 	"github.com/Neumenon/cowrie/go/v2/gen1"
 	cowrie "github.com/Neumenon/cowrie/go/v2"
@@ -206,7 +208,33 @@ func recodeCmd(args []string) {
 	addr := fs.Bool("addr", false, "Print the content-address (§3) multihash SHA-256 hex of the canonical bytes")
 	fileID := fs.Bool("file-id", false, "Read a Cowrie FILE (§7) on stdin, decode+verify, print merkle_root as lowercase hex")
 	fileRecode := fs.Bool("file-recode", false, "Read a Cowrie FILE (§7) on stdin, decode, re-encode, write raw bytes to stdout")
+	tensorSpans := fs.Bool("tensor-spans", false, "Read a canonical Cowrie message on stdin, decode, print one line per tensor in document order: \"<data_offset> <data_len> <dtype> <shape>\"")
 	fs.Parse(args)
+
+	if *tensorSpans {
+		input, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		spans, err := cowrie.TensorSpans(input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
+			os.Exit(1)
+		}
+		for _, s := range spans {
+			shape := "-"
+			if len(s.Shape) > 0 {
+				parts := make([]string, len(s.Shape))
+				for i, d := range s.Shape {
+					parts[i] = strconv.FormatUint(d, 10)
+				}
+				shape = strings.Join(parts, ",")
+			}
+			fmt.Printf("%d %d %d %s\n", s.DataOffset, s.DataLen, uint8(s.DType), shape)
+		}
+		return
+	}
 
 	if *fileID || *fileRecode {
 		input, err := io.ReadAll(os.Stdin)

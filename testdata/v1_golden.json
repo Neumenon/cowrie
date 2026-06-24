@@ -493,5 +493,11 @@
     "canonical_hex": "434f57520100020161017ad101d10041",
     "fingerprint64": 6580773593216541858,
     "fingerprint32": 1928422562
+  },
+  "tensors_nested": {
+    "value": "{'m': Tensor(dtype=4, shape=(2,), data=b'\\x01\\x02'), 'n': [Tensor(dtype=1, shape=(1,), data=b'\\x00\\x00\\x80?')]}",
+    "canonical_hex": "434f5752010002016d016ed2002004010202010201c120010101040000803f",
+    "fingerprint64": 12032143729305386520,
+    "fingerprint32": 129039896
   }
 }

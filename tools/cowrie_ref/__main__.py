@@ -50,6 +50,8 @@ CASES: dict[str, object] = {
     "bitmask_0": Bitmask(()), "bitmask_1": Bitmask((True,)),
     "bitmask_8": Bitmask((True,) * 8), "bitmask_9": Bitmask((True,) * 9),
     "dfs_global_sort": {"z": {"a": 1}},
+    "tensors_nested": {"m": Tensor(0x04, (2,), b"\x01\x02"),
+                       "n": [Tensor(0x01, (1,), b"\x00\x00\x80\x3f")]},
 }
 
 

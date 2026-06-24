@@ -68,5 +68,23 @@
       "data_offset": 12,
       "data_len": 2
     }
+  ],
+  "tensors_nested": [
+    {
+      "dtype": 4,
+      "shape": [
+        2
+      ],
+      "data_offset": 18,
+      "data_len": 2
+    },
+    {
+      "dtype": 1,
+      "shape": [
+        1
+      ],
+      "data_offset": 27,
+      "data_len": 4
+    }
   ]
 }

@@ -964,12 +964,24 @@ export function encode(v: Value): Uint8Array {
 }
 
 // Decoder
+// One located tensor data run within a canonical message (Phase 2 zero-copy locator).
+// dataOffset is the ABSOLUTE byte offset (from byte 0 of the message) of the tensor's
+// contiguous little-endian data run; dataLen is its byte length.
+export interface TensorSpan {
+  dtype: number;
+  shape: number[];
+  dataOffset: number;
+  dataLen: number;
+}
+
 class Decoder {
   private pos = 0;
   private dict: string[] = [];
   private depth = 0;
   private textDecoder = new TextDecoder();
   private limits: ResolvedLimits;
+  // Tensor data runs captured during decode, in document order (Phase 2 locator).
+  spans: TensorSpan[] = [];
 
   constructor(
     private data: Uint8Array,
@@ -1191,6 +1203,9 @@ class Decoder {
         if (expected !== null && dataLen !== expected) {
           throw new Error(`cowrie: tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
         }
+        // Record the tensor's data run: data_offset is the position AFTER reading the
+        // dataLen uvarint (start of the contiguous data bytes), matching the Python oracle.
+        this.spans.push({ dtype, shape: shape.slice(), dataOffset: this.pos, dataLen });
         const data = this.read(dataLen);
         if (this.strict) {
           // Sub-byte dtypes (qint4/qint2/qint3/ternary/binary): the unused high bits in the
@@ -1447,6 +1462,23 @@ export function decode(data: Uint8Array, opts: DecodeOptions = {}): Value {
     resolveLimits(opts),
     opts.strict ?? false,
   ).decode();
+}
+
+/**
+ * Locate every tensor's data run within a canonical message, in document order — the
+ * Phase 2 zero-copy locator (mirrors the Python oracle cowrie_ref.tensor_spans). Decodes
+ * the message and returns each tensor's { dtype, shape, dataOffset, dataLen }, where
+ * dataOffset is the ABSOLUTE byte offset of the tensor's contiguous little-endian data run.
+ */
+export function tensorSpans(data: Uint8Array, opts: DecodeOptions = {}): TensorSpan[] {
+  const dec = new Decoder(
+    data,
+    opts.onUnknownExt ?? UnknownExtBehavior.KEEP,
+    resolveLimits(opts),
+    opts.strict ?? false,
+  );
+  dec.decode();
+  return dec.spans;
 }
 
 // JSON Bridge

@@ -284,6 +284,23 @@ func DecodeWithOptions(data []byte, opts DecodeOptions) (*Value, error) {
 	return decode(r)
 }
 
+// TensorSpans decodes a canonical (uncompressed) Cowrie v1 message and returns
+// one TensorSpan per tensor in document order (the order tensors appear during
+// decode), locating each tensor's contiguous little-endian data run. Tensors
+// nested inside arrays/objects are included. Offsets are ABSOLUTE byte offsets
+// into data. Returns nil (no spans) when the message contains no tensors.
+// Mirrors tools/cowrie_ref/decode.py tensor_spans.
+func TensorSpans(data []byte) ([]TensorSpan, error) {
+	opts := DefaultDecodeOptions()
+	r := &reader{data: data, opts: opts, strict: opts.Strict}
+	spans := make([]TensorSpan, 0)
+	r.spans = &spans
+	if _, err := decode(r); err != nil {
+		return nil, err
+	}
+	return spans, nil
+}
+
 // DecodeFrom decodes from an io.Reader.
 // Applies DefaultMaxBytesLen (50MB) as an input size limit to prevent
 // resource exhaustion. Use DecodeFromLimited for a custom limit.
@@ -345,6 +362,20 @@ func DecodeFromWithOptions(rd io.Reader, opts DecodeOptions) (*Value, error) {
 	return DecodeWithOptions(data, opts)
 }
 
+// TensorSpan locates a tensor's contiguous little-endian data run within a
+// canonical Cowrie message (Phase 2 zero-copy tensor locator). DataOffset is the
+// ABSOLUTE byte offset (from byte 0 of the message) of the first data byte — the
+// decoder position immediately AFTER the dataLen uvarint — and DataLen is the
+// run's byte length. A zero-copy reader views data[DataOffset:DataOffset+DataLen]
+// with no decode/copy. Mirrors tools/cowrie_ref/decode.py span tuples
+// (dtype, shape, data_offset, data_len).
+type TensorSpan struct {
+	DType      DType
+	Shape      []uint64
+	DataOffset int
+	DataLen    int
+}
+
 // reader wraps a byte slice for reading with security limits.
 type reader struct {
 	data   []byte
@@ -352,6 +383,11 @@ type reader struct {
 	depth  int           // Current nesting depth
 	opts   DecodeOptions // Security limits
 	strict bool          // §5.3 strict-decode: reject non-canonical input
+
+	// spans, when non-nil, accumulates one TensorSpan per tensor encountered
+	// during decode, in document order. Threaded through decodeValue so nested
+	// tensors (inside arrays/objects) are captured too.
+	spans *[]TensorSpan
 }
 
 // remaining returns the number of bytes left to read.
@@ -831,6 +867,20 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		dataLen, err := r.readUvarint()
 		if err != nil {
 			return nil, err
+		}
+		// Phase 2 zero-copy tensor locator: r.pos is now the ABSOLUTE byte offset
+		// of the tensor's contiguous data run (immediately after the dataLen
+		// uvarint), exactly matching the Python oracle's data_offset. Capture it
+		// before any data is consumed. Done here so a span is recorded even when
+		// streaming via TensorSink. Nested tensors are captured because spans is
+		// threaded through every decodeValue call.
+		if r.spans != nil {
+			*r.spans = append(*r.spans, TensorSpan{
+				DType:      DType(dtype),
+				Shape:      dims,
+				DataOffset: r.pos,
+				DataLen:    int(dataLen),
+			})
 		}
 		// Sanity check: dataLen can't exceed remaining data
 		if dataLen > uint64(r.remaining()) {

@@ -22,7 +22,9 @@ pub mod types;
 // Re-export main types
 pub use address::{address_of_bytes, content_address, content_address_hex, to_hex};
 pub use compress::{decode_framed, decode_framed_strict, encode_framed, Compression};
-pub use decode::{decode, decode_strict, decode_with_options, DecodeOptions};
+pub use decode::{
+    decode, decode_strict, decode_with_options, tensor_spans, DecodeOptions, TensorSpan,
+};
 pub use encode::{encode, encode_with_options, EncodeOptions};
 pub use file::{decode_file, encode_file, file_identity, merkle_root};
 pub use json::{from_json, to_json, to_json_pretty};
