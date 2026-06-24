@@ -139,7 +139,14 @@ func encodeFileFromFrames(frames [][]byte) []byte {
 	offsets := make([]int, len(frames))
 	for i, f := range frames {
 		out = putUvarint(out, uint64(len(f)))
-		offsets[i] = len(out) // offset to frame_bytes (after its length prefix)
+		// §7: each frame's bytes begin at a 64-byte FILE offset so in-frame
+		// tensors stay 64B-aligned in the file. Pad = (-offset) mod 64 zero bytes
+		// after frame_len; the footer offset points to the aligned frame start.
+		pad := (-len(out)) & (TensorAlign - 1)
+		for j := 0; j < pad; j++ {
+			out = append(out, 0)
+		}
+		offsets[i] = len(out) // offset to frame_bytes (64B-aligned)
 		out = append(out, f...)
 	}
 	footerOffset := len(out)
@@ -210,6 +217,18 @@ func DecodeFile(data []byte) ([][]byte, error) {
 			return nil, err
 		}
 		pos = adv2
+		// §7: frame bytes are 64-byte aligned in the file. Consume pad =
+		// (-pos) mod 64 zero bytes after frame_len; reject non-zero padding.
+		pad := (-pos) & (TensorAlign - 1)
+		if pos+pad > len(data) {
+			return nil, errors.New("cowrie file: truncated frame alignment padding")
+		}
+		for j := 0; j < pad; j++ {
+			if data[pos+j] != 0 {
+				return nil, errors.New("cowrie file: frame alignment padding not zero")
+			}
+		}
+		pos += pad
 		if uint64(pos)+flen > footerOffset {
 			return nil, errors.New("cowrie file: frame extends past footer")
 		}

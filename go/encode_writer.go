@@ -48,6 +48,17 @@ func EncodeToWriter(w io.Writer, v *Value) error {
 	return err
 }
 
+// segmentsLen returns the total byte length already accumulated across all
+// emitted segments. Used to compute the absolute output offset so tensor data
+// can be 64B-aligned (§2.5) in the scatter-gather encode path.
+func segmentsLen(segments net.Buffers) int {
+	total := 0
+	for _, s := range segments {
+		total += len(s)
+	}
+	return total
+}
+
 // collectSegments appends write segments for a value.
 // For tensors, the data is added as a separate segment (zero-copy).
 // For all other types, values are encoded into the last buffer segment.
@@ -81,7 +92,17 @@ func encodeValueScatter(buf *buffer, segments *net.Buffers, v *Value, d *dict) e
 		}
 		buf.writeUvarint(uint64(len(v.tensorVal.Data)))
 
-		// Flush current buf as a segment, then add tensor data as separate segment
+		// §2.5: tensor data MUST begin at a 64-byte boundary relative to byte 0
+		// of the message. The absolute offset right after the dataLen uvarint is
+		// the bytes already emitted in prior segments plus the current buffer.
+		offset := segmentsLen(*segments) + len(buf.data)
+		pad := (-offset) & (TensorAlign - 1)
+		for i := 0; i < pad; i++ {
+			buf.writeByte(0)
+		}
+
+		// Flush current buf (header + pad) as a segment, then add tensor data as
+		// a separate zero-copy segment landing on the 64B-aligned offset.
 		if len(buf.data) > 0 {
 			*segments = append(*segments, buf.data)
 			buf.data = make([]byte, 0, 64)

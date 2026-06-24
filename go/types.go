@@ -30,6 +30,12 @@ const (
 	Version = 1
 )
 
+// TensorAlign is the canonical 64-byte alignment boundary for tensor data
+// (SPEC-v1 §2.5) and for frame starts in a Cowrie file (§7). A tensor's data
+// MUST begin at a 64-byte offset relative to byte 0 of the message; a file's
+// frame bytes MUST begin at a 64-byte file offset.
+const TensorAlign = 64
+
 // Flag bits
 const (
 	FlagCompressed       = 0x01 // bit0: data is compressed

@@ -40,6 +40,9 @@ const FILE_MAGIC: &[u8; 4] = b"CWRF";
 const FILE_VERSION: u8 = 1;
 /// §7 frame-count bound (DoS guard).
 const MAX_FRAMES: u64 = 1 << 32;
+/// Canonical frame alignment (SPEC-v1 §7): each frame's bytes begin at a 64-byte file offset so
+/// that in-frame tensors stay 64B-aligned within the file. Equals the tensor alignment (§2.5).
+const FRAME_ALIGN: usize = 64;
 
 // ---------------------------------------------------------------- varint -----
 
@@ -146,7 +149,12 @@ pub fn encode_file(frames: &[Vec<u8>]) -> Vec<u8> {
     let mut offsets: Vec<usize> = Vec::with_capacity(frames.len());
     for f in frames {
         write_uvarint(&mut out, f.len() as u64);
-        offsets.push(out.len()); // offset to frame_bytes (after its length prefix)
+        // Each frame's bytes begin at a 64-byte FILE offset (SPEC-v1 §7) so that in-frame tensors
+        // remain 64B-aligned within the file. Pad with canonical zero bytes; the footer offset
+        // points to the aligned frame start.
+        let pad = (FRAME_ALIGN - (out.len() % FRAME_ALIGN)) % FRAME_ALIGN;
+        out.extend(std::iter::repeat_n(0u8, pad));
+        offsets.push(out.len()); // offset to frame_bytes (64B-aligned)
         out.extend_from_slice(f);
     }
     let footer_offset = out.len();
@@ -208,6 +216,18 @@ pub fn decode_file(data: &[u8], verify: bool) -> Result<Vec<Vec<u8>>, CowrieErro
         let (flen, p) = decode_uvarint(data, pos)?;
         pos = p;
         let flen = flen as usize;
+        // Each frame's bytes begin at a 64-byte FILE offset (SPEC-v1 §7): skip the canonical
+        // zero padding and verify it is zero, mirroring the Python reference.
+        let pad = (FRAME_ALIGN - (pos % FRAME_ALIGN)) % FRAME_ALIGN;
+        if pos + pad > data.len() {
+            return Err(CowrieError::Truncated);
+        }
+        if data[pos..pos + pad].iter().any(|&b| b != 0) {
+            return Err(CowrieError::NonCanonical(
+                "frame alignment padding not zero".into(),
+            ));
+        }
+        pos += pad;
         if pos + flen > footer_offset {
             return Err(CowrieError::Truncated);
         }

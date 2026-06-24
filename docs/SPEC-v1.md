@@ -122,7 +122,15 @@ COWR (0x43 0x4F 0x57 0x52) | version:u8 (0x01) | compression:u8 | DictLen:uvarin
 | 0x0C | UUID | 16 bytes, RFC-4122 field order (**big-endian**) — the sole BE field |
 | 0x0D | BigInt | len:uvarint + two's-complement bytes **LE**, minimal length |
 | 0x0E | Extension | extType:uvarint + len:uvarint + payload |
-| 0x20 | Tensor | dtype:u8 + rank:u8 + dims:uvarint×rank + dataLen:uvarint + data (LE elements) |
+| 0x20 | Tensor | dtype:u8 + rank:u8 + dims:uvarint×rank + dataLen:uvarint + **align-pad** + data (LE elements) |
+
+**Tensor data alignment (§2.5, NORMATIVE).** A tensor's `data` MUST begin at a **64-byte boundary
+relative to byte 0 of the message** (the `COWR` magic). After `dataLen`, the encoder writes exactly
+`pad = (−offset) mod 64` zero bytes, where `offset` is the absolute byte position just after `dataLen`;
+`data` then starts at the aligned position. The padding MUST be zero (non-zero ⇒ `ERR_NON_CANONICAL`)
+and its length is fully determined by position, so there is still exactly one canonical byte-string.
+This makes the contiguous `data` run mmap/SIMD/GPU zero-copy-friendly (see §7 for file-level alignment).
+The content address (§3) hashes the padded canonical bytes.
 | 0x24 | Bitmask | count:uvarint + ⌈count/8⌉ bytes, LSB-first; trailing bits of last byte = 0 |
 | 0x40–0xBF | FIXINT | value = tag − 0x40 (0..127); single byte |
 | 0xC0–0xCF | FIXARRAY | count = tag − 0xC0 (0..15), then count values |
@@ -356,13 +364,16 @@ if any, sits *above* this layer (it changes file bytes, hence identity) — fram
 **Layout** (LE ints; uvarint = §2.1):
 ```
 "CWRF" (0x43 0x57 0x52 0x46) · version u8(0x01) · reserved u8(0x00) · uvarint frame_count
-repeat frame_count:  uvarint frame_len · frame_bytes        (canonical COWR value)
+repeat frame_count:  uvarint frame_len · align-pad · frame_bytes   (canonical COWR value, 64B-aligned start)
 FOOTER @ footer_offset:
     uvarint frame_count                                     (MUST equal the header count)
     repeat:  uvarint frame_offset · uvarint frame_len       (MUST mirror the body layout exactly)
     merkle_root  34 bytes                                   (multihash SHA-256, §3)
 u64 LE footer_offset · "CWRF"                               (seek-from-end trailer)
 ```
+Each frame's bytes begin at a **64-byte file offset**: after `frame_len`, write `(−offset) mod 64` zero
+bytes (verified zero on decode). Combined with §2.5's in-message tensor alignment, this puts every tensor's
+`data` at a 64-byte **absolute file offset**, so `mmap(file)` yields aligned zero-copy tensor views.
 The **body is the source of truth**: a decoder reads frames sequentially via their length prefixes and
 MUST reject (`ERR_NON_CANONICAL`) any file whose footer count/offsets do not exactly mirror that layout,
 whose reserved byte ≠ 0, or whose body does not end exactly at `footer_offset`. Thus there is **exactly one

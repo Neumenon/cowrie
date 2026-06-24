@@ -8,6 +8,10 @@ use super::types::{
 use crate::{MAGIC, VERSION};
 use std::collections::BTreeMap;
 
+/// Canonical alignment for tensor data (SPEC-v1 §2.5): a tensor's data run begins at a 64-byte
+/// boundary relative to byte 0 of the message.
+const TENSOR_ALIGN: usize = 64;
+
 /// Configurable limits for the Cowrie decoder.
 ///
 /// All limits have safe defaults that match the Go reference implementation.
@@ -383,9 +387,21 @@ impl<'a> Reader<'a> {
                         )));
                     }
                 }
+                // Tensor data is 64-byte aligned relative to byte 0 of the message (SPEC-v1 §2.5).
+                // `self.pos` here is the absolute offset right after the dataLen uvarint; consume
+                // `pad = (-pos) mod 64` zero bytes so the data run starts on a 64-byte boundary,
+                // mirroring the Python reference (`pad = (-self.pos) % TENSOR_ALIGN`).
+                let pad = (TENSOR_ALIGN - (self.pos % TENSOR_ALIGN)) % TENSOR_ALIGN;
+                let pad_bytes = self.read_bytes(pad)?;
+                if self.opts.strict && pad_bytes.iter().any(|&b| b != 0) {
+                    return Err(CowrieError::NonCanonical(
+                        "tensor alignment padding not zero".into(),
+                    ));
+                }
                 // Record this tensor's data span in document order (Phase 2 zero-copy locator).
-                // `self.pos` here is the absolute offset of the data bytes — exactly after the
-                // dataLen uvarint — matching the Python oracle's `data_off = self.pos`.
+                // `self.pos` here is the ABSOLUTE, 64B-ALIGNED offset of the data bytes — after the
+                // dataLen uvarint and the alignment padding — matching the Python oracle's
+                // `data_off = self.pos` (taken after consuming the pad).
                 if let Some(spans) = self.spans.as_mut() {
                     spans.push(TensorSpan {
                         dtype: dtype as u8,
@@ -1180,6 +1196,9 @@ mod tests {
         buf.extend(std::iter::repeat_n(1u8, 32)); // uvarint 1 per dimension
                                                   // data_len = 4 bytes (1 float32 element = product of all dims * 4)
         buf.push(4); // uvarint 4
+        // canonical 64B tensor-data alignment (§2.5)
+        let pad = (64 - (buf.len() % 64)) % 64;
+        buf.extend(std::iter::repeat_n(0u8, pad));
         buf.extend_from_slice(&1.0f32.to_le_bytes());
 
         let result = decode(&buf);
@@ -1204,6 +1223,10 @@ mod tests {
             buf.push(d); // each dim as uvarint (single byte, fits <=127)
         }
         buf.push(data.len() as u8); // data_len as uvarint
+        // Canonical 64B tensor-data alignment (SPEC-v1 §2.5): zero-pad so data starts on a
+        // 64-byte boundary relative to byte 0 of the message.
+        let pad = (TENSOR_ALIGN - (buf.len() % TENSOR_ALIGN)) % TENSOR_ALIGN;
+        buf.extend(std::iter::repeat_n(0u8, pad));
         buf.extend_from_slice(data);
         buf
     }
@@ -1500,6 +1523,9 @@ mod tests {
         buf.push(5); // rank = 5
         buf.extend(std::iter::repeat_n(1u8, 5)); // uvarint 1 per dimension
         buf.push(4); // data_len = 4
+        // canonical 64B tensor-data alignment (§2.5)
+        let pad = (64 - (buf.len() % 64)) % 64;
+        buf.extend(std::iter::repeat_n(0u8, pad));
         buf.extend_from_slice(&1.0f32.to_le_bytes());
 
         // max_rank=5: should pass

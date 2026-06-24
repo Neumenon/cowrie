@@ -20,7 +20,25 @@ FILES = {
     "file_five":   [True, 127, "héllo", {"z": {"a": 1}}, [1, 2]],
     "file_mixed":  [Decimal128(12345, 2), Datetime(0), Uuid(bytes(range(16))),
                     Tensor(0x04, (2, 3), bytes(6)), Bitmask((True, False, True))],
+    "file_tensors": [Tensor(0x01, (2, 3), bytes(24)), {"w": Tensor(0x04, (4,), b"\x01\x02\x03\x04")}],
 }
+
+
+def test_file_tensors_are_64byte_aligned_in_file() -> None:
+    # The §7 frame alignment + §2.5 tensor alignment together must place every tensor's data at a
+    # 64-byte ABSOLUTE file offset (the mmap zero-copy payoff).
+    import struct
+    from cowrie_ref.varint import decode_uvarint
+    data = F.encode_file(FILES["file_tensors"])
+    pos = 6
+    n, pos = decode_uvarint(data, pos)
+    for _ in range(n):
+        flen, pos = decode_uvarint(data, pos)
+        pos += (-pos) % 64
+        frame = data[pos:pos + flen]
+        for (_dt, _sh, in_off, _dl) in c.tensor_spans(frame):
+            assert (pos + in_off) % 64 == 0
+        pos += flen
 _GOLDEN = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "testdata", "v1_files.json"))
 GOLDEN = json.load(open(_GOLDEN))
 

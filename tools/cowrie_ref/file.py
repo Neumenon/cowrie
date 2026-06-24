@@ -39,6 +39,7 @@ import struct
 
 from . import encode
 from .errors import CowrieError, ERR_INVALID_MAGIC, ERR_TRUNCATED, ERR_NON_CANONICAL
+from .model import TENSOR_ALIGN as FRAME_ALIGN
 from .varint import decode_uvarint, encode_uvarint
 
 FILE_MAGIC = b"CWRF"
@@ -88,7 +89,8 @@ def encode_file(values: list[object]) -> bytes:
     offsets = []
     for f in frames:
         out += encode_uvarint(len(f))
-        offsets.append(len(out))  # offset to frame_bytes (after its length prefix)
+        out += b"\x00" * ((-len(out)) % FRAME_ALIGN)  # align frame start to 64B so in-frame tensors stay aligned in the file
+        offsets.append(len(out))  # offset to frame_bytes (64B-aligned)
         out += f
     footer_offset = len(out)
     # footer
@@ -131,6 +133,10 @@ def decode_file(data: bytes, *, verify: bool = True) -> list[bytes]:
     layout: list[tuple[int, int]] = []
     for _ in range(n):
         flen, pos = decode_uvarint(data, pos)
+        pad = (-pos) % FRAME_ALIGN
+        if any(data[pos:pos + pad]):
+            raise CowrieError(ERR_NON_CANONICAL, "frame alignment padding not zero")
+        pos += pad
         if pos + flen > footer_offset:
             raise CowrieError(ERR_TRUNCATED, "frame extends past footer")
         layout.append((pos, flen))

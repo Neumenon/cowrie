@@ -354,6 +354,14 @@ func encodeValue(buf *buffer, v *Value, d *dict) error {
 			buf.writeUvarint(dim)
 		}
 		buf.writeUvarint(uint64(len(v.tensorVal.Data)))
+		// §2.5: tensor data MUST begin at a 64-byte boundary relative to byte 0
+		// of the message. len(buf.data) is the absolute message offset (encoding
+		// starts at byte 0), so pad = (-offset) mod 64 zero bytes before the data.
+		// Position-determined: exactly one canonical byte-string.
+		pad := (-len(buf.data)) & (TensorAlign - 1)
+		for i := 0; i < pad; i++ {
+			buf.writeByte(0)
+		}
 		buf.write(v.tensorVal.Data)
 
 	case TypeTensorRef:

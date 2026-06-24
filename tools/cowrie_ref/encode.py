@@ -22,7 +22,9 @@ def _collect_keys(value: object, acc: set[str]) -> None:
             _collect_keys(item, acc)
 
 
-def encode_value(value: object, dict_index: dict[str, int]) -> bytes:
+def encode_value(value: object, dict_index: dict[str, int], base: int = 0) -> bytes:
+    # ``base`` = absolute byte offset where this value's first byte lands in the message; used to
+    # align tensor data to a 64-byte boundary (§2.5).
     # bool must precede int (bool is an int subclass in Python).
     if value is None:
         return bytes([m.T_NULL])
@@ -69,9 +71,14 @@ def encode_value(value: object, dict_index: dict[str, int]) -> bytes:
         want = (nelem * m.DTYPE_BITS[value.dtype] + 7) // 8
         if len(value.data) != want:
             raise ValueError(f"tensor dataLen {len(value.data)} != expected {want}")
-        out = bytes([m.T_TENSOR, value.dtype, len(value.shape)])
-        out += b"".join(encode_uvarint(d) for d in value.shape)
-        return out + encode_uvarint(len(value.data)) + value.data
+        out = bytearray([m.T_TENSOR, value.dtype, len(value.shape)])
+        for d in value.shape:
+            out += encode_uvarint(d)
+        out += encode_uvarint(len(value.data))
+        pad = (-(base + len(out))) % m.TENSOR_ALIGN  # zero-pad so data starts 64B-aligned (§2.5)
+        out += b"\x00" * pad
+        out += value.data
+        return bytes(out)
     if isinstance(value, m.Bitmask):
         count = len(value.bits)
         buf = bytearray((count + 7) // 8)
@@ -80,14 +87,19 @@ def encode_value(value: object, dict_index: dict[str, int]) -> bytes:
                 buf[i >> 3] |= 1 << (i & 7)  # LSB-first
         return bytes([m.T_BITMASK]) + encode_uvarint(count) + bytes(buf)
     if isinstance(value, list):
-        body = b"".join(encode_value(item, dict_index) for item in value)
         head = bytes([m.FIXARRAY + len(value)]) if len(value) <= 15 else bytes([m.T_ARRAY]) + encode_uvarint(len(value))
-        return head + body
+        buf = bytearray(head)
+        for item in value:
+            buf += encode_value(item, dict_index, base + len(buf))
+        return bytes(buf)
     if isinstance(value, dict):
         keys = m.sorted_keys(value)
-        body = b"".join(encode_uvarint(dict_index[k]) + encode_value(value[k], dict_index) for k in keys)
         head = bytes([m.FIXMAP + len(keys)]) if len(keys) <= 15 else bytes([m.T_OBJECT]) + encode_uvarint(len(keys))
-        return head + body
+        buf = bytearray(head)
+        for k in keys:
+            buf += encode_uvarint(dict_index[k])
+            buf += encode_value(value[k], dict_index, base + len(buf))
+        return bytes(buf)
     raise TypeError(f"unsupported value type: {type(value).__name__}")
 
 
@@ -105,4 +117,4 @@ def encode(value: object) -> bytes:
     for key in dict_keys:
         raw = key.encode("utf-8")
         header += encode_uvarint(len(raw)) + raw
-    return bytes(header) + encode_value(value, dict_index)
+    return bytes(header) + encode_value(value, dict_index, base=len(header))

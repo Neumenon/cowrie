@@ -26,6 +26,11 @@ const FLAG_COMPRESSED = 0x01;
 // bit 3 (0x08) is reserved — was FLAG_HAS_COLUMN_HINTS, now silently ignored on decode
 const COMPRESS_THRESHOLD = 256;
 
+// Canonical 64-byte alignment epoch (SPEC-v1 §2.5 + §7): tensor data and file frames
+// begin at a 64-byte boundary, position-determined so there is still exactly one
+// canonical byte-string. Mirrors model.TENSOR_ALIGN in the Python reference.
+const ALIGN = 64;
+
 // Security limits - aligned with Go reference implementation
 export const Limits = {
   MAX_DEPTH: 1000,               // Maximum nesting depth
@@ -817,6 +822,11 @@ class Encoder {
           this.writeUvarint(dim);
         }
         this.writeUvarint(t.data.length);
+        // Zero-pad so the data starts at a 64-byte boundary relative to byte 0 of the
+        // message (§2.5). this.buf.length is the absolute offset right after dataLen —
+        // this is how the encoder threads the absolute 'base' (cf. cowrie_ref encode.py).
+        const pad = ((ALIGN - (this.buf.length % ALIGN)) % ALIGN); // (-offset) mod 64
+        for (let i = 0; i < pad; i++) this.writeByte(0);
         this.write(t.data);
         break;
       }
@@ -1203,8 +1213,18 @@ class Decoder {
         if (expected !== null && dataLen !== expected) {
           throw new Error(`cowrie: tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
         }
-        // Record the tensor's data run: data_offset is the position AFTER reading the
-        // dataLen uvarint (start of the contiguous data bytes), matching the Python oracle.
+        // Consume the 64-byte alignment padding (§2.5): data begins at a 64-byte boundary
+        // relative to byte 0 of the message. pad = (-pos) mod 64; in strict mode reject any
+        // non-zero pad byte. data_offset (the recorded span) is the ALIGNED position.
+        const tensorPad = ((ALIGN - (this.pos % ALIGN)) % ALIGN);
+        const padBytes = this.read(tensorPad);
+        if (this.strict) {
+          for (const b of padBytes) {
+            if (b !== 0) throw new CowrieError(ERR_NON_CANONICAL, 'tensor alignment padding not zero');
+          }
+        }
+        // Record the tensor's data run: data_offset is the ALIGNED start of the contiguous
+        // data bytes, matching the Python oracle (tensor_spans data_offset is 64-aligned).
         this.spans.push({ dtype, shape: shape.slice(), dataOffset: this.pos, dataLen });
         const data = this.read(dataLen);
         if (this.strict) {
@@ -2118,7 +2138,14 @@ export function encodeFile(frames: Uint8Array[]): Uint8Array {
     const lenPrefix = encodeUvarint(f.length);
     parts.push(lenPrefix);
     pos += lenPrefix.length;
-    offsets.push(pos); // offset to frame_bytes (after its length prefix)
+    // Align the frame start to a 64-byte file offset (§7) so in-frame tensors stay
+    // 64-aligned within the file. pad = (-pos) mod 64 zero bytes after frame_len.
+    const framePad = ((ALIGN - (pos % ALIGN)) % ALIGN);
+    if (framePad > 0) {
+      parts.push(new Uint8Array(framePad));
+      pos += framePad;
+    }
+    offsets.push(pos); // offset to frame_bytes (64-byte aligned)
     parts.push(f);
     pos += f.length;
   }
@@ -2179,6 +2206,15 @@ export function decodeFile(data: Uint8Array, verify = true): Uint8Array[] {
     let flenBig: bigint;
     [flenBig, pos] = decodeUvarint(data, pos);
     const flen = Number(flenBig);
+    // Frame bytes begin at a 64-byte file offset (§7): after frame_len, consume the
+    // (-pos) mod 64 zero-pad and verify it is all zero (canonical).
+    const framePad = ((ALIGN - (pos % ALIGN)) % ALIGN);
+    for (let p = 0; p < framePad; p++) {
+      if (data[pos + p] !== 0) {
+        throw new CowrieError(ERR_NON_CANONICAL, 'frame alignment padding not zero');
+      }
+    }
+    pos += framePad;
     if (pos + flen > footerOffset) {
       throw new CowrieError('ERR_TRUNCATED', 'frame extends past footer');
     }
@@ -2427,6 +2463,10 @@ class DeterministicEncoder extends Encoder {
           this.writeUvarintSorted(dim);
         }
         this.writeUvarintSorted(t.data.length);
+        // 64-byte tensor data alignment (§2.5): pad = (-offset) mod 64 zero bytes after
+        // dataLen. sortedBuf.length is the absolute offset right after dataLen.
+        const detPad = ((ALIGN - (this.sortedBuf.length % ALIGN)) % ALIGN);
+        for (let i = 0; i < detPad; i++) this.writeByteSorted(0);
         this.writeSorted(t.data);
         break;
       }

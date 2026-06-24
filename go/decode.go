@@ -868,9 +868,25 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		if err != nil {
 			return nil, err
 		}
+		// §2.5: tensor data is 64-byte aligned relative to byte 0 of the message.
+		// r.pos is the absolute offset immediately after the dataLen uvarint;
+		// consume pad = (-pos) mod 64 zero bytes so the data run starts aligned.
+		// Strict mode rejects any non-zero padding byte (non-canonical).
+		pad := (-r.pos) & (TensorAlign - 1)
+		padBytes, err := r.read(pad)
+		if err != nil {
+			return nil, err
+		}
+		if r.strict {
+			for _, pb := range padBytes {
+				if pb != 0 {
+					return nil, fmt.Errorf("%w: tensor alignment padding not zero", ErrNonCanonical)
+				}
+			}
+		}
 		// Phase 2 zero-copy tensor locator: r.pos is now the ABSOLUTE byte offset
-		// of the tensor's contiguous data run (immediately after the dataLen
-		// uvarint), exactly matching the Python oracle's data_offset. Capture it
+		// of the tensor's contiguous data run (the 64B-aligned position after the
+		// padding), exactly matching the Python oracle's data_offset. Capture it
 		// before any data is consumed. Done here so a span is recorded even when
 		// streaming via TensorSink. Nested tensors are captured because spans is
 		// threaded through every decodeValue call.

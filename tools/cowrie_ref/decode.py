@@ -141,6 +141,10 @@ class _Decoder:
                 nelem *= d
             bits = nelem * m.DTYPE_BITS[dtype]
             dlen = self._uvarint()
+            pad = (-self.pos) % m.TENSOR_ALIGN  # data is 64B-aligned (§2.5)
+            pad_bytes = self._take(pad)
+            if self.strict and any(pad_bytes):
+                raise self._bad(ERR_NON_CANONICAL, "tensor alignment padding not zero")
             data_off = self.pos
             data = self._take(dlen)
             self.spans.append((dtype, shape, data_off, dlen))

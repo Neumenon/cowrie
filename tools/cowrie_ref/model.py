@@ -25,6 +25,7 @@ FIXINT, FIXARRAY, FIXMAP, FIXNEG = 0x40, 0xC0, 0xD0, 0xE0  # range bases
 MAGIC = b"COWR"
 VERSION = 0x01
 COMPRESSION_NONE = 0x00
+TENSOR_ALIGN = 64  # §2.5: tensor data starts at a 64-byte boundary (canonical, zero-padded, verified)
 
 # §2.5 DType -> (wire value, bytes_per_elem | None for sub-byte) ; sub-byte handled separately
 DTYPE = {

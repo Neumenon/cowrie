@@ -5,6 +5,10 @@ use super::types::{CowrieError, EdgeData, NodeData, Value};
 use crate::{MAGIC, VERSION};
 use std::collections::{BTreeMap, HashMap};
 
+/// Canonical alignment for tensor data (SPEC-v1 §2.5): a tensor's data run begins at a 64-byte
+/// boundary relative to byte 0 of the message, with the gap filled by canonical zero padding.
+const TENSOR_ALIGN: usize = 64;
+
 /// Encoding options.
 #[derive(Debug, Clone, Default)]
 pub struct EncodeOptions {
@@ -242,6 +246,12 @@ fn encode_value(
                 write_uvarint(buf, *dim);
             }
             write_uvarint(buf, t.data.len() as u64);
+            // Tensor data MUST begin at a 64-byte boundary relative to byte 0 of the message
+            // (SPEC-v1 §2.5). The encoder builds the message top-down into a single `buf` that
+            // starts with the COWR header, so `buf.len()` here IS the absolute byte offset right
+            // after the dataLen uvarint — exactly the Python reference's `base + len(out)`.
+            let pad = (TENSOR_ALIGN - (buf.len() % TENSOR_ALIGN)) % TENSOR_ALIGN;
+            buf.extend(std::iter::repeat_n(0u8, pad));
             buf.extend_from_slice(&t.data);
         }
 

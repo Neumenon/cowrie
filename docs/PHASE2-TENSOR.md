@@ -58,3 +58,13 @@ with a firm deadline (not open-ended). Pinned by the panel:
   so B is required before 1.0 — it just shouldn't block A.
 
 This file is the standing record of that decision; A is built first.
+
+## STATUS
+- **A — DONE & gated** (non-breaking tensor data-locator; `tensor_view_gate.py`).
+- **B — DONE & gated** (canonical epoch). Resolved the open fork in favour of **inline alignment**
+  (DeepSeek's recommendation: simplest single-canonical-form, no relocated section): tensor `data`
+  aligned to 64 B relative to message byte 0 (§2.5), and FILE frames aligned to 64 B file offsets (§7),
+  so every tensor's `data` lands at a 64-byte **absolute file offset** under `mmap`. Padding is
+  position-determined + verified-zero ⇒ still exactly one canonical byte-string. Verified across all four
+  languages (recode/addr/tensor-spans/file gates) + reference end-to-end alignment test. The relocated
+  packed-section design (Gemini) is recorded as a possible future *tensor-file profile*, not v1 Core.
