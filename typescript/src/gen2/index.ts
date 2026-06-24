@@ -1982,6 +1982,214 @@ export function contentAddressHex(value: Value): string {
 }
 
 // ============================================================
+// Cowrie FILE container + Merkle file identity (SPEC-v1 §7)
+//
+// A Cowrie file packages an ordered list of frames (each frame is one complete,
+// canonical §2.2 COWR value's wire bytes) with a sealed footer index for O(1)
+// random access, and a Merkle root over the frames that is the file's content
+// identity. Mirrors tools/cowrie_ref/file.py exactly.
+//
+// Layout (multi-byte ints little-endian; uvarint = §2.1):
+//   "CWRF"        file magic
+//   version  u8 (0x01)
+//   reserved u8 (0x00)
+//   uvarint  frame_count
+//   repeat frame_count times: uvarint frame_len, frame_bytes
+//   FOOTER (@ footer_offset):
+//     uvarint frame_count
+//     repeat: uvarint frame_offset, uvarint frame_len   (offset = file-start to frame_bytes)
+//     merkle_root 34 bytes
+//   u64 LE  footer_offset
+//   "CWRF"        end magic
+//
+// Merkle (RFC 6962 domain separation, promote-odd — never duplicate; count bound in root):
+//   leaf(f)    = SHA-256(0x00 || f)
+//   node(a, b) = SHA-256(0x01 || a || b)
+//   tree_digest = promote-odd reduction of the leaves (empty file: SHA-256(b""))
+//   root_digest = SHA-256(0x02 || uvarint(frame_count) || tree_digest)
+//   merkle_root = 0x12 0x20 || root_digest
+// ============================================================
+
+const FILE_MAGIC = new Uint8Array([0x43, 0x57, 0x52, 0x46]); // 'CWRF'
+const FILE_VERSION = 1;
+const FILE_MAX_FRAMES = 2 ** 32; // §7 frame-count bound (DoS guard); JS << wraps at 32 bits
+
+function sha256(data: Uint8Array): Uint8Array {
+  return new Uint8Array(createHash('sha256').update(data).digest());
+}
+
+function concatBytes(...parts: Uint8Array[]): Uint8Array {
+  let total = 0;
+  for (const p of parts) total += p.length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+function merkleLeaf(frame: Uint8Array): Uint8Array {
+  return sha256(concatBytes(new Uint8Array([0x00]), frame));
+}
+
+function merkleNode(a: Uint8Array, b: Uint8Array): Uint8Array {
+  return sha256(concatBytes(new Uint8Array([0x01]), a, b));
+}
+
+function treeDigest(frames: Uint8Array[]): Uint8Array {
+  if (frames.length === 0) {
+    return sha256(new Uint8Array(0));
+  }
+  let level = frames.map(merkleLeaf);
+  while (level.length > 1) {
+    const next: Uint8Array[] = [];
+    for (let i = 0; i + 1 < level.length; i += 2) {
+      next.push(merkleNode(level[i], level[i + 1]));
+    }
+    if (level.length % 2 === 1) {
+      next.push(level[level.length - 1]); // promote the odd node unchanged (never duplicate)
+    }
+    level = next;
+  }
+  return level[0];
+}
+
+/**
+ * Multihash SHA-256 Merkle root over the ordered frame byte-blobs (§7), with the
+ * frame count bound into the root (0x02 domain) so distinct frame lists can never
+ * share a root. Returns the 34-byte multihash (0x12 0x20 || root_digest).
+ */
+export function merkleRoot(frames: Uint8Array[]): Uint8Array {
+  const root = sha256(
+    concatBytes(new Uint8Array([0x02]), encodeUvarint(frames.length), treeDigest(frames)),
+  );
+  return concatBytes(new Uint8Array([0x12, 0x20]), root);
+}
+
+/**
+ * Build a Cowrie file from an ordered list of frames. Each frame must be one
+ * complete, canonical §2.2 COWR value's wire bytes (uncompressed). Re-encoding the
+ * frames returned by decodeFile reproduces a canonical file byte-for-byte.
+ */
+export function encodeFile(frames: Uint8Array[]): Uint8Array {
+  const parts: Uint8Array[] = [];
+  parts.push(FILE_MAGIC);
+  parts.push(new Uint8Array([FILE_VERSION, 0x00])); // version, reserved
+  parts.push(encodeUvarint(frames.length));
+
+  // Track the running byte length to compute frame offsets (file-start to frame_bytes).
+  let pos = FILE_MAGIC.length + 2 + encodeUvarint(frames.length).length;
+  const offsets: number[] = [];
+  for (const f of frames) {
+    const lenPrefix = encodeUvarint(f.length);
+    parts.push(lenPrefix);
+    pos += lenPrefix.length;
+    offsets.push(pos); // offset to frame_bytes (after its length prefix)
+    parts.push(f);
+    pos += f.length;
+  }
+  const footerOffset = pos;
+
+  // Footer (self-contained).
+  parts.push(encodeUvarint(frames.length));
+  for (let i = 0; i < frames.length; i++) {
+    parts.push(encodeUvarint(offsets[i]));
+    parts.push(encodeUvarint(frames[i].length));
+  }
+  parts.push(merkleRoot(frames));
+
+  const footerOffsetBytes = new Uint8Array(8);
+  new DataView(footerOffsetBytes.buffer).setBigUint64(0, BigInt(footerOffset), true);
+  parts.push(footerOffsetBytes);
+  parts.push(FILE_MAGIC);
+  return concatBytes(...parts);
+}
+
+/**
+ * Return the ordered frame byte-blobs, fully validated (§7). The BODY is the source
+ * of truth: frames are read sequentially via their length prefixes, and the footer
+ * MUST exactly mirror that layout (count, contiguous offsets/lengths) — so there is
+ * exactly one canonical file byte-string per ordered frame list. With verify=true
+ * (default) the stored Merkle root must also match.
+ */
+export function decodeFile(data: Uint8Array, verify = true): Uint8Array[] {
+  if (data.length < 4 + 1 + 1 + 1 + 8 + 4) {
+    throw new CowrieError('ERR_TRUNCATED', 'file too short');
+  }
+  const eq4 = (off: number) =>
+    data[off] === FILE_MAGIC[0] && data[off + 1] === FILE_MAGIC[1] &&
+    data[off + 2] === FILE_MAGIC[2] && data[off + 3] === FILE_MAGIC[3];
+  if (!eq4(0)) throw new CowrieError('ERR_INVALID_MAGIC', 'bad file magic');
+  if (!eq4(data.length - 4)) throw new CowrieError('ERR_INVALID_MAGIC', 'bad end magic');
+  if (data[4] !== FILE_VERSION) throw new CowrieError('ERR_INVALID_MAGIC', 'bad file version');
+  if (data[5] !== 0x00) throw new CowrieError(ERR_NON_CANONICAL, 'reserved byte must be 0');
+
+  const footerOffset = Number(
+    new DataView(data.buffer, data.byteOffset + data.length - 12, 8).getBigUint64(0, true),
+  );
+  if (!(footerOffset > 6 && footerOffset <= data.length - 12)) {
+    throw new CowrieError('ERR_TRUNCATED', 'footer offset out of range');
+  }
+
+  // --- body: read frames sequentially (the source of truth) ---
+  let pos = 6;
+  let nBig: bigint;
+  [nBig, pos] = decodeUvarint(data, pos);
+  if (nBig > BigInt(FILE_MAX_FRAMES)) {
+    throw new CowrieError('ERR_TRUNCATED', 'frame count exceeds limit');
+  }
+  const n = Number(nBig);
+  const frames: Uint8Array[] = [];
+  const layout: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    let flenBig: bigint;
+    [flenBig, pos] = decodeUvarint(data, pos);
+    const flen = Number(flenBig);
+    if (pos + flen > footerOffset) {
+      throw new CowrieError('ERR_TRUNCATED', 'frame extends past footer');
+    }
+    layout.push([pos, flen]);
+    frames.push(data.slice(pos, pos + flen));
+    pos += flen;
+  }
+  if (pos !== footerOffset) {
+    throw new CowrieError(ERR_NON_CANONICAL, 'body does not end exactly at the footer');
+  }
+
+  // --- footer: must mirror the body layout exactly (canonical) ---
+  let fcountBig: bigint;
+  [fcountBig, pos] = decodeUvarint(data, pos);
+  if (Number(fcountBig) !== n) {
+    throw new CowrieError(ERR_NON_CANONICAL, 'footer frame count != header');
+  }
+  for (const [off, flen] of layout) {
+    let foffBig: bigint;
+    let flen2Big: bigint;
+    [foffBig, pos] = decodeUvarint(data, pos);
+    [flen2Big, pos] = decodeUvarint(data, pos);
+    if (Number(foffBig) !== off || Number(flen2Big) !== flen) {
+      throw new CowrieError(ERR_NON_CANONICAL, 'footer index does not mirror body layout');
+    }
+  }
+  const storedRoot = data.slice(pos, pos + 34);
+  pos += 34;
+  if (pos !== data.length - 12) {
+    throw new CowrieError(ERR_NON_CANONICAL, 'footer length not canonical');
+  }
+  if (verify && compareBytes(merkleRoot(frames), storedRoot) !== 0) {
+    throw new CowrieError(ERR_NON_CANONICAL, 'merkle root mismatch (tampered or non-canonical)');
+  }
+  return frames;
+}
+
+/** The file's content identity = its verified Merkle root (34-byte multihash). */
+export function fileIdentity(data: Uint8Array): Uint8Array {
+  return merkleRoot(decodeFile(data, true));
+}
+
+// ============================================================
 // Deterministic Encoding
 // ============================================================
 

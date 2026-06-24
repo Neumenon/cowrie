@@ -8,21 +8,35 @@
 // Address mode (SPEC-v1 §3): pass --addr to print the content address (multihash SHA-256
 // of the canonical wire bytes) as lowercase hex instead of the canonical bytes. Combines
 // with --strict.
-import { encode, decode, addressOfBytes } from "./src/gen2/index";
+//
+// File modes (SPEC-v1 §7): read a Cowrie FILE (CWRF container) on stdin.
+//   --file-id     : decode+verify, print the merkle_root as one line of lowercase hex (68 chars).
+//   --file-recode : decode, RE-ENCODE the file, write raw bytes to stdout (reproduces input
+//                   byte-for-byte for canonical files).
+import { encode, decode, addressOfBytes, decodeFile, encodeFile, fileIdentity } from "./src/gen2/index";
 
 const strict = process.argv.includes("--strict") || process.env.STRICT === "1";
 const addr = process.argv.includes("--addr");
+const fileId = process.argv.includes("--file-id");
+const fileRecode = process.argv.includes("--file-recode");
 
 const chunks: Buffer[] = [];
 process.stdin.on("data", (c: Buffer) => chunks.push(c));
 process.stdin.on("end", () => {
   const data = new Uint8Array(Buffer.concat(chunks));
   try {
-    const canonical = encode(decode(data, { strict }));
-    if (addr) {
-      process.stdout.write(Buffer.from(addressOfBytes(canonical)).toString("hex") + "\n");
+    if (fileId) {
+      process.stdout.write(Buffer.from(fileIdentity(data)).toString("hex") + "\n");
+    } else if (fileRecode) {
+      const frames = decodeFile(data, true);
+      process.stdout.write(Buffer.from(encodeFile(frames)));
     } else {
-      process.stdout.write(Buffer.from(canonical));
+      const canonical = encode(decode(data, { strict }));
+      if (addr) {
+        process.stdout.write(Buffer.from(addressOfBytes(canonical)).toString("hex") + "\n");
+      } else {
+        process.stdout.write(Buffer.from(canonical));
+      }
     }
   } catch (e) {
     process.stderr.write(String(e));

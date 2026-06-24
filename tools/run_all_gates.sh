@@ -9,6 +9,7 @@
 #   (a) pytest the Python reference  (tools/cowrie_ref/tests)
 #   (b) conformance gate             (68 positive vectors x 4 langs)
 #   (b2) content-address gate        (§3 multihash SHA-256 identity, 4 langs agree)
+#   (b3) file-identity gate          (§7 file/Merkle identity + canonical re-encode, 4 langs)
 #   (c) negative gate (lenient)      (16 anti-malleability fixtures)
 #   (d) negative gate (--strict)     (strict decoders must reject non-canonical)
 #   (e) differential fuzz (150)      (generative cross-lang determinism)
@@ -85,6 +86,9 @@ run "conformance_gate" "${PY}" tools/conformance_gate.py
 # (b2) Content-address parity (§3): all impls agree on the multihash SHA-256 identity.
 run "content_address_gate" "${PY}" tools/content_address_gate.py
 
+# (b3) File / Merkle identity parity (§7): all impls agree on file identity + canonical re-encode.
+run "file_identity_gate" "${PY}" tools/file_identity_gate.py
+
 # (c) Negative gate, lenient decode: malformed fixtures must be rejected.
 run "negative_gate (lenient)" "${PY}" tools/negative_gate.py
 
@@ -97,6 +101,6 @@ run "fuzz_differential 150" "${PY}" tools/fuzz_differential.py 150
 echo ""
 echo "=============================================================="
 echo " ✅✅✅  ALL GATES PASS  ✅✅✅"
-echo "   pytest · conformance · content-address · negative · negative --strict · fuzz"
+echo "   pytest · conformance · content-address · file-identity · negative · negative --strict · fuzz"
 echo "=============================================================="
 exit 0

@@ -12,6 +12,7 @@ pub mod address;
 pub mod compress;
 pub mod decode;
 pub mod encode;
+pub mod file;
 pub mod json;
 pub mod master_stream;
 pub mod schema;
@@ -23,6 +24,7 @@ pub use address::{address_of_bytes, content_address, content_address_hex, to_hex
 pub use compress::{decode_framed, decode_framed_strict, encode_framed, Compression};
 pub use decode::{decode, decode_strict, decode_with_options, DecodeOptions};
 pub use encode::{encode, encode_with_options, EncodeOptions};
+pub use file::{decode_file, encode_file, file_identity, merkle_root};
 pub use json::{from_json, to_json, to_json_pretty};
 pub use master_stream::{read_frame, write_frame, MasterFrame, MasterWriterOptions};
 pub use schema::{

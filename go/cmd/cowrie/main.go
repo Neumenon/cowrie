@@ -204,7 +204,34 @@ func recodeCmd(args []string) {
 	fs := flag.NewFlagSet("recode", flag.ExitOnError)
 	strict := fs.Bool("strict", false, "Strict-decode mode (§5.3): reject non-canonical input")
 	addr := fs.Bool("addr", false, "Print the content-address (§3) multihash SHA-256 hex of the canonical bytes")
+	fileID := fs.Bool("file-id", false, "Read a Cowrie FILE (§7) on stdin, decode+verify, print merkle_root as lowercase hex")
+	fileRecode := fs.Bool("file-recode", false, "Read a Cowrie FILE (§7) on stdin, decode, re-encode, write raw bytes to stdout")
 	fs.Parse(args)
+
+	if *fileID || *fileRecode {
+		input, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		if *fileID {
+			id, err := cowrie.FileIdentityHex(input)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Println(id)
+			return
+		}
+		// fileRecode
+		out, err := cowrie.RecodeFile(input)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(out)
+		return
+	}
 
 	// STRICT=1 env also enables strict mode (parity with cross-language harness).
 	if v := os.Getenv("STRICT"); v == "1" || v == "true" {
