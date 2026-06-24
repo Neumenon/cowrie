@@ -1145,9 +1145,15 @@ class Decoder {
         const coef = this.read(16);
         if (this.strict) {
           // Lowest-terms check (model.Decimal128.canonical): a non-zero coefficient
-          // divisible by 10 is non-canonical (should be scaled down).
+          // divisible by 10 is non-canonical (should be scaled down). Additionally,
+          // a zero coefficient must use scale 0 — canonical() maps coeff==0 to (0,0),
+          // so coeff==0 with scale!=0 is non-canonical (decimal_zero_scale).
           const coeff = bytesToBigintLESigned(coef);
-          if (coeff !== 0n && coeff % 10n === 0n) {
+          if (coeff === 0n) {
+            if (scale !== 0) {
+              throw new CowrieError(ERR_NON_CANONICAL, 'decimal not lowest terms');
+            }
+          } else if (coeff % 10n === 0n) {
             throw new CowrieError(ERR_NON_CANONICAL, 'decimal not lowest terms');
           }
         }
@@ -2383,7 +2389,10 @@ class DeterministicEncoder extends Encoder {
       case Type.DECIMAL128: {
         const d = v.data as Decimal128;
         this.writeByteSorted(Tag.DECIMAL128);
-        this.writeByteSorted(d.scale & 0xff);
+        // §2.3: scale is a SVARINT (zigzag + LEB128), NOT a raw int8 byte. A raw byte
+        // desyncs the stream for |scale| > 63 and diverges from the main encoder
+        // (index.ts:777) and cowrie_ref encode.py:60.
+        this.writeUvarintSorted(zigzagEncode(BigInt(d.scale)));
         this.writeSorted(d.coef);
         break;
       }

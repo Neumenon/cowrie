@@ -13,9 +13,13 @@
 //   --file-id     : decode+verify, print the merkle_root as one line of lowercase hex (68 chars).
 //   --file-recode : decode, RE-ENCODE the file, write raw bytes to stdout (reproduces input
 //                   byte-for-byte for canonical files).
-import { encode, decode, addressOfBytes, decodeFile, encodeFile, fileIdentity, tensorSpans, schemaFingerprint64 } from "./src/gen2/index";
+import { encode, decode, addressOfBytes, decodeFile, encodeFile, fileIdentity, tensorSpans, schemaFingerprint64, merkleRoot } from "./src/gen2/index";
 
 const strict = process.argv.includes("--strict") || process.env.STRICT === "1";
+// Dataset/stream layer Merkle root (SPEC-v1 §7 dataset_root): read uvarint(n) then n
+// repetitions of (uvarint(len) || blob_bytes) from stdin, compute the §7 merkleRoot over
+// that ORDERED list of blobs (shard file-roots), print the 34-byte multihash as 68 hex chars.
+const datasetRoot = process.argv.includes("--dataset-root");
 const addr = process.argv.includes("--addr");
 const fileId = process.argv.includes("--file-id");
 const fileRecode = process.argv.includes("--file-recode");
@@ -29,7 +33,29 @@ process.stdin.on("data", (c: Buffer) => chunks.push(c));
 process.stdin.on("end", () => {
   const data = new Uint8Array(Buffer.concat(chunks));
   try {
-    if (fingerprint) {
+    if (datasetRoot) {
+      let pos = 0;
+      const readUvarint = (): number => {
+        let shift = 0n;
+        let val = 0n;
+        for (;;) {
+          const b = data[pos];
+          pos++;
+          val |= BigInt(b & 0x7f) << shift;
+          if ((b & 0x80) === 0) break;
+          shift += 7n;
+        }
+        return Number(val);
+      };
+      const n = readUvarint();
+      const blobs: Uint8Array[] = [];
+      for (let i = 0; i < n; i++) {
+        const len = readUvarint();
+        blobs.push(data.subarray(pos, pos + len));
+        pos += len;
+      }
+      process.stdout.write(Buffer.from(merkleRoot(blobs)).toString("hex") + "\n");
+    } else if (fingerprint) {
       const fp = schemaFingerprint64(decode(data, { strict }));
       process.stdout.write(fp.toString(16).padStart(16, "0") + "\n");
     } else if (tensorSpansMode) {

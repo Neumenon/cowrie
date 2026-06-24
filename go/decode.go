@@ -731,10 +731,10 @@ func decodeValue(r *reader, dict []string) (*Value, error) {
 		// §5.3 strict: a Decimal128 must be in lowest terms — a coefficient
 		// divisible by 10 (with coeff != 0) should have been normalized into a
 		// smaller scale.
-		if r.strict && decimalNotLowestTerms(coefBytes) {
+		if r.strict && decimalNotLowestTerms(coefBytes, scale) {
 			return nil, fmt.Errorf("%w: decimal not lowest terms", ErrNonCanonical)
 		}
-		return NewDecimal128(int8(scale), coef), nil // scale fits int8 for canonical Decimal128 values
+		return NewDecimal128(int32(scale), coef), nil // scale is int64-svarint on the wire; int32 covers the decimal domain
 
 	case TagString:
 		s, err := r.readStringWithLimit(r.opts.MaxStringLen)
@@ -1389,14 +1389,17 @@ func strictCheckBigInt(le []byte) error {
 	return nil
 }
 
-// decimalNotLowestTerms reports whether a Decimal128 coefficient (16-byte LE
-// signed) is non-canonical: non-zero and divisible by 10. Mirrors
-// model.Decimal128.canonical (the scale-stripping loop touches scale only, so
-// coeff%10==0 with coeff!=0 means the value is not in lowest terms).
-func decimalNotLowestTerms(coefLE []byte) bool {
+// decimalNotLowestTerms reports whether a Decimal128 (16-byte LE signed
+// coefficient + svarint scale) is non-canonical. Mirrors
+// model.Decimal128.canonical:
+//   - zero coefficient: canonical iff scale == 0 (canonical() collapses any
+//     zero to Decimal128(0, 0)), so coeff==0 && scale!=0 is NON-canonical.
+//   - non-zero coefficient: canonical iff not divisible by 10 (the
+//     scale-stripping loop divides coeff by 10 while reducing scale).
+func decimalNotLowestTerms(coefLE []byte, scale int64) bool {
 	c := bigIntFromLE(coefLE)
 	if c.Sign() == 0 {
-		return false
+		return scale != 0
 	}
 	rem := new(big.Int).Mod(new(big.Int).Abs(c), big.NewInt(10))
 	return rem.Sign() == 0

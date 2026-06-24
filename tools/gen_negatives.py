@@ -57,6 +57,7 @@ NEGATIVES: list[tuple[str, bytes, str, str]] = [
     ("reserved_0x35",    D0 + b"\x35",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy Node
     ("reserved_0x30",    D0 + b"\x30",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy AdjList
     ("reserved_0xf0",    D0 + b"\xf0",                              "ERR_RESERVED_TAG",   "malformed"),     # top reserved range
+    ("decimal_zero_scale", D0 + b"\x0a\x0a" + b"\x00" * 16,         "ERR_NON_CANONICAL",  "non-canonical"), # coeff 0, scale 5 -> must be (0,0)
 ]
 
 

@@ -99,6 +99,9 @@ run "tensor_view_gate" "${PY}" tools/tensor_view_gate.py
 # (b5) Structural-fingerprint parity (§4 / §4.4 — the gate that kills B4): all impls agree on fingerprint64.
 run "fingerprint_gate" "${PY}" tools/fingerprint_gate.py
 
+# (b6) Dataset-identity parity (stream layer): all impls agree on dataset_root (Merkle DAG over file roots).
+run "dataset_identity_gate" "${PY}" tools/dataset_identity_gate.py
+
 # (c) Negative gate, lenient decode: malformed fixtures must be rejected.
 run "negative_gate (lenient)" "${PY}" tools/negative_gate.py
 

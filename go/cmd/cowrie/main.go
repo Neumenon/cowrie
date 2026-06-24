@@ -22,6 +22,8 @@
 package main
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -269,7 +271,44 @@ func recodeCmd(args []string) {
 	fileRecode := fs.Bool("file-recode", false, "Read a Cowrie FILE (§7) on stdin, decode, re-encode, write raw bytes to stdout")
 	tensorSpans := fs.Bool("tensor-spans", false, "Read a canonical Cowrie message on stdin, decode, print one line per tensor in document order: \"<data_offset> <data_len> <dtype> <shape>\"")
 	fingerprint := fs.Bool("fingerprint", false, "Read a canonical Cowrie message on stdin, decode, print the §4 fingerprint64 as 16 lowercase hex chars")
+	datasetRoot := fs.Bool("dataset-root", false, "Read uvarint(n) then n repetitions of (uvarint(len) || blob) on stdin; print the §7 merkle_root over that ORDERED blob list as 68 lowercase hex chars")
 	fs.Parse(args)
+
+	if *datasetRoot {
+		input, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input: %v\n", err)
+			os.Exit(1)
+		}
+		// Dataset/stream layer (§7 reuse): the dataset_root is the SAME merkle_root
+		// construction, with the ordered list of 34-byte shard file-roots as the
+		// leaf blobs. Oracle: tools/cowrie_ref/profiles.py dataset_root.
+		// stdin framing: uvarint(n) || n * (uvarint(len) || blob_bytes).
+		n, w := binary.Uvarint(input)
+		if w <= 0 {
+			fmt.Fprintf(os.Stderr, "Error: bad uvarint count\n")
+			os.Exit(1)
+		}
+		pos := w
+		blobs := make([][]byte, 0, n)
+		for i := uint64(0); i < n; i++ {
+			l, lw := binary.Uvarint(input[pos:])
+			if lw <= 0 {
+				fmt.Fprintf(os.Stderr, "Error: bad uvarint length at blob %d\n", i)
+				os.Exit(1)
+			}
+			pos += lw
+			if uint64(pos)+l > uint64(len(input)) {
+				fmt.Fprintf(os.Stderr, "Error: blob %d length past end of input\n", i)
+				os.Exit(1)
+			}
+			blobs = append(blobs, input[pos:pos+int(l)])
+			pos += int(l)
+		}
+		// Reuse the gated §7 merkle (cowrie.MerkleRoot) — do not reimplement.
+		fmt.Println(hex.EncodeToString(cowrie.MerkleRoot(blobs)))
+		return
+	}
 
 	if *fingerprint {
 		input, err := io.ReadAll(os.Stdin)

@@ -186,7 +186,7 @@ func encodeValueToBuf(buf *buffer, v *Value, d *dict) error {
 		buf.write(bits[:])
 	case TypeDecimal128:
 		buf.writeByte(TagDecimal128)
-		buf.writeByte(byte(v.decimal128.Scale))
+		buf.writeUvarint(zigzagEncode(int64(v.decimal128.Scale)))
 		buf.write(v.decimal128.Coef[:])
 	case TypeString:
 		buf.writeByte(TagString)

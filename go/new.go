@@ -28,7 +28,7 @@ func Float64(f float64) *Value {
 }
 
 // NewDecimal128 returns a decimal128 value.
-func NewDecimal128(scale int8, coef [16]byte) *Value {
+func NewDecimal128(scale int32, coef [16]byte) *Value {
 	return &Value{typ: TypeDecimal128, decimal128: Decimal128{Scale: scale, Coef: coef}}
 }
 

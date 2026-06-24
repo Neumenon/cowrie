@@ -1080,23 +1080,33 @@ func audioEncodingToString(e AudioEncoding) string {
 
 // formatDecimal128 formats a Decimal128 as a decimal string.
 func formatDecimal128(d Decimal128) string {
-	// Convert coefficient to big.Int
-	bi := new(big.Int)
-	bi.SetBytes(d.Coef[:])
-
-	// Handle negative (two's complement)
-	if d.Coef[0]&0x80 != 0 {
-		// Negative number
+	// Coef is stored LITTLE-ENDIAN two's-complement (the §2.3 wire form). Convert
+	// to big-endian unsigned magnitude, then apply the sign bit (the MSB lives in
+	// the last LE byte, Coef[15]).
+	be := make([]byte, 16)
+	for i := 0; i < 16; i++ {
+		be[i] = d.Coef[15-i]
+	}
+	bi := new(big.Int).SetBytes(be)
+	if d.Coef[15]&0x80 != 0 {
+		// Negative number (two's complement): subtract 2^128.
 		bi.Sub(bi, new(big.Int).Lsh(big.NewInt(1), 128))
 	}
 
+	// Track sign separately so the decimal-point insertion below operates on the
+	// unsigned magnitude string (a leading '-' would shift the digit positions).
+	neg := bi.Sign() < 0
+	bi.Abs(bi)
 	s := bi.String()
 
 	// Apply scale
 	if d.Scale <= 0 {
 		// No decimal point needed, or append zeros
-		for i := int8(0); i > d.Scale; i-- {
+		for i := int32(0); i > d.Scale; i-- {
 			s += "0"
+		}
+		if neg && s != "0" {
+			s = "-" + s
 		}
 		return s
 	}
@@ -1109,7 +1119,11 @@ func formatDecimal128(d Decimal128) string {
 	}
 
 	pos := len(s) - scale
-	return s[:pos] + "." + s[pos:]
+	out := s[:pos] + "." + s[pos:]
+	if neg {
+		out = "-" + out
+	}
+	return out
 }
 
 // formatUUID formats a UUID as a canonical string.

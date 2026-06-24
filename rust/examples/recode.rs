@@ -32,9 +32,41 @@ fn main() {
     let file_recode = std::env::args().skip(1).any(|a| a == "--file-recode");
     let tensor_spans_mode = std::env::args().skip(1).any(|a| a == "--tensor-spans");
     let fingerprint_mode = std::env::args().skip(1).any(|a| a == "--fingerprint");
+    let dataset_root_mode = std::env::args().skip(1).any(|a| a == "--dataset-root");
 
     let mut data = Vec::new();
     std::io::stdin().read_to_end(&mut data).expect("failed to read stdin");
+
+    // --- Dataset/stream layer Merkle root (SPEC-v1 §7 dataset_root) ---
+    // Read from stdin: uvarint(n) then n repetitions of (uvarint(len) || blob_bytes).
+    // Compute the §7 merkle_root over that ORDERED list of blobs (the shard file-roots) and
+    // print the 34-byte multihash as 68 lowercase hex chars on one line. Reuses gen2::merkle_root.
+    if dataset_root_mode {
+        let mut pos = 0usize;
+        let read_uvarint = |data: &[u8], p: &mut usize| -> u64 {
+            let mut shift = 0u32;
+            let mut val = 0u64;
+            loop {
+                let b = data[*p];
+                *p += 1;
+                val |= ((b & 0x7f) as u64) << shift;
+                if b & 0x80 == 0 {
+                    break;
+                }
+                shift += 7;
+            }
+            val
+        };
+        let n = read_uvarint(&data, &mut pos);
+        let mut blobs: Vec<Vec<u8>> = Vec::with_capacity(n as usize);
+        for _ in 0..n {
+            let len = read_uvarint(&data, &mut pos) as usize;
+            blobs.push(data[pos..pos + len].to_vec());
+            pos += len;
+        }
+        println!("{}", to_hex(&merkle_root(&blobs)));
+        return;
+    }
 
     // --- Phase 2 zero-copy tensor locator: one line per tensor, document order ---
     if tensor_spans_mode {

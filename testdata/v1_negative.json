@@ -123,5 +123,10 @@
     "hex": "434f5752010000f0",
     "expect": "ERR_RESERVED_TAG",
     "tier": "malformed"
+  },
+  "decimal_zero_scale": {
+    "hex": "434f57520100000a0a00000000000000000000000000000000",
+    "expect": "ERR_NON_CANONICAL",
+    "tier": "non-canonical"
   }
 }
