@@ -182,6 +182,9 @@ func specErrorCode(err error) string {
 		return "ERR_TRAILING_DATA"
 	case errors.Is(err, cowrie.ErrInvalidVarint):
 		return "ERR_INVALID_VARINT"
+	case errors.Is(err, cowrie.ErrInvalidUTF8):
+		// §2.4: String/key payload that is not valid UTF-8.
+		return "ERR_INVALID_UTF8"
 	case errors.Is(err, cowrie.ErrInvalidFieldID):
 		// dict index out of range / non-ascending field id (§2.6)
 		return "ERR_INVALID_FIELD_ID"

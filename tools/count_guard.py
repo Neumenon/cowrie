@@ -18,7 +18,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Floors pinned at the v1.0-freeze counts. Bump these up when coverage grows; never down.
 FLOOR = {
     "testdata/v1_golden.json": 73,            # positive conformance vectors (full Core + boundaries)
-    "testdata/v1_negative.json": 26,          # anti-malleability fixtures (7 malformed + 13 non-canonical)
+    "testdata/v1_negative.json": 27,          # anti-malleability fixtures (8 malformed + 13 non-canonical + invalid-utf8)
     "testdata/v1_content_addresses.json": 73, # §3 content addresses
     "testdata/v1_tensor_spans.json": 8,       # §2.5 tensor zero-copy spans
     "testdata/v1_files.json": 7,              # §7 file/Merkle fixtures

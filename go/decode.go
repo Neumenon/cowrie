@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"unicode/utf8"
 	"unsafe"
 )
 
@@ -33,6 +34,11 @@ var (
 	ErrExtTooLarge     = errors.New("cowrie: extension payload exceeds maximum length")
 	ErrUnknownExt      = errors.New("cowrie: unknown extension type (strict mode)")
 	ErrInvalidVarint   = errors.New("cowrie: invalid or overflow varint encoding")
+	// ErrInvalidUTF8 is returned when a String value or header dictionary key
+	// holds bytes that are not valid UTF-8 (§2.4). The Python oracle
+	// (decode.py:69-73 keys, :116-124 string values), Rust and TS all reject
+	// these with ERR_INVALID_UTF8; Go must match.
+	ErrInvalidUTF8 = errors.New("cowrie: string is not valid UTF-8")
 	ErrDictTooLarge    = errors.New("cowrie: dictionary exceeds maximum size")
 	ErrTrailingData    = errors.New("cowrie: trailing data after root value")
 	// ErrDuplicateKey is returned when a header dictionary contains two identical
@@ -462,6 +468,11 @@ func (r *reader) readString() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// §2.4: String/key payloads MUST be valid UTF-8. Match the Python oracle,
+	// Rust and TS, which reject invalid UTF-8 with ERR_INVALID_UTF8.
+	if !utf8.Valid(b) {
+		return "", ErrInvalidUTF8
+	}
 	if r.opts.UnsafeStrings {
 		return unsafe.String(&b[0], len(b)), nil
 	}
@@ -485,6 +496,11 @@ func (r *reader) readStringWithLimit(maxLen int) (string, error) {
 	b, err := r.read(int(length))
 	if err != nil {
 		return "", err
+	}
+	// §2.4: String/key payloads MUST be valid UTF-8. Match the Python oracle,
+	// Rust and TS, which reject invalid UTF-8 with ERR_INVALID_UTF8.
+	if !utf8.Valid(b) {
+		return "", ErrInvalidUTF8
 	}
 	if r.opts.UnsafeStrings {
 		if len(b) == 0 {

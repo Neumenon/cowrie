@@ -58,6 +58,8 @@ NEGATIVES: list[tuple[str, bytes, str, str]] = [
     ("reserved_0x30",    D0 + b"\x30",                              "ERR_RESERVED_TAG",   "malformed"),     # legacy AdjList
     ("reserved_0xf0",    D0 + b"\xf0",                              "ERR_RESERVED_TAG",   "malformed"),     # top reserved range
     ("decimal_zero_scale", D0 + b"\x0a\x0a" + b"\x00" * 16,         "ERR_NON_CANONICAL",  "non-canonical"), # coeff 0, scale 5 -> must be (0,0)
+    # --- invalid UTF-8 in a String payload: all decoders MUST reject (§2.4 / decode.py:116-124) ---
+    ("invalid_utf8_string", D0 + b"\x05\x03\xff\xff\xff",           "ERR_INVALID_UTF8",   "malformed"),     # String(0x05) len 3 with bytes 0xff (invalid UTF-8)
 ]
 
 

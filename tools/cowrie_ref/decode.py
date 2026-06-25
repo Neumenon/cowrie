@@ -62,6 +62,8 @@ class _Decoder:
         if self._take(1)[0] != m.COMPRESSION_NONE:
             raise self._bad(ERR_UNSUPPORTED_COMPRESSION, "this reference decodes uncompressed only")
         n = self._uvarint()
+        if n > m.MAX_DICT:
+            raise self._bad(ERR_TOO_LARGE, "dictionary entries > MaxDict")
         prev: bytes | None = None
         for _ in range(n):
             raw = self._take(self._uvarint())
@@ -112,13 +114,19 @@ class _Decoder:
                     raise self._bad(ERR_NON_CANONICAL, "non-canonical NaN")
             return v
         if tag == m.T_STRING:
-            raw = self._take(self._uvarint())
+            n = self._uvarint()
+            if n > m.MAX_STRING:
+                raise self._bad(ERR_TOO_LARGE, "string length > MaxString")
+            raw = self._take(n)
             try:
                 return raw.decode("utf-8")
             except UnicodeDecodeError:
                 raise self._bad(ERR_INVALID_UTF8)
         if tag == m.T_BYTES:
-            return self._take(self._uvarint())
+            n = self._uvarint()
+            if n > m.MAX_BYTES:
+                raise self._bad(ERR_TOO_LARGE, "bytes length > MaxBytes")
+            return self._take(n)
         if tag == m.T_BIGINT:
             raw = self._take(self._uvarint())
             v = int.from_bytes(raw, "little", signed=True)
@@ -141,7 +149,10 @@ class _Decoder:
             return m.Uuid(self._take(16))
         if tag == m.T_EXTENSION:
             ext_type = self._uvarint()
-            return m.Extension(ext_type, self._take(self._uvarint()))
+            n = self._uvarint()
+            if n > m.MAX_EXT:
+                raise self._bad(ERR_TOO_LARGE, "extension payload > MaxExt")
+            return m.Extension(ext_type, self._take(n))
         if tag == m.T_TENSOR:
             dtype = self._take(1)[0]
             if dtype not in m.DTYPE_BITS:
@@ -176,11 +187,15 @@ class _Decoder:
             return m.Bitmask(bits)
         if tag == m.T_ARRAY or m.FIXARRAY <= tag <= m.FIXARRAY + 15:
             count = (tag - m.FIXARRAY) if tag != m.T_ARRAY else self._uvarint()
+            if count > m.MAX_ARRAY:
+                raise self._bad(ERR_TOO_LARGE, "array element count > MaxArray")
             if self.strict and tag == m.T_ARRAY and count <= 15:
                 raise self._bad(ERR_NON_CANONICAL, "array should use FIXARRAY")
             return [self.value(depth + 1) for _ in range(count)]
         if tag == m.T_OBJECT or m.FIXMAP <= tag <= m.FIXMAP + 15:
             count = (tag - m.FIXMAP) if tag != m.T_OBJECT else self._uvarint()
+            if count > m.MAX_OBJECT:
+                raise self._bad(ERR_TOO_LARGE, "object field count > MaxObject")
             if self.strict and tag == m.T_OBJECT and count <= 15:
                 raise self._bad(ERR_NON_CANONICAL, "object should use FIXMAP")
             obj: dict[str, object] = {}

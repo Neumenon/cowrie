@@ -37,7 +37,7 @@ IMPLS = {
 }
 
 
-_CODE = re.compile(rb"ERR_[A-Z_]+")
+_CODE = re.compile(rb"ERR_[A-Z0-9_]+")
 
 
 def probe(cmd: list[str], raw: bytes, cwd: str | None) -> tuple[str, str]:

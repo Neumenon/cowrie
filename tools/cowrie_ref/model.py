@@ -30,6 +30,14 @@ import struct as _struct
 CANONICAL_NAN = _struct.unpack("<d", bytes.fromhex("000000000000f87f"))[0]  # the one canonical quiet NaN (§3)
 MAX_RANK = 32       # §2.7
 MAX_DEPTH = 1000    # §2.7
+# §2.7 size caps (normative; match Go DefaultMax*, Rust gen2 max_*_len, TS Limits.MAX_*_LEN).
+# Oversized input is rejected with ERR_TOO_LARGE — the cross-language token the others surface.
+MAX_ARRAY = 1_000_000   # §2.7 MaxArray: array element count
+MAX_OBJECT = 1_000_000  # §2.7 MaxObject: object field count
+MAX_DICT = 1_000_000    # §2.7 MaxDict: header dictionary entry count
+MAX_STRING = 10_000_000  # §2.7 MaxString: 10MB (decoded UTF-8 byte length)
+MAX_BYTES = 50_000_000   # §2.7 MaxBytes: 50MB
+MAX_EXT = 1_000_000      # §2.7 MaxExt: 1MB extension payload
 
 # §2.5 DType -> (wire value, bytes_per_elem | None for sub-byte) ; sub-byte handled separately
 DTYPE = {

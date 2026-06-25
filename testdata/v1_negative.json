@@ -128,5 +128,10 @@
     "hex": "434f57520100000a0a00000000000000000000000000000000",
     "expect": "ERR_NON_CANONICAL",
     "tier": "non-canonical"
+  },
+  "invalid_utf8_string": {
+    "hex": "434f57520100000503ffffff",
+    "expect": "ERR_INVALID_UTF8",
+    "tier": "malformed"
   }
 }

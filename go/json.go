@@ -463,6 +463,18 @@ func stringToDtype(s string) (DType, bool) {
 		return DTypeUint32, true
 	case "uint64":
 		return DTypeUint64, true
+	case "bool":
+		return DTypeBool, true
+	case "qint4":
+		return DTypeQINT4, true
+	case "qint2":
+		return DTypeQINT2, true
+	case "qint3":
+		return DTypeQINT3, true
+	case "ternary":
+		return DTypeTernary, true
+	case "binary":
+		return DTypeBinary, true
 	default:
 		return 0, false
 	}
@@ -1033,6 +1045,18 @@ func dtypeToString(d DType) string {
 		return "uint32"
 	case DTypeUint64:
 		return "uint64"
+	case DTypeBool:
+		return "bool"
+	case DTypeQINT4:
+		return "qint4"
+	case DTypeQINT2:
+		return "qint2"
+	case DTypeQINT3:
+		return "qint3"
+	case DTypeTernary:
+		return "ternary"
+	case DTypeBinary:
+		return "binary"
 	default:
 		return "unknown"
 	}

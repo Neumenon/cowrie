@@ -45,8 +45,13 @@ export const Limits = {
 };
 
 export class SecurityLimitExceeded extends Error {
+  // §2.7 size/limit overruns surface the SPEC-v1 §2.6 ERR_TOO_LARGE token so the
+  // conformance gate (which extracts the first /ERR_[A-Z_]+/ from the message) and the
+  // Python oracle (decode.py: every MAX_* check raises ERR_TOO_LARGE) agree. The literal
+  // is inlined to avoid a TDZ on the ERR_TOO_LARGE const declared later in this module.
+  readonly code: string = 'ERR_TOO_LARGE';
   constructor(message: string) {
-    super(message);
+    super(`ERR_TOO_LARGE: ${message}`);
     this.name = 'SecurityLimitExceeded';
   }
 }
@@ -64,9 +69,10 @@ export class CowrieError extends Error {
   }
 }
 
-// SPEC-v1 §2.6 canonical error codes. The conformance gate extracts the first /ERR_[A-Z_]+/
+// SPEC-v1 §2.6 canonical error codes. The conformance gate extracts the first /ERR_[A-Z0-9_]+/
 // token from stderr, so every decode failure must surface one of these.
 export const ERR_NON_CANONICAL = 'ERR_NON_CANONICAL';
+export const ERR_INVALID_UTF8 = 'ERR_INVALID_UTF8';
 export const ERR_INVALID_MAGIC = 'ERR_INVALID_MAGIC';
 export const ERR_INVALID_VERSION = 'ERR_INVALID_VERSION';
 export const ERR_TRUNCATED = 'ERR_TRUNCATED';
@@ -1037,7 +1043,18 @@ class Decoder {
   private pos = 0;
   private dict: string[] = [];
   private depth = 0;
-  private textDecoder = new TextDecoder();
+  // fatal:true => decode() THROWS on invalid UTF-8 instead of silently substituting U+FFFD, so we can
+  // reject it (ERR_INVALID_UTF8) like the Python oracle / Go / Rust rather than normalizing it.
+  private textDecoder = new TextDecoder('utf-8', { fatal: true });
+
+  /** Decode UTF-8 bytes, rejecting invalid sequences with ERR_INVALID_UTF8 (SPEC §1: strings/keys are UTF-8). */
+  private decodeUtf8(bytes: Uint8Array): string {
+    try {
+      return this.textDecoder.decode(bytes);
+    } catch {
+      throw new CowrieError(ERR_INVALID_UTF8, 'invalid UTF-8 in string or object key');
+    }
+  }
   private limits: ResolvedLimits;
   // Tensor data runs captured during decode, in document order (Phase 2 locator).
   spans: TensorSpan[] = [];
@@ -1084,7 +1101,7 @@ class Decoder {
     if (len > this.limits.maxStringLen) {
       throw new SecurityLimitExceeded(`String too long: ${len} > ${this.limits.maxStringLen}`);
     }
-    return this.textDecoder.decode(this.read(len));
+    return this.decodeUtf8(this.read(len));
   }
 
   private enterNested(): void {
@@ -1235,7 +1252,7 @@ class Decoder {
         for (let i = 0; i < count; i++) {
           const fieldId = this.readUvarintAsNumber();
           if (fieldId >= this.dict.length) {
-            throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
+            throw new CowrieError(ERR_INVALID_FIELD_ID, `${fieldId} >= ${this.dict.length}`);
           }
           if (this.strict && fieldId <= lastIdx) {
             throw new CowrieError(ERR_NON_CANONICAL, 'object fields not in ascending dictIdx');
@@ -1266,7 +1283,7 @@ class Decoder {
         // Sub-byte packed types (BOOL, QINT4, etc.) are skipped (tensorExpectedBytes returns null).
         const expected = tensorExpectedBytes(dtype, shape);
         if (expected !== null && dataLen !== expected) {
-          throw new Error(`cowrie: tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
+          throw new CowrieError(ERR_NON_CANONICAL, `tensor dataLen ${dataLen} does not match shape/dtype (expected ${expected} bytes)`);
         }
         // Consume the 64-byte alignment padding (§2.5): data begins at a 64-byte boundary
         // relative to byte 0 of the message. pad = (-pos) mod 64; in strict mode reject any
@@ -1399,7 +1416,7 @@ class Decoder {
         throw new SecurityLimitExceeded(`String too long: ${keyLen} > ${this.limits.maxStringLen}`);
       }
       const rawKey = this.read(keyLen);
-      const key = this.textDecoder.decode(rawKey);
+      const key = this.decodeUtf8(rawKey);
       if (this.strict && prevKeyBytes !== null) {
         const cmp = compareBytes(rawKey, prevKeyBytes);
         if (cmp === 0) {
@@ -1470,7 +1487,7 @@ class Decoder {
     for (let i = 0; i < propCount; i++) {
       const fieldId = this.readUvarintAsNumber();
       if (fieldId >= this.dict.length) {
-        throw new Error(`Invalid dictionary index: ${fieldId} >= ${this.dict.length}`);
+        throw new CowrieError(ERR_INVALID_FIELD_ID, `${fieldId} >= ${this.dict.length}`);
       }
       const key = this.dict[fieldId];
       props[key] = this.decodeValue();
@@ -1499,7 +1516,9 @@ export function tensorSpans(data: Uint8Array, opts: DecodeOptions = {}): TensorS
     data,
     opts.onUnknownExt ?? UnknownExtBehavior.KEEP,
     resolveLimits(opts),
-    opts.strict ?? false,
+    // §5.3 / cowrie_ref.decode.py:210: tensor_spans defaults strict=True so non-canonical
+    // input is rejected by default (matches the Python oracle and Rust).
+    opts.strict ?? true,
   );
   dec.decode();
   return dec.spans;
