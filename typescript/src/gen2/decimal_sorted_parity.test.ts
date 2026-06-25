@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { encode, encodeWithOpts, decode, CowrieError, ERR_NON_CANONICAL } from "./index.ts";
+import { encode, encodeWithOpts, decode, fromAny, CowrieError, ERR_NON_CANONICAL } from "./index.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -64,6 +64,40 @@ for (const [name, rec] of DECIMAL_VECTORS) {
     assert.equal(sorted, main, `sorted encoder != main encoder for ${name}`);
     // ...and therefore the golden bytes as well.
     assert.equal(sorted, golden, `sorted encoder != golden for ${name}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Object-ordering parity: the deterministic (sorted) encoder MUST produce
+// byte-identical output to the main encoder for objects, including nested
+// objects and non-BMP/astral keys. The old DeterministicEncoder built its dict
+// in DFS-discovery order (never globally re-sorted) and sorted sibling/object
+// keys with JS UTF-16 `<` instead of UTF-8 bytes, so it diverged from encode()
+// for these cases.
+// ---------------------------------------------------------------------------
+const OBJECT_PARITY_CASES: Record<string, unknown> = {
+  // Nested object: dict discovery order is z, a (DFS) but canonical UTF-8 dict
+  // order is a, z — exercises the global re-sort.
+  nested_za: { z: { a: 1 } },
+  // Sibling key b before nested a/c — exercises dict order across nesting levels.
+  b_then_nested: { b: 1, a: { c: 2 } },
+  // Astral/emoji key (U+1F600, non-BMP) vs fullwidth exclamation (U+FF01).
+  // JS UTF-16 `<` orders the surrogate-pair emoji BEFORE U+FF01, but UTF-8 bytes
+  // order U+FF01 (EF BC 81) BEFORE U+1F600 (F0 9F 98 80). Exercises UTF-8 sort.
+  astral_keys: { "\u{1F600}": 1, "！": 2 },
+};
+
+for (const [name, plain] of Object.entries(OBJECT_PARITY_CASES)) {
+  test(`deterministic (sorted) encoder == main encoder for object case: ${name}`, () => {
+    const value = fromAny(plain);
+    const main = hex(encode(value));
+    const sorted = hex(encodeWithOpts(value, { deterministic: true }));
+    assert.equal(sorted, main, `sorted encoder != main encoder for ${name}`);
+    // Default opts (deterministic falsy) must also match: it falls through to encode().
+    const sortedDefault = hex(encodeWithOpts(value, {}));
+    assert.equal(sortedDefault, main, `encodeWithOpts(default) != main encoder for ${name}`);
+    // Round-trips back to the same logical value.
+    assert.deepEqual(decode(Buffer.from(sorted, "hex")), value);
   });
 }
 

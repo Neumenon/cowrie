@@ -2439,12 +2439,19 @@ class DeterministicEncoder extends Encoder {
       }
       case Type.OBJECT: {
         const obj = v.data as Record<string, Value>;
-        // Use byte-order comparison for locale-independent deterministic sorting
-        let entries = Object.entries(obj).sort((a, b) => a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0);
-        // Filter out null values if omitNull is set
+        // Filter out null values if omitNull is set (must drop from BOTH dict collection
+        // and field emission — collectKeysSorted applies the same filter).
+        let entries = Object.entries(obj);
         if (this.opts.omitNull) {
           entries = entries.filter(([_, val]) => val.type !== Type.NULL);
         }
+        // Emit fields in ascending dictIdx order (§2.4), matching the main encoder
+        // (index.ts:835). The dict is globally UTF-8-byte-sorted, so dictLookup index
+        // order IS the canonical order — sorting by the JS UTF-16 `<` on the key string
+        // diverges for non-BMP/astral keys.
+        entries.sort(
+          (a, b) => (this.sortedDictLookup.get(a[0]) ?? 0) - (this.sortedDictLookup.get(b[0]) ?? 0)
+        );
         // v3 inline encoding: FIXMAP for count 0-15
         if (entries.length <= 15) {
           this.writeByteSorted(Tag.FIXMAP_BASE + entries.length);
@@ -2575,6 +2582,17 @@ class DeterministicEncoder extends Encoder {
     }
 
     this.collectKeysSorted(v);
+
+    // Global byte-sorted canonical dictionary order (SPEC-v1 §2.4), mirroring the main
+    // Encoder.encode (index.ts:991). collectKeysSorted gathers keys in DFS-discovery
+    // order; we MUST globally re-sort by UTF-8 byte sequence (not JS UTF-16 `<`) and
+    // rebuild the lookup so the dictionary is byte-identical to encode() for nested
+    // objects and non-BMP/astral keys.
+    this.sortedDictKeys.sort((a, b) =>
+      compareBytes(sharedTextEncoder.encode(a), sharedTextEncoder.encode(b))
+    );
+    this.sortedDictLookup.clear();
+    this.sortedDictKeys.forEach((k, i) => this.sortedDictLookup.set(k, i));
 
     // Header
     this.writeSorted(MAGIC);
