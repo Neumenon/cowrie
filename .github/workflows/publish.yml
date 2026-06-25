@@ -1,0 +1,146 @@
+name: publish
+
+# v1 publish workflow — triggered by pushing a release tag `vX.Y.Z`.
+#
+# CONTRACT: nothing publishes unless the FULL conformance gate is green (the `gates` job below runs
+# tools/run_all_gates.sh; every publish job `needs: [gates, version-check]`). A tag never ships red.
+#
+# REQUIRED SETUP (one-time, repo settings — not in this file):
+#   - PyPI : Trusted Publishing (OIDC) for the `cowrie-ref` project, env `pypi`
+#            (https://pypi.org/manage/project/cowrie-ref/settings/publishing/) — no token needed.
+#   - npm  : secret NPM_TOKEN (automation token) with publish rights to `cowrie-codec`.
+#   - crates.io : secret CARGO_REGISTRY_TOKEN with publish rights to `cowrie-rs`.
+#   - Go   : NO registry — the Go module (github.com/Neumenon/cowrie/go/v2) is "published" by the
+#            `go/vX.Y.Z` tag; push that tag alongside `vX.Y.Z` (see the go-tag job's notes).
+#
+# VERSION NOTE: the tag drives everything. `version-check` fails the run unless rust/Cargo.toml,
+# typescript/package.json, and tools/pyproject.toml ALL already declare the tagged version — align the
+# manifests and commit BEFORE tagging. (Lineage caveat: manifests are still at 2.1.2 / 0.1.0 and the Go
+# module path is /v2; pick the v1 version line deliberately before the first real tag.)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- 1. the gate: identical build+gate to conformance.yml; publish depends on it -------------
+  gates:
+    name: run_all_gates
+    runs-on: ubuntu-latest
+    env:
+      GO_CLI: /tmp/cowrie-cli
+      RUST_RECODE: ${{ github.workspace }}/rust/target/release/examples/recode
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with: { go-version: '1.21', cache-dependency-path: go/go.sum }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: rust }
+      - uses: actions/setup-node@v5
+        with: { node-version: '22', cache: npm, cache-dependency-path: typescript/package-lock.json }
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - name: Build recode tools
+        run: |
+          (cd go && go build -o "$GO_CLI" ./cmd/cowrie)
+          (cd rust && cargo build --release --example recode)
+          (cd typescript && (npm ci || npm install))
+      - name: Install Python reference
+        run: |
+          python3 -m venv /tmp/cowrie-venv
+          /tmp/cowrie-venv/bin/python -m pip install -e "tools[test]"
+      - name: Run all conformance gates
+        run: bash tools/run_all_gates.sh
+
+  # ---- 2. manifests must declare the tagged version --------------------------------------------
+  version-check:
+    name: version-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tag version == manifest versions
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          echo "tag version: $VER"
+          fail=0
+          rust=$(grep -m1 -E '^version *= *"' rust/Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          ts=$(python3 -c "import json;print(json.load(open('typescript/package.json'))['version'])")
+          py=$(python3 -c "import tomllib;print(tomllib.load(open('tools/pyproject.toml','rb'))['project']['version'])")
+          for kv in "rust:$rust" "ts:$ts" "py:$py"; do
+            name=${kv%%:*}; got=${kv#*:}
+            if [ "$got" != "$VER" ]; then echo "FAIL: $name manifest is '$got', tag is '$VER'"; fail=1; else echo "  $name: $got OK"; fi
+          done
+          exit $fail
+
+  # ---- 3. publish jobs — each gated on a green run + matching versions -------------------------
+  pypi:
+    name: publish PyPI (cowrie-ref)
+    needs: [gates, version-check]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write          # PyPI Trusted Publishing (OIDC) — no token
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - name: Build sdist + wheel
+        run: |
+          python3 -m pip install --upgrade build
+          (cd tools && python3 -m build)
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: tools/dist
+
+  npm:
+    name: publish npm (cowrie-codec)
+    needs: [gates, version-check]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # npm provenance
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: '22', registry-url: 'https://registry.npmjs.org', cache: npm, cache-dependency-path: typescript/package-lock.json }
+      - name: Build + publish
+        working-directory: typescript
+        run: |
+          (npm ci || npm install)
+          npm run build
+          npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  crates:
+    name: publish crates.io (cowrie-rs)
+    needs: [gates, version-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo publish
+        working-directory: rust
+        run: cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+
+  # ---- 4. Go: no registry; ensure the matching go/ module tag exists ---------------------------
+  go-tag:
+    name: verify Go module tag
+    needs: [gates, version-check]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - name: Require go/vX.Y.Z tag (Go module path is .../go/v2)
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          if git rev-parse "go/v${VER}" >/dev/null 2>&1; then
+            echo "go/v${VER} present — `go get github.com/Neumenon/cowrie/go/v2@go/v${VER}` will resolve."
+          else
+            echo "NOTE: push the Go module tag too:  git tag go/v${VER} && git push origin go/v${VER}"
+            echo "(Go modules are 'published' by their VCS tag, not a registry.)"
+          fi

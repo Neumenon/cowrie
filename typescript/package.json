@@ -1,7 +1,7 @@
 {
   "name": "cowrie-codec",
   "version": "2.1.2",
-  "description": "Cowrie - Structured JSON binary codec for TypeScript",
+  "description": "Cowrie v1 — deterministic, content-addressable, AI-native binary codec for TypeScript (zero-copy tensors, multihash content addresses, Merkle file identity)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
