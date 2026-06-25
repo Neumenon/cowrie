@@ -27,14 +27,18 @@ cd python && pip install -e ".[dev]" && mypy cowrie/ --ignore-missing-imports &&
 cd typescript && npm ci && npm run build && npm test
 ```
 
-For wire-format changes, also run the shared fixture harness from the repo root:
+For wire-format changes, run the full cross-language conformance suite from the repo root — the same
+gates CI enforces (Python reference + Go + Rust + TS must agree byte-for-byte):
 
 ```bash
 (cd go && go build -o /tmp/cowrie-cli ./cmd/cowrie)
-GO_CLI=/tmp/cowrie-cli python3 testdata/fixtures/validate_fixtures.py
-python3 tools/fixtures/validate_manifest.py
-python3 tools/spec/verify_sections.py
+(cd rust && cargo build --release --example recode)
+bash tools/run_all_gates.sh
 ```
+
+This runs all 11 gates: count-guard, the Python-reference tests, positive conformance, content-address
+parity, file-identity parity, tensor-view parity, §4 fingerprint parity, dataset-identity parity,
+negative (lenient + strict), and the differential fuzzer.
 
 ## Adding fixture cases
 

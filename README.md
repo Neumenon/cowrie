@@ -39,21 +39,23 @@ JSON's text shape and lack of binary primitives are the bottleneck.
 Cowrie is **beta** software: the wire format is intentionally small and pinned by
 fixtures, but the project is new and not yet production-proven at large scale.
 
-Cowrie's cross-language parity is enforced by a **representative conformance
-suite** plus **pinned deterministic parity tests** (not yet a full
-all-implementation encode matrix):
+Cowrie's cross-language parity is **machine-enforced**: the Python reference (the executable spec /
+oracle), Go, Rust, and TypeScript must agree byte-for-byte. CI runs `tools/run_all_gates.sh` on every
+push, and a red gate blocks merge. The 11 standing gates:
 
-- **55 cross-language fixture cases** (`testdata/fixtures/`) validated by
-  `validate_fixtures.py`: 46 binary decode cases, 7 JSON-bridge encode cases,
-  and 2 framed-compression decode cases. The harness runs the Go reference CLI
-  plus the Python decoder for in-scope cases. Rust and TypeScript parity is gated
-  by pinned per-language invariant/parity tests rather than this harness.
-- **Pinned regression tests** in each language asserting identical *deterministic
-  encodings* and *schema fingerprints* — including ML types and graph
-  (Node/Edge/NodeBatch/EdgeBatch) types.
+- **count-guard** — the conformance corpus may only grow (no silent coverage shrink)
+- **conformance** — every golden vector encodes/decodes to identical canonical bytes in all 4 langs
+- **content-address** — all 4 agree on the multihash-SHA-256 content address (§3)
+- **file-identity** — all 4 agree on the Merkle file identity (§7)
+- **tensor-view** — all 4 agree on zero-copy tensor data spans (§2.5, 64-byte aligned)
+- **fingerprint** — all 4 agree on the §4 structural fingerprint
+- **dataset-identity** — all 4 agree on the Merkle dataset root (stream layer)
+- **negative** (lenient + **strict**) — non-canonical/malformed input is rejected with the exact `ERR_*` code
+- **differential fuzz** — thousands of random values, zero cross-language divergence
+- **canary** — proves a 1-byte corruption turns the gate red
 
-Deterministic encoding (keys sorted by byte order, stable tensor/graph layout)
-makes the output suitable for content-addressable storage and cross-service caching.
+Deterministic, content-addressed encoding (global byte-sorted keys, 64-byte-aligned tensors) makes the
+output suitable for content-addressable storage, dedup, and cross-service caching.
 
 ## Install
 
