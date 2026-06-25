@@ -1,19 +1,21 @@
-# Cowrie — Structured Binary Codec
+# Cowrie — deterministic, content-addressable binary codec for AI data
 
-A multi-language binary codec for structured data with native ML extensions:
+[![conformance](https://github.com/Neumenon/cowrie/actions/workflows/conformance.yml/badge.svg)](https://github.com/Neumenon/cowrie/actions/workflows/conformance.yml)
 
-- **Gen1**: Lightweight codec — 16 core types + 4 proto-tensor types
-- **Gen2**: Full Cowrie v2 — 20+ types, dictionary coding, compression, schema fingerprint
+Cowrie v1 (`COWR`) is a **deterministic, content-addressable, AI-native binary envelope**: *equal value ⇒
+equal canonical bytes ⇒ equal hash, in any language.* There is exactly **one canonical byte-string per
+value** — mandatory and **decoder-enforced** (unlike CBOR's optional canonical mode) — with first-class
+**tensors** (64-byte aligned, zero-copy), **content addresses** (multihash SHA-256), **tamper-evident
+Merkle files**, and a structural fingerprint. Proven byte-identical across **Python (reference/oracle),
+Go, Rust, and TypeScript** by the CI conformance gates.
 
-Cowrie's lead value is **deterministic encoding with native bytes (0x08), tensors
-(0x20), tensor refs (0x21), and a stable schema fingerprint** — useful where
-JSON's text shape and lack of binary primitives are the bottleneck.
+> **Reserved tags.** Every non-core tag is reserved, and a strict decoder **REJECTS** it
+> (`ERR_RESERVED_TAG`) — reserved tags are *not* skipped. New capabilities are added as profiles /
+> conventions over the **locked Core**, never as new wire tags. The legacy v2 (`SJ`) codec — Gen1, Gen2,
+> the master-stream, and graph/image/audio/delta — lives under `attic/`.
 
-> **Reserved tags (Gen2).** In Gen2, tags `0x30` (AdjList), `0x31` (RichText),
-> `0x32` (Delta), and `0x39` (GraphShard) are deprecated. Decoders MUST skip
-> their length-prefixed payloads silently. Encoders MUST NOT emit them. The
-> original Gen2 graph / rich-text / delta implementations live under `attic/`.
-> (Gen1 retains AdjList and GraphShard as active graph types.)
+> **Note:** the sections below still partly describe the legacy v2 (`SJ`) format and are being rewritten
+> for v1. The authoritative v1 surface is `docs/SPEC-v1.md` + the conformance gates (`tools/run_all_gates.sh`).
 
 ## Features
 

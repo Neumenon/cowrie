@@ -40,15 +40,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo + target
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            rust/target
-          key: cargo-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock', 'rust/Cargo.toml') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
+          workspaces: rust
 
       - name: Set up Node
         uses: actions/setup-node@v5

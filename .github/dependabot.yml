@@ -13,6 +13,6 @@ updates:
     schedule:
       interval: "weekly"
   - package-ecosystem: "pip"
-    directory: "/python"
+    directory: "/tools"   # v1 Python reference package (cowrie_ref); legacy python/ retired to attic
     schedule:
       interval: "weekly"
