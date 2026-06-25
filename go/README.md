@@ -72,8 +72,10 @@ jsonOut, err := cowrie.ToJSON(v2)
 | node_batch | `NodeBatch(nodes)` | 0x37 |
 | edge_batch | `EdgeBatch(edges)` | 0x38 |
 
-Tags 0x30 (Adjlist), 0x31 (RichText), 0x32 (Delta), 0x39 (GraphShard) are reserved.
-Encoders must not emit them. Decoders skip them silently (return null).
+Tags 0x30 (Adjlist), 0x31 (RichText), 0x32 (Delta), 0x39 (GraphShard) — and the legacy
+graph tags 0x35–0x38 — are **reserved** in v1. Encoders must not emit them, and decoders
+**reject** them with `ERR_RESERVED_TAG` (they are not skipped). New capabilities are added as
+profiles/conventions over the locked Core, never as new wire tags.
 
 `FlagHasColumnHints = 0x08` is reserved; the per-column hints feature was cut and
 the code lives in `attic/`. The flag bit is ignored on decode.
