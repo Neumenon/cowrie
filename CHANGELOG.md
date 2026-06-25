@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.9.0 — Cowrie v1 (COWR) clean-room (2026-06-25)
+
+Clean-room reimplementation of Cowrie as a deterministic, content-addressable,
+AI-native binary codec. Magic `COWR`, format version 1. Authoritative spec:
+`docs/SPEC-v1.md`. This is a pre-1.0 release candidate — the wire format is
+**not yet frozen**.
+
+### Added — deterministic content-addressable v1 format
+
+The core invariant: **equal value => equal canonical bytes => equal hash**, and
+those bytes are **byte-identical across Python, Go, Rust, and TypeScript**. The
+content address is a multihash SHA-256 (spec §3). Verified: all four languages
+emit the same content address
+`122091f7d42a00c157c37f0929b15e90d8c785dbe50581cc651aafc338f6e5e8aad1`
+for `{"name":"Alice","scores":[1,2,3]}`.
+
+### Added — 11 cross-language conformance gates
+
+Eleven standing conformance gates run via `bash tools/run_all_gates.sh`, wired
+into CI at `.github/workflows/conformance.yml`. Green is law: no merge while red.
+
+### Added — Python as a first-class CLI peer and installable package
+
+The Python reference (built from `tools/`) is now a first-class peer of the other
+implementations: it ships both an importable library (`import cowrie_ref`) and a
+`cowrie` console script. PyPI package name: `cowrie-ref`.
+
+- Library: `from cowrie_ref import encode, decode, content_address, fingerprint`
+  — plain objects go in directly.
+- CLI: `cowrie recode [--strict|--addr|--file-id|--file-recode|--tensor-spans|--fingerprint|--dataset-root] < wire`
+
+### Added — publish workflow
+
+Tag-triggered publishing via `.github/workflows/publish.yml` (fires on `v*`),
+gate-gated against the 11 conformance gates. One-time setup before first publish:
+PyPI Trusted Publisher for `cowrie-ref`, plus `NPM_TOKEN` and
+`CARGO_REGISTRY_TOKEN` secrets.
+
+### Changed — all implementations aligned to 0.9.0
+
+The repository is now a monorepo (`go/`, `rust/`, `typescript/`, `tools/` for
+Python), with every implementation pinned to version **0.9.0**. Registry
+mappings: PyPI `cowrie-ref`, npm `cowrie-codec`, crates.io `cowrie-rs`, Go module
+`github.com/Neumenon/cowrie/go`.
+
+### Changed — Go module path `/v2` suffix dropped
+
+The Go module is now `github.com/Neumenon/cowrie/go` (a subdir module; release
+tags take the form `go/vX.Y.Z`). The legacy `/v2` major-version path suffix was
+dropped.
+
+### Install (from the `phase0-spec` branch — nothing published yet)
+
+- Python: `pip install "git+https://github.com/Neumenon/cowrie.git@phase0-spec#subdirectory=tools"`
+- Go: `go get github.com/Neumenon/cowrie/go@phase0-spec`
+- Rust: `cowrie-rs = { git = "https://github.com/Neumenon/cowrie.git", branch = "phase0-spec" }`
+- JS: npm cannot install a git subdir — `git clone -b phase0-spec <repo>; cd cowrie/typescript;
+  npm install && npm run build && npm pack` -> `cowrie-codec-0.9.0.tgz`, then `npm install <path>.tgz`.
+
+After publish: `pip install cowrie-ref` | `npm install cowrie-codec` |
+`cargo add cowrie-rs` | `go get github.com/Neumenon/cowrie/go@v0.9.0`.
+
+### Retired — legacy v2 implementation moved to `attic/`
+
+The legacy pre-v1 implementation and its format are retired to `attic/`. The
+entries below document that pre-v1 history and remain for the record.
+
+---
+
+## Legacy (pre-v1, archived)
+
+The entries in this section are a verbatim historical record of the retired
+pre-v1 implementation. They are preserved unchanged for provenance and may
+reference retired terminology that no longer applies to the v1 format above.
+
 ## Unreleased
 
 ## v2.1.2 (2026-06-20)

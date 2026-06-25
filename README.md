@@ -2,358 +2,131 @@
 
 [![conformance](https://github.com/Neumenon/cowrie/actions/workflows/conformance.yml/badge.svg)](https://github.com/Neumenon/cowrie/actions/workflows/conformance.yml)
 
-Cowrie v1 (`COWR`) is a **deterministic, content-addressable, AI-native binary envelope**: *equal value ⇒
-equal canonical bytes ⇒ equal hash, in any language.* There is exactly **one canonical byte-string per
-value** — mandatory and **decoder-enforced** (unlike CBOR's optional canonical mode) — with first-class
-**tensors** (64-byte aligned, zero-copy), **content addresses** (multihash SHA-256), **tamper-evident
-Merkle files**, and a structural fingerprint. Proven byte-identical across **Python (reference/oracle),
-Go, Rust, and TypeScript** by the CI conformance gates.
+Cowrie v1 (`COWR`, version 1) is a **deterministic, content-addressable, AI-native binary codec**.
+It exists to make data identity exact and portable: there is exactly **one** canonical byte-string
+per value, it is the same in every language, and its hash is its address.
 
-> **Reserved tags.** Every non-core tag is reserved, and a strict decoder **REJECTS** it
-> (`ERR_RESERVED_TAG`) — reserved tags are *not* skipped. New capabilities are added as profiles /
-> conventions over the **locked Core**, never as new wire tags. The legacy v2 (`SJ`) codec — Gen1, Gen2,
-> the master-stream, and graph/image/audio/delta — lives under `attic/`.
+## The identity invariant
 
-> **Note:** the sections below still partly describe the legacy v2 (`SJ`) format and are being rewritten
-> for v1. The authoritative v1 surface is `docs/SPEC-v1.md` + the conformance gates (`tools/run_all_gates.sh`).
+> **equal value ⇒ equal canonical bytes ⇒ equal hash — byte-identical across Python, Go, Rust, and TypeScript.**
 
-## Features
+Canonicalization is **mandatory and decoder-enforced** (unlike CBOR's optional canonical mode): there
+is no second valid encoding of the same value. The content address is a multihash SHA-256 over the
+canonical bytes (spec §3). As proof, all four implementations emit the same content address for
+`{"name":"Alice","scores":[1,2,3]}`:
 
-| Feature | Gen1 | Gen2 |
-|---------|------|------|
-| Core types (0x00-0x0F) | 16 (unified with Gen2) | 16 (unified with Gen1) |
-| ML types | proto-tensors (0x16-0x19) | Tensor, Image, Audio, etc. |
-| Dictionary coding | No | Yes |
-| Compression | No | gzip/zstd |
-| Schema fingerprint | No | Yes |
-
-## Language Implementations
-
-| Language | Gen1 | Gen2 | Status |
-|----------|------|------|--------|
-| Go | Yes | Yes | Supported |
-| Rust | Yes | Yes | Supported |
-| Python | Yes | Yes | Supported |
-| TypeScript | Yes | Yes | Supported |
-
-## Cross-Language Parity
-
-Cowrie is **beta** software: the wire format is intentionally small and pinned by
-fixtures, but the project is new and not yet production-proven at large scale.
-
-Cowrie's cross-language parity is **machine-enforced**: the Python reference (the executable spec /
-oracle), Go, Rust, and TypeScript must agree byte-for-byte. CI runs `tools/run_all_gates.sh` on every
-push, and a red gate blocks merge. The 11 standing gates:
-
-- **count-guard** — the conformance corpus may only grow (no silent coverage shrink)
-- **conformance** — every golden vector encodes/decodes to identical canonical bytes in all 4 langs
-- **content-address** — all 4 agree on the multihash-SHA-256 content address (§3)
-- **file-identity** — all 4 agree on the Merkle file identity (§7)
-- **tensor-view** — all 4 agree on zero-copy tensor data spans (§2.5, 64-byte aligned)
-- **fingerprint** — all 4 agree on the §4 structural fingerprint
-- **dataset-identity** — all 4 agree on the Merkle dataset root (stream layer)
-- **negative** (lenient + **strict**) — non-canonical/malformed input is rejected with the exact `ERR_*` code
-- **differential fuzz** — thousands of random values, zero cross-language divergence
-- **canary** — proves a 1-byte corruption turns the gate red
-
-Deterministic, content-addressed encoding (global byte-sorted keys, 64-byte-aligned tensors) makes the
-output suitable for content-addressable storage, dedup, and cross-service caching.
-
-## Install
-
-```bash
-# Go
-go get github.com/Neumenon/cowrie/go@latest
-
-# Python
-pip install cowrie-py
-
-# JavaScript / TypeScript
-npm install cowrie-codec
-
-# Rust
-cargo add cowrie-rs
+```
+122091f7d42a00c157c37f0929b15e90d8c785dbe50581cc651aafc338f6e5e8aad1
 ```
 
-## Benchmarks
+That invariant is what makes Cowrie useful as a substrate for content-addressable storage, dedup,
+cross-service caching, and tamper-evident dataset identity.
 
-- [vLLM serialization benchmark](go/vllm_bench_test.go) — Cowrie vs JSON for inference payloads (~4.8x compression on a 1536-dim float32 embedding, zero-copy tensor decode)
+## At a glance — install + usage
 
-## Quick Start
+`@phase0-spec` installs the clean v1 codec from the branch being promoted to `main`. Once published,
+swap to the registry forms shown below each cell. See **[INSTALL.md](INSTALL.md)** and
+**[docs/QUICKSTART.md](docs/QUICKSTART.md)** for full detail (per-platform notes, publishing, CLI flags).
 
-### Go
+| Language | Install (today, from branch) | Install (after publish) |
+| --- | --- | --- |
+| **Python** | `pip install "git+https://github.com/Neumenon/cowrie.git@phase0-spec#subdirectory=tools"` | `pip install cowrie-ref` |
+| **Go** | `go get github.com/Neumenon/cowrie/go@phase0-spec` | `go get github.com/Neumenon/cowrie/go@v0.9.0` |
+| **Rust** | `cowrie-rs = { git = "https://github.com/Neumenon/cowrie.git", branch = "phase0-spec" }` | `cargo add cowrie-rs` |
+| **JS/TS** | clone + build + pack (see below) | `npm install cowrie-codec` |
 
-```go
-import (
-    cowrie "github.com/Neumenon/cowrie/go"
-    "github.com/Neumenon/cowrie/go/gen1"
-)
+> **JS note:** npm cannot install a git subdirectory. Build the tarball once:
+> ```bash
+> git clone -b phase0-spec https://github.com/Neumenon/cowrie.git
+> cd cowrie/typescript && npm install && npm run build && npm pack   # -> cowrie-codec-0.9.0.tgz
+> npm install /path/to/cowrie-codec-0.9.0.tgz
+> ```
 
-// Gen1
-data, _ := gen1.Encode(map[string]any{
-    "name": "Alice",
-    "embedding": []float64{0.1, 0.2, 0.3},
-})
-result, _ := gen1.Decode(data)
+The APIs are idiomatic per language and differ deliberately — Python takes plain objects, JS needs
+`fromAny` (its numbers can't distinguish int from float), Go and Rust use explicit value constructors.
 
-// Gen2
-val := cowrie.Object(
-    cowrie.Member{Key: "name", Value: cowrie.String("Alice")},
-)
-data, _ = cowrie.Encode(val)
-```
-
-### Rust
-
-```rust
-use cowrie_rs::{gen1, gen2};
-
-// Gen1
-let val = gen1::Value::Object(vec![
-    ("name".to_string(), gen1::Value::String("test".to_string())),
-]);
-let encoded = gen1::encode(&val)?;
-
-// Gen2
-let val = gen2::Value::object(vec![
-    ("name", gen2::Value::String("test".into())),
-]);
-let encoded = gen2::encode(&val)?;
-```
-
-### Python
+**Python** — plain objects go in directly:
 
 ```python
-from cowrie import gen1, gen2
+from cowrie_ref import encode, decode, content_address, fingerprint
 
-# Gen1
-data = gen1.encode({"name": "Alice", "scores": [1.0, 2.0, 3.0]})
-result = gen1.decode(data)
-
-# Gen2
-val = gen2.from_any({"name": "Alice"})
-data = gen2.encode(val)
+blob = encode({"name": "Alice", "scores": [1, 2, 3]})
+value = decode(blob)
+addr = content_address({"name": "Alice", "scores": [1, 2, 3]}).hex()
 ```
 
-### TypeScript
+**TypeScript / JavaScript** — wrap with `fromAny` first:
 
-```typescript
-import { gen1, gen2 } from 'cowrie-codec';
+```javascript
+const { fromAny, encode, decode, toAny, contentAddress } = require("cowrie-codec");
 
-// Gen1
-const data = gen1.encode({ name: 'Alice', scores: [1.0, 2.0, 3.0] });
-const result = gen1.decode(data);
-
-// Gen2
-const val = gen2.SJ.object({ name: gen2.SJ.string('Alice') });
-const encoded = gen2.encode(val);
+const v = fromAny({ name: "Alice", scores: [1, 2, 3] });
+const wire = encode(v);
+const value = toAny(decode(wire));
+const addr = contentAddress(v);
 ```
 
-## Building
-
-### Go
-
-```bash
-cd go
-go build ./...
-go test ./...
-```
-
-### Rust
-
-```bash
-cd rust
-cargo build
-cargo test
-```
-
-### Python
-
-```bash
-cd python
-pip install -e ".[dev]"
-pytest tests/
-```
-
-The optional Cython fast-path extension needs `zlib` development headers (and
-`libzstd` + `pkg-config` for zstd support); without them, the pure-Python path is
-used automatically. Published v2.1.2 wheels require and smoke-test the native
-accelerator on Linux/macOS; Windows installs use the pure-Python sdist fallback
-until native MSVC/zlib wheels are validated.
-
-### TypeScript
-
-```bash
-cd typescript
-npm install
-npm run build
-npm test
-```
-
-## CLI Tool
-
-A command-line tool is available for encoding/decoding:
-
-```bash
-cd go
-go build -o cowrie ./cmd/cowrie
-
-# Encode JSON to Cowrie
-echo '{"name":"Alice","age":30}' | ./cowrie encode --gen2 > data.cowrie
-
-# Decode Cowrie to JSON
-./cowrie decode < data.cowrie
-
-# Get info about Cowrie file
-./cowrie info < data.cowrie
-```
-
-## Performance
-
-### Payload Size Comparison
-
-Measured with `cowrie encode` on the described inputs (the embedding row uses the
-typed float32 proto-tensor / `Tensor` type, the ML use case):
-
-| Payload | JSON | Gen1 | Gen2 |
-|---------|-----:|-----:|-----:|
-| Small object (3 fields) | 39 B | 35 B | 34 B |
-| Array of 1,000 repeated-schema objects | 45,149 B | 40,003 B | **18,680 B** |
-| 1536-dim float32 embedding (typed) | 29,648 B | 6,185 B | 6,195 B |
-
-**Key insights:** Gen2's dictionary coding roughly halves repeated-schema payloads
-(18.7 KB vs 40 KB Gen1, ~2.4× vs JSON). For float32 tensors/embeddings, both Gen1's
-proto-tensor and Gen2's `Tensor` give ~4.8× over JSON (binary float32 vs float64
-text) — use the typed tensor for ML payloads; an untyped JSON-style float array
-compresses less.
-
-### When to Use Gen1 vs Gen2
-
-| Use Case | Recommended | Why |
-|----------|-------------|-----|
-| Simple JSON APIs | Gen1 | Faster, simpler |
-| Repeated schemas (logs, events) | Gen2 | Dictionary coding saves ~50% |
-| ML pipelines (tensors, images) | Gen2 | Native ML type support |
-| Graph data (GNN) | Gen2 | Node, Edge, NodeBatch, EdgeBatch types |
-| Embedded/IoT | Gen1 | Smaller code footprint |
-| Real-time systems | Gen1 | Single-pass, predictable latency |
-
-## Graph Types (v2.1)
-
-Gen2 graph data structures (Node/Edge/NodeBatch/EdgeBatch — 0x35-0x38):
+**Go** — explicit value constructors:
 
 ```go
-// Go - Gen2 Graph Types
-node := cowrie.Node("person_42", []string{"Person", "Employee"}, map[string]any{
-    "name": "Alice",
-    "age":  int64(30),
-})
+import cowrie "github.com/Neumenon/cowrie/go"
 
-edge := cowrie.Edge("person_42", "company_1", "WORKS_AT", map[string]any{
-    "since": int64(2020),
-})
-
-batch := cowrie.NodeBatch([]cowrie.NodeData{node.Node()})
-```
-
-> **Note:** In Gen2, tag 0x39 (GraphShard) is reserved and no longer emitted —
-> use NodeBatch (0x37) + EdgeBatch (0x38) to transport graph data. (Gen1 still
-> supports GraphShard and AdjList directly.)
-
-## Schema Fingerprint
-
-A stable 64-bit FNV-1a fingerprint of a value's **schema** — its type structure and
-field names, not the data — identical across all implementations. Useful as a
-type ID for stream frames or for detecting schema changes.
-
-```go
 v := cowrie.Object(
     cowrie.Member{Key: "name", Value: cowrie.String("Alice")},
-    cowrie.Member{Key: "age", Value: cowrie.Int64(30)},
+    cowrie.Member{Key: "scores", Value: cowrie.Array(
+        cowrie.Int64(1), cowrie.Int64(2), cowrie.Int64(3))},
 )
-fp := cowrie.SchemaFingerprint64(v) // same fingerprint in Go/Rust/Python/TS
-// 32-bit variant for compact frame headers:
-id := cowrie.SchemaFingerprint32(v)
+data, _ := cowrie.Encode(v)
+addr := cowrie.AddressOfBytes(data)
+dec, _ := cowrie.Decode(data)
 ```
 
-Two values with the same field names and types share a fingerprint regardless of
-their actual values; changing a field's name or type changes it.
+**Rust**:
 
-## Streaming Support
+```rust
+use cowrie_rs::gen2;
 
-Cowrie supports streaming for large payloads:
-
-### Gen1: Record-by-Record Streaming
-
-```go
-// Go - Stream decode from io.Reader
-dec := gen1.NewStreamDecoder(conn)
-for {
-    val, err := dec.Decode()
-    if err == io.EOF {
-        break
-    }
-    process(val)
-}
+let v = gen2::Value::String("Alice".into());
+let wire = gen2::encode(&v)?;
+let addr = gen2::address_of_bytes(&wire);   // or gen2::content_address(&v)
+let dec = gen2::decode(&wire)?;
 ```
 
-### Gen2: Framed Master Stream
-
-```go
-// Go - Master stream with metadata
-import (
-    cowrie "github.com/Neumenon/cowrie/go"
-    "github.com/Neumenon/cowrie/go/codec"
-)
-
-mw := codec.NewMasterWriter(writer, codec.DefaultMasterWriterOptions())
-_ = mw.WriteWithMeta(
-    map[string]any{"name": "Alice"},
-    cowrie.Object(cowrie.Member{Key: "version", Value: cowrie.String("1.0")}),
-)
-
-// Read frame
-mr := codec.NewMasterReader(streamBytes, codec.DefaultMasterReaderOptions())
-frame, _ := mr.Next()
-val := frame.Payload
-meta := frame.Meta
-```
-
-```python
-# Python - Master stream
-from cowrie.gen2 import Value, write_master_frame, read_master_frame
-
-payload = write_master_frame(
-    Value.object({"name": Value.string("Alice")}),
-    Value.object({"version": Value.int64(1)}),
-)
-frame, _ = read_master_frame(payload)
-```
-
-
-## Wire Format
-
-See [SPEC.md](SPEC.md) for the complete wire format specification.
-
-## Glyph (text format)
-
-**Glyph** is a sibling *text* serialization that encodes the same values as
-token-efficient, human-readable text (a JSON bridge for LLM payloads), with a
-bridge to and from the cowrie binary format. It is maintained as a standalone
-project at [github.com/Neumenon/glyph](https://github.com/Neumenon/glyph) — its
-guide, quickstart, and specs live there.
-
-## Benchmarks
-
-Run benchmarks:
+The Python package also installs a `cowrie` CLI:
 
 ```bash
-# Go (includes the vLLM serialization benchmarks)
-cd go && go test -bench=. -benchmem ./...
-
-# Rust
-cd rust && cargo bench
+cowrie recode [--strict|--addr|--file-id|--file-recode|--tensor-spans|--fingerprint|--dataset-root] < wire
 ```
+
+## Conformance — green is law
+
+Cross-language parity is **machine-enforced**, not asserted. The Python reference is the executable
+oracle; Go, Rust, and TypeScript must agree with it byte-for-byte. Eleven standing gates run on every
+push via CI (`.github/workflows/conformance.yml`), and a red gate **blocks merge**. Run them locally
+with the single source-of-truth runner:
+
+```bash
+bash tools/run_all_gates.sh
+```
+
+The gates cover positive conformance, content-address (§3), file/Merkle identity (§7), zero-copy
+tensor spans, the structural fingerprint (§4), dataset identity, strict + lenient rejection of
+malformed/non-canonical input (exact `ERR_*` codes), differential fuzzing, and a canary that proves a
+1-byte corruption turns the gate red. Full status and how each count was verified live in
+**[CONFORMANCE.md](CONFORMANCE.md)**.
+
+## Specification
+
+**[docs/SPEC-v1.md](docs/SPEC-v1.md)** is the authoritative, reference-executable wire format. It is the
+single source of truth for the bytes; this README is only an introduction.
+
+## Status
+
+**0.9.0 — pre-1.0 release candidate.** All four implementations are at 0.9.0 and pass every conformance
+gate. The wire format is **not yet frozen**: it is stable and fixture-pinned, but reserves the right to
+change before 1.0. New capabilities are added as profiles/conventions over the locked Core, never as new
+wire tags. Registry packages: PyPI `cowrie-ref`, npm `cowrie-codec`, crates.io `cowrie-rs`, Go module
+`github.com/Neumenon/cowrie/go`.
 
 ## License
 

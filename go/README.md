@@ -1,11 +1,24 @@
 # Cowrie — Go
 
-Binary "JSON++" codec (Cowrie v2) for Go.
+Deterministic, content-addressable, AI-native binary codec for Go. Cowrie v1.
+
+Equal value => equal canonical bytes => equal hash — byte-identical across
+Python, Go, Rust, and TypeScript. Magic `COWR`, version 1. Content address is a
+multihash SHA-256 (see `docs/SPEC-v1.md`). Version `0.9.0` (pre-1.0 release
+candidate; the wire format is not yet frozen).
 
 ## Installation
 
+Nothing is published yet — install from the `phase0-spec` branch (git-native):
+
 ```bash
-go get github.com/Neumenon/cowrie/go
+go get github.com/Neumenon/cowrie/go@phase0-spec
+```
+
+After publish:
+
+```bash
+go get github.com/Neumenon/cowrie/go@v0.9.0
 ```
 
 ## Quick Start
@@ -19,6 +32,9 @@ v := cowrie.Object(
     cowrie.Member{Key: "score", Value: cowrie.Float64(0.95)},
 )
 data, err := cowrie.Encode(v)
+
+// Content address (multihash SHA-256 over the canonical bytes)
+addr := cowrie.AddressOfBytes(data)
 
 // Decode
 decoded, err := cowrie.Decode(data)

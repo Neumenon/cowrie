@@ -5,17 +5,17 @@
 > every conformance fixture, from **this document alone** — never by reading any existing implementation.
 > Any ambiguity here is a spec bug to fix, not a thing to resolve by copying code.
 >
-> This supersedes the legacy two-format (Gen1/Gen2) `SPEC.md`. Order: **(0) decisions → (1) value model →
+> This supersedes the legacy two-format `SPEC.md`. Order: **(0) decisions → (1) value model →
 > (2) wire encoding → (3) canonical profile → (4) fingerprint grammar → (5) conformance → (6) profiles.**
 > The Python reference `tools/cowrie_ref/` implements the full Core from this document alone and generates
 > the golden vectors (`testdata/v1_golden.json`); it is the conformance oracle. Remaining: conform Go/Rust/TS
 > to the golden vectors (in progress), then the cross-language gate goes green.
 
 ## 0. Greenfield decisions (settled)
-- **One format.** No Gen1, no proto-tensors, no "v3 inline" label, no Gen1/Gen2 reserved-tag split.
-  It is just "Cowrie v1."
+- **One format.** No legacy two-format split, no proto-tensors, no "v3 inline" label, no
+  legacy reserved-tag split. It is just "Cowrie v1."
 - **Magic + version.** Stream begins with `COWR` (`0x43 0x4F 0x57 0x52`) + 1 version byte `0x01`.
-  (Replaces the legacy `SJ`/`0x534A` magic, which collided with FIXINT values.)
+  (Replaces the legacy `0x534A` magic, which collided with FIXINT values.)
 - **Compression is a single header byte**, not bit-flags: `0x00` none · `0x01` gzip · `0x02` zstd ·
   `0x03–0xFF` reserved (reject). Compression is transport only; **identity is over uncompressed bytes.**
 - **Deprecated/unknown core tags → reject** (`ERR_RESERVED_TAG`). Forward compatibility is **only**

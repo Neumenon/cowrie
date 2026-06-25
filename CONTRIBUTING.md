@@ -6,7 +6,7 @@ Thanks for helping improve Cowrie. This repository contains four maintained impl
 
 - Keep wire-format behavior deterministic and cross-language compatible.
 - Do not trust README claims when changing behavior; update fixtures/specs/tests together.
-- Gen2 reserved tags `0x30-0x32` and `0x39` must be skipped by decoders and not emitted by encoders.
+- Deprecated/unknown core tags (e.g. the reserved `0x30–0x39` range) must be rejected with `ERR_RESERVED_TAG`; forward compatibility is only via the Extension envelope (SPEC-v1 §0, §1.3).
 - NaN/Inf are allowed in Cowrie binary encoding and rejected by the JSON bridge.
 
 ## Before opening a PR
@@ -20,8 +20,8 @@ cd go && go vet ./... && go test ./...
 # Rust
 cd rust && cargo clippy --all-targets -- -D warnings && cargo test
 
-# Python
-cd python && pip install -e ".[dev]" && mypy cowrie/ --ignore-missing-imports && pytest tests/
+# Python (reference; lives in tools/)
+cd tools && pip install -e ".[dev]" && mypy cowrie_ref/ --ignore-missing-imports && pytest cowrie_ref/tests/
 
 # TypeScript
 cd typescript && npm ci && npm run build && npm test
