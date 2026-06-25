@@ -5,13 +5,13 @@ Binary "JSON++" codec (Cowrie v2) for Go.
 ## Installation
 
 ```bash
-go get github.com/Neumenon/cowrie/go/v2
+go get github.com/Neumenon/cowrie/go
 ```
 
 ## Quick Start
 
 ```go
-import cowrie "github.com/Neumenon/cowrie/go/v2"
+import cowrie "github.com/Neumenon/cowrie/go"
 
 // Build a value and encode
 v := cowrie.Object(

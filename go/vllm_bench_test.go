@@ -9,7 +9,7 @@ import (
 	"math/rand"
 	"testing"
 
-	cowrie "github.com/Neumenon/cowrie/go/v2"
+	cowrie "github.com/Neumenon/cowrie/go"
 )
 
 func randFloat32Bytes(dims int, rng *rand.Rand) []byte {

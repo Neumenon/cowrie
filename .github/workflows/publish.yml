@@ -10,13 +10,13 @@ name: publish
 #            (https://pypi.org/manage/project/cowrie-ref/settings/publishing/) — no token needed.
 #   - npm  : secret NPM_TOKEN (automation token) with publish rights to `cowrie-codec`.
 #   - crates.io : secret CARGO_REGISTRY_TOKEN with publish rights to `cowrie-rs`.
-#   - Go   : NO registry — the Go module (github.com/Neumenon/cowrie/go/v2) is "published" by the
-#            `go/vX.Y.Z` tag; push that tag alongside `vX.Y.Z` (see the go-tag job's notes).
+#   - Go   : NO registry — the Go module (github.com/Neumenon/cowrie/go) is "published" by the
+#            `go/vX.Y.Z` subdir tag; push that tag alongside `vX.Y.Z` (see the go-tag job's notes).
 #
 # VERSION NOTE: the tag drives everything. `version-check` fails the run unless rust/Cargo.toml,
 # typescript/package.json, and tools/pyproject.toml ALL already declare the tagged version — align the
-# manifests and commit BEFORE tagging. (Lineage caveat: manifests are still at 2.1.2 / 0.1.0 and the Go
-# module path is /v2; pick the v1 version line deliberately before the first real tag.)
+# manifests and commit BEFORE tagging. (The manifests are currently aligned at 0.9.0; the Go module
+# path dropped its legacy /v2 suffix so Go can carry v0.x/v1.x like the others.)
 
 on:
   push:
@@ -135,11 +135,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with: { fetch-depth: 0 }
-      - name: Require go/vX.Y.Z tag (Go module path is .../go/v2)
+      - name: Require go/vX.Y.Z tag (Go module is the .../go subdir)
         run: |
           VER="${GITHUB_REF_NAME#v}"
           if git rev-parse "go/v${VER}" >/dev/null 2>&1; then
-            echo "go/v${VER} present — `go get github.com/Neumenon/cowrie/go/v2@go/v${VER}` will resolve."
+            echo "go/v${VER} present — go get github.com/Neumenon/cowrie/go@go/v${VER} will resolve."
           else
             echo "NOTE: push the Go module tag too:  git tag go/v${VER} && git push origin go/v${VER}"
             echo "(Go modules are 'published' by their VCS tag, not a registry.)"

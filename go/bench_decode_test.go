@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	cowrie "github.com/Neumenon/cowrie/go/v2"
+	cowrie "github.com/Neumenon/cowrie/go"
 )
 
 var (

@@ -63,7 +63,7 @@ output suitable for content-addressable storage, dedup, and cross-service cachin
 
 ```bash
 # Go
-go get github.com/Neumenon/cowrie/go/v2@latest
+go get github.com/Neumenon/cowrie/go@latest
 
 # Python
 pip install cowrie-py
@@ -85,8 +85,8 @@ cargo add cowrie-rs
 
 ```go
 import (
-    cowrie "github.com/Neumenon/cowrie/go/v2"
-    "github.com/Neumenon/cowrie/go/v2/gen1"
+    cowrie "github.com/Neumenon/cowrie/go"
+    "github.com/Neumenon/cowrie/go/gen1"
 )
 
 // Gen1
@@ -302,8 +302,8 @@ for {
 ```go
 // Go - Master stream with metadata
 import (
-    cowrie "github.com/Neumenon/cowrie/go/v2"
-    "github.com/Neumenon/cowrie/go/v2/codec"
+    cowrie "github.com/Neumenon/cowrie/go"
+    "github.com/Neumenon/cowrie/go/codec"
 )
 
 mw := codec.NewMasterWriter(writer, codec.DefaultMasterWriterOptions())

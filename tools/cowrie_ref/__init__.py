@@ -28,7 +28,7 @@ __all__ = [
     # §7 file container + dataset/stream identity
     "encode_file", "decode_file", "file_identity", "merkle_root", "dataset_root",
 ]
-__version__ = "0.1.0"
+__version__ = "0.9.0"
 
 
 def __getattr__(name: str):  # PEP 562 lazy re-export of the §7 helpers (breaks the import cycle)

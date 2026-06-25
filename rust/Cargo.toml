@@ -3,7 +3,7 @@ members = ["."]
 
 [package]
 name = "cowrie-rs"
-version = "2.1.2"
+version = "0.9.0"
 edition = "2021"
 description = "Cowrie v1 — deterministic, content-addressable, AI-native binary codec (zero-copy tensors, multihash content addresses, Merkle file identity)"
 license = "MIT"

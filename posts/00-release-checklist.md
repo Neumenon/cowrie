@@ -7,9 +7,9 @@
 | npm | `cowrie-codec` | 2.1.2 | `typescript/package.json` |
 | PyPI | `cowrie-py` | 2.1.2 | `python/pyproject.toml` |
 | crates.io | `cowrie-rs` | 2.1.2 | `rust/Cargo.toml` |
-| Go | `github.com/Neumenon/cowrie/go/v2` | `v2.1.2` (tagged as `go/v2.1.2`) | `go/go.mod` |
+| Go | `github.com/Neumenon/cowrie/go` | `v2.1.2` (tagged as `go/v2.1.2`) | `go/go.mod` |
 
-Go is released under two tags pushed together: the canonical `v<version>` tag (e.g. `v2.1.2`) and the subdir-module tag `go/v<version>` (e.g. `go/v2.1.2`) that the Go module proxy resolves for `github.com/Neumenon/cowrie/go/v2`.
+Go is released under two tags pushed together: the canonical `v<version>` tag (e.g. `v2.1.2`) and the subdir-module tag `go/v<version>` (e.g. `go/v2.1.2`) that the Go module proxy resolves for `github.com/Neumenon/cowrie/go`.
 
 ---
 
@@ -84,7 +84,7 @@ pip install cowrie-py==<version> && COWRIE_REQUIRE_NATIVE=1 python -c "from cowr
 cargo add cowrie-rs@<version>
 
 # Go
-go get github.com/Neumenon/cowrie/go/v2@v<version>
+go get github.com/Neumenon/cowrie/go@v<version>
 ```
 
 ---

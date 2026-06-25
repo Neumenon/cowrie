@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Neumenon/cowrie/go/v2"
+	"github.com/Neumenon/cowrie/go"
 )
 
 func main() {
