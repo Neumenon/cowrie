@@ -7,14 +7,9 @@ import (
 	"testing"
 
 	cowrie "github.com/Neumenon/cowrie/go/v2"
-	"github.com/Neumenon/cowrie/go/v2/gen1"
 )
 
 var (
-	smallGen1  []byte
-	mediumGen1 []byte
-	largeGen1  []byte
-	floatsGen1 []byte
 	smallGen2  []byte
 	mediumGen2 []byte
 	largeGen2  []byte
@@ -27,10 +22,6 @@ var (
 
 func init() {
 	dir := filepath.Join("..", "benchmarks", "fixtures")
-	smallGen1, _ = os.ReadFile(filepath.Join(dir, "small.gen1"))
-	mediumGen1, _ = os.ReadFile(filepath.Join(dir, "medium.gen1"))
-	largeGen1, _ = os.ReadFile(filepath.Join(dir, "large.gen1"))
-	floatsGen1, _ = os.ReadFile(filepath.Join(dir, "floats.gen1"))
 	smallGen2, _ = os.ReadFile(filepath.Join(dir, "small.gen2"))
 	mediumGen2, _ = os.ReadFile(filepath.Join(dir, "medium.gen2"))
 	largeGen2, _ = os.ReadFile(filepath.Join(dir, "large.gen2"))
@@ -39,39 +30,6 @@ func init() {
 	mediumJSON, _ = os.ReadFile(filepath.Join(dir, "medium.json"))
 	largeJSON, _ = os.ReadFile(filepath.Join(dir, "large.json"))
 	floatsJSON, _ = os.ReadFile(filepath.Join(dir, "floats.json"))
-}
-
-// Gen1 Decode
-func BenchmarkDecodeGen1Small(b *testing.B) {
-	b.SetBytes(int64(len(smallGen1)))
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		gen1.Decode(smallGen1)
-	}
-}
-
-func BenchmarkDecodeGen1Medium(b *testing.B) {
-	b.SetBytes(int64(len(mediumGen1)))
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		gen1.Decode(mediumGen1)
-	}
-}
-
-func BenchmarkDecodeGen1Large(b *testing.B) {
-	b.SetBytes(int64(len(largeGen1)))
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		gen1.Decode(largeGen1)
-	}
-}
-
-func BenchmarkDecodeGen1Floats(b *testing.B) {
-	b.SetBytes(int64(len(floatsGen1)))
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		gen1.Decode(floatsGen1)
-	}
 }
 
 // Gen2 Decode

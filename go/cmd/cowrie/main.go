@@ -2,8 +2,8 @@
 //
 // Usage:
 //
-//	cowrie encode [--gen1|--gen2] [--compress=none|gzip|zstd] < input.json > output.cowrie
-//	cowrie decode [--gen1|--gen2] < input.cowrie > output.json
+//	cowrie encode [--gen2] [--compress=none|gzip|zstd] < input.json > output.cowrie
+//	cowrie decode [--gen2] < input.cowrie > output.json
 //	cowrie info < input.cowrie
 //
 // Examples:
@@ -24,7 +24,6 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Neumenon/cowrie/go/v2/gen1"
 	cowrie "github.com/Neumenon/cowrie/go/v2"
 )
 
@@ -65,8 +63,8 @@ func printUsage() {
 	fmt.Println(`cowrie - Binary JSON codec CLI
 
 Usage:
-  cowrie encode [--gen1|--gen2] [--compress=none|gzip|zstd] < input.json > output.cowrie
-  cowrie decode [--gen1|--gen2] < input.cowrie > output.json
+  cowrie encode [--gen2] [--compress=none|gzip|zstd] < input.json > output.cowrie
+  cowrie decode [--gen2] < input.cowrie > output.json
   cowrie info < input.cowrie
 
 Commands:
@@ -75,7 +73,6 @@ Commands:
   info      Display information about an Cowrie file
 
 Flags:
-  --gen1        Use Gen1 codec (lightweight, stdlib only)
   --gen2        Use Gen2 codec (full Cowrie v2 with ML extensions) [default]
   --compress    Compression: none, gzip, zstd (Gen2 only) [default: none]
   --pretty      Pretty-print JSON output (decode only)
@@ -88,7 +85,6 @@ Examples:
 
 func encodeCmd(args []string) {
 	fs := flag.NewFlagSet("encode", flag.ExitOnError)
-	useGen1 := fs.Bool("gen1", false, "Use Gen1 codec")
 	useGen2 := fs.Bool("gen2", false, "Use Gen2 codec (default)")
 	compress := fs.String("compress", "none", "Compression: none, gzip, zstd")
 	fs.Parse(args)
@@ -102,43 +98,29 @@ func encodeCmd(args []string) {
 
 	var output []byte
 
-	if *useGen1 {
-		// Gen1 encoding
-		var data any
-		if err := json.Unmarshal(input, &data); err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
-			os.Exit(1)
-		}
-		output, err = gen1.Encode(data)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
-			os.Exit(1)
-		}
-	} else {
-		// Gen2 encoding (default)
-		_ = useGen2 // Silence unused warning
-		val, err := cowrie.FromJSON(input)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
-			os.Exit(1)
-		}
+	// Gen2 encoding (the only v1 codec; --gen2 is accepted for compatibility)
+	_ = useGen2 // Silence unused warning
+	val, err := cowrie.FromJSON(input)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error parsing JSON: %v\n", err)
+		os.Exit(1)
+	}
 
-		// Apply compression if requested
-		switch *compress {
-		case "none":
-			output, err = cowrie.Encode(val)
-		case "gzip":
-			output, err = cowrie.EncodeFramed(val, cowrie.CompressionGzip)
-		case "zstd":
-			output, err = cowrie.EncodeFramed(val, cowrie.CompressionZstd)
-		default:
-			fmt.Fprintf(os.Stderr, "Unknown compression: %s\n", *compress)
-			os.Exit(1)
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
-			os.Exit(1)
-		}
+	// Apply compression if requested
+	switch *compress {
+	case "none":
+		output, err = cowrie.Encode(val)
+	case "gzip":
+		output, err = cowrie.EncodeFramed(val, cowrie.CompressionGzip)
+	case "zstd":
+		output, err = cowrie.EncodeFramed(val, cowrie.CompressionZstd)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown compression: %s\n", *compress)
+		os.Exit(1)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error encoding: %v\n", err)
+		os.Exit(1)
 	}
 
 	os.Stdout.Write(output)
@@ -146,7 +128,6 @@ func encodeCmd(args []string) {
 
 func decodeCmd(args []string) {
 	fs := flag.NewFlagSet("decode", flag.ExitOnError)
-	useGen1 := fs.Bool("gen1", false, "Use Gen1 codec")
 	useGen2 := fs.Bool("gen2", false, "Use Gen2 codec (default)")
 	pretty := fs.Bool("pretty", false, "Pretty-print JSON output")
 	fs.Parse(args)
@@ -160,42 +141,24 @@ func decodeCmd(args []string) {
 
 	var output []byte
 
-	if *useGen1 {
-		// Gen1 decoding
-		data, err := gen1.Decode(input)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
-			os.Exit(1)
-		}
-		if *pretty {
-			output, err = json.MarshalIndent(data, "", "  ")
-		} else {
-			output, err = json.Marshal(data)
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error marshaling JSON: %v\n", err)
-			os.Exit(1)
-		}
+	// Gen2 decoding (the only v1 codec; --gen2 is accepted for compatibility)
+	_ = useGen2 // Silence unused warning
+
+	// Try framed decode first (handles compression)
+	val, err := cowrie.DecodeFramed(input)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *pretty {
+		output, err = cowrie.ToJSONIndent(val, "  ")
 	} else {
-		// Gen2 decoding (default)
-		_ = useGen2 // Silence unused warning
-
-		// Try framed decode first (handles compression)
-		val, err := cowrie.DecodeFramed(input)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error decoding: %v\n", err)
-			os.Exit(1)
-		}
-
-		if *pretty {
-			output, err = cowrie.ToJSONIndent(val, "  ")
-		} else {
-			output, err = cowrie.ToJSON(val)
-		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error converting to JSON: %v\n", err)
-			os.Exit(1)
-		}
+		output, err = cowrie.ToJSON(val)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error converting to JSON: %v\n", err)
+		os.Exit(1)
 	}
 
 	os.Stdout.Write(output)
@@ -450,16 +413,6 @@ func infoCmd(args []string) {
 			fmt.Printf("Root type: %s\n", val.Type())
 			fmt.Printf("Schema fingerprint: 0x%016x\n", cowrie.SchemaFingerprint64(val))
 			fmt.Printf("Schema descriptor: %s\n", cowrie.SchemaDescriptor(val))
-		}
-	} else if input[0] == 0x00 || input[0] <= 0x15 {
-		// Likely Gen1 format (starts with type tag)
-		fmt.Println("Format: Cowrie Gen1 (likely)")
-		fmt.Printf("Size: %d bytes\n", len(input))
-
-		// Try to decode
-		data, err := gen1.Decode(input)
-		if err == nil {
-			fmt.Printf("Root type: %T\n", data)
 		}
 	} else {
 		fmt.Println("Format: Unknown")

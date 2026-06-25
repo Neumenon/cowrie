@@ -19,12 +19,26 @@ from .errors import CowrieError
 from .fingerprint import fingerprint
 from .model import Bitmask, Decimal128, Datetime, Extension, Tensor, Uuid
 
+# §7 file / dataset identity — part of the public v1 surface (re-exported lazily below to avoid an
+# import cycle: ``file`` and ``profiles`` import ``encode`` from this package at module load).
 __all__ = [
     "encode", "encode_value", "decode", "fingerprint", "CowrieError", "roundtrip_ok", "value_eq",
     "content_address", "address_of_bytes", "tensor_spans",
     "Bitmask", "Decimal128", "Datetime", "Extension", "Tensor", "Uuid",
+    # §7 file container + dataset/stream identity
+    "encode_file", "decode_file", "file_identity", "merkle_root", "dataset_root",
 ]
 __version__ = "0.1.0"
+
+
+def __getattr__(name: str):  # PEP 562 lazy re-export of the §7 helpers (breaks the import cycle)
+    if name in ("encode_file", "decode_file", "file_identity", "merkle_root"):
+        from . import file as _file
+        return getattr(_file, name)
+    if name == "dataset_root":
+        from . import profiles as _profiles
+        return _profiles.dataset_root
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def value_eq(a: object, b: object) -> bool:

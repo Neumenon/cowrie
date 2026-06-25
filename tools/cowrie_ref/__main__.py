@@ -1,7 +1,14 @@
 """CLI:
 
-    python -m cowrie_ref gen          # (re)generate testdata/v1_golden.json and self-check
-    python -m cowrie_ref fp '<json>'  # canonical hex + fingerprint of a JSON value
+    python -m cowrie_ref recode [FLAGS] < wire   # the v1 (COWR) recode CLI — a PEER to Go/Rust/TS
+    python -m cowrie_ref gen                      # (re)generate testdata/v1_golden.json and self-check
+    python -m cowrie_ref fp '<json>'              # canonical hex + fingerprint of a JSON value
+
+``recode`` reads wire/file bytes on stdin and supports the EXACT same contracts the other
+languages' ``recode`` CLIs use (bare, ``--strict``, ``--addr``, ``--file-id``, ``--file-recode``,
+``--tensor-spans``, ``--fingerprint``, ``--dataset-root``); see :mod:`cowrie_ref.recode`.
+
+Installed as the ``cowrie`` console script (``pip install -e tools``), so ``cowrie recode`` works.
 """
 from __future__ import annotations
 
@@ -92,7 +99,14 @@ def _fp(arg: str) -> int:
     return 0
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Entry point. Accepts an explicit ``argv`` (INCLUDING the program name at ``argv[0]``, e.g.
+    ``sys.argv``) or, when called as a console script with no args, reads ``sys.argv`` itself."""
+    if argv is None:
+        argv = sys.argv
+    if len(argv) >= 2 and argv[1] == "recode":
+        from .recode import main as _recode_main
+        return _recode_main(argv[2:])
     if len(argv) >= 2 and argv[1] == "gen":
         return _gen()
     if len(argv) >= 3 and argv[1] == "fp":

@@ -16,6 +16,9 @@ dependencies = []
 test = ["pytest>=8"]
 
 [project.scripts]
+# 'cowrie' is the v1 CLI peer to the Go/Rust/TS 'recode' tools: `cowrie recode [FLAGS] < wire`.
+cowrie = "cowrie_ref.__main__:main"
+# kept as an explicit alias for the reference package's own name.
 cowrie-ref = "cowrie_ref.__main__:main"
 
 [tool.hatch.build.targets.wheel]
