@@ -37,7 +37,7 @@
     "@types/node": "^25.0.9",
     "c8": "^11.0.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.3"
   },
   "dependencies": {},
   "homepage": "https://github.com/Neumenon/cowrie#readme",
