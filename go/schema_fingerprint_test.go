@@ -51,24 +51,25 @@ func TestSchemaFingerprint_NestedMapOrderStable(t *testing.T) {
 	}
 }
 
-// TestSchemaFingerprint_ArrayOrderMatters verifies array order affects fingerprint.
-func TestSchemaFingerprint_ArrayOrderMatters(t *testing.T) {
-	// Arrays with same elements in different order should have different fingerprints
-	// (or same if we're only fingerprinting schema/types)
+// TestSchemaFingerprint_ArrayPolicy pins the documented array policy:
+// element order of same-typed elements does not change the fingerprint
+// (schema is types, not values), but array LENGTH does. Callers who need
+// length-independent fingerprints must use Tensor (dtype+rank only).
+// Changing either assertion is a cross-language breaking change.
+func TestSchemaFingerprint_ArrayPolicy(t *testing.T) {
 	a1 := []any{int64(1), int64(2), int64(3)}
 	a2 := []any{int64(3), int64(2), int64(1)}
 
-	v1 := mustValueFromAny(a1)
-	v2 := mustValueFromAny(a2)
+	fp1 := SchemaFingerprint32(mustValueFromAny(a1))
+	fp2 := SchemaFingerprint32(mustValueFromAny(a2))
 
-	fp1 := SchemaFingerprint32(v1)
-	fp2 := SchemaFingerprint32(v2)
-
-	// Schema fingerprint only cares about types, not values
-	// So these should be the same (both are arrays of int64)
 	if fp1 != fp2 {
-		t.Logf("Note: Array order produces different fingerprints: %#x vs %#x", fp1, fp2)
-		// This is acceptable behavior - document which policy you choose
+		t.Errorf("same-typed arrays reordered must fingerprint identically: %#x vs %#x", fp1, fp2)
+	}
+
+	fp3 := SchemaFingerprint32(mustValueFromAny([]any{int64(1), int64(2)}))
+	if fp1 == fp3 {
+		t.Errorf("arrays of different length must fingerprint differently (documented policy): both %#x", fp1)
 	}
 }
 

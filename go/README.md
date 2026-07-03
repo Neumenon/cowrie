@@ -140,7 +140,9 @@ data := make([]byte, 384*4) // raw little-endian float32 bytes
 v := cowrie.Tensor(cowrie.DTypeFloat32, []uint64{384}, data)
 buf, _ := cowrie.Encode(v)
 
-// Decode and get a zero-copy []float32 view
+// Decode and view as []float32. Decode copies the tensor bytes out of the
+// input buffer once; ViewFloat32 is then a zero-copy view of that copy.
+// For allocation-free decode of large tensors, use the TensorSink interface.
 decoded, _ := cowrie.Decode(buf)
 td := decoded.Tensor()
 floats, ok := td.ViewFloat32() // zero-copy slice into td.Data

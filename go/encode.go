@@ -753,15 +753,11 @@ func sortedMapKeys(m map[string]any) []string {
 }
 
 // sortMembers sorts members by key in lexicographic order.
+// The decoder accepts objects up to DefaultMaxObjectLen (1M) fields, so this
+// must not be quadratic — deterministic encoding is pitched for hashing/caching
+// where large objects are plausible.
 func sortMembers(members []Member) {
-	// Simple insertion sort - efficient for small arrays (typical JSON)
-	for i := 1; i < len(members); i++ {
-		key := members[i]
-		j := i - 1
-		for j >= 0 && members[j].Key > key.Key {
-			members[j+1] = members[j]
-			j--
-		}
-		members[j+1] = key
-	}
+	sort.SliceStable(members, func(i, j int) bool {
+		return members[i].Key < members[j].Key
+	})
 }
