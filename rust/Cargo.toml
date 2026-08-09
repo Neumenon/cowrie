@@ -21,7 +21,7 @@ zstd = { version = "0.13", optional = true }
 
 # JSON bridge
 serde_json = "1.0"
-base64 = "0.22"
+base64 = "0.23"
 
 # Content addressing (SPEC-v1 §3): multihash SHA-256 of canonical wire bytes
 sha2 = "0.10"
