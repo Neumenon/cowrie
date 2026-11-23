@@ -4,6 +4,10 @@
 
 Cowrie is a **16 KB-aligned, content-addressed, trust-tagged binary container** for local AI runtimes. Zero external Rust crate dependencies; compiles offline in `< 3 s`.
 
+- **Measured Gains, Use Cases & Integration Playbook:** [`docs/GAINS-AND-USES.md`](docs/GAINS-AND-USES.md)
+- **Frozen Wire & Container Specification:** [`SPEC.md`](SPEC.md)
+- **Legacy v0 Codec Archive:** [`Neumenon/cowrie-legacy`](https://github.com/Neumenon/cowrie-legacy)
+
 ## Architecture (Four Planes)
 - **Plane A (`canonical.rs`):** Bijective canonical binary frames (`COWR`) with UTF-8 byte-sorted key dictionaries, minimal ints/varints, canonical `+0.0`/qNaN, hard `MAX_DEPTH = 64`, byte-bounded allocations, out-of-band `authority`/`epistemic` header bytes, and 34-byte SHA-256 multihash CIDs.
 - **Plane B (`lens.rs`):** Pure-function progressive attention views — `Alpha32 R0` handles, `R1` structural atlas, and adaptive `R2` (`len >= 3`, density `>= 0.70`, `<T:dtype[shape]@space>` tensor handles, CID-bound trust fences).
