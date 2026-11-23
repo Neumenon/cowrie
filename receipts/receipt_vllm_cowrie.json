@@ -1,0 +1,27 @@
+{
+  "suite": "vllm_0_15_live_cowrie_integration",
+  "vllm_version": "0.15.0",
+  "qwen35_native_in_vllm_0_15": false,
+  "qwen35_compat_note": "vLLM 0.15.0 supports Qwen3ForCausalLM (tested live here with real 248K Qwen3.5 tokenizer), not yet Qwen3_5ForConditionalGeneration.",
+  "r2_vs_json_live": {
+    "json_prompt_tokens": 3176,
+    "r2_prompt_tokens": 961,
+    "token_reduction_pct": 69.74,
+    "json_latency_ms": 26.85,
+    "r2_latency_ms": 23.7,
+    "speedup_x": 1.13
+  },
+  "canonical_prefix_cache_vllm_v1": {
+    "key_shuffle_cid_identical": true,
+    "prompt_tokens": 5091,
+    "cold_prefill_ms": 30.16,
+    "prefix_hit_ms": 26.31,
+    "prefix_speedup_x": 1.15
+  },
+  "causal_trust_membrane": {
+    "hop2_laundered_tainted": true,
+    "tainted_shell_exec_blocked": true,
+    "clean_parallel_shell_exec_allowed": true
+  },
+  "verdict": "PASS"
+}

@@ -1,0 +1,11 @@
+{
+  "llama_server": {
+    "engine": "prism_llama_server_q4_kv",
+    "model": "/home/omen/.local/share/models/Qwen3.5-9B-Q4_K_M.gguf",
+    "r2_lens_answer": "COWRIE-LLAMA-Q4-OK",
+    "prompt_tokens": 159,
+    "hop1_taint_blocked": true,
+    "statepage_sp_receipt": "/home/omen/cowrie/receipts/receipt_shani_kvquant.json",
+    "verdict": "PASS"
+  }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "cowrie-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "cowrie — human inspection, verification, and lens projection CLI for Cowrie shards."
+
+[[bin]]
+name = "cowrie"
+path = "src/main.rs"
+
+[dependencies]
+cowrie-core = { path = "../cowrie-core" }

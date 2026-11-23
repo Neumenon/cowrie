@@ -1,0 +1,33 @@
+{
+  "eureka": {
+    "engine": "eureka_engine_gpu_and_llb_serve",
+    "model": "/home/omen/.local/share/models/Qwen3.5-9B-Q4_K_M.gguf",
+    "kv_type": "q8_0",
+    "agent_memory_and_trust": {
+      "store_triage_lens_ok": true,
+      "direct_0x04_blocked_403": true,
+      "hop2_laundered_0x80_blocked_403": true,
+      "clean_parallel_allowed_200": true,
+      "chat_tainted_tools_blocked_403": true,
+      "chat_clean_r2_injected_answer": "COWRIE-EUREKA-9000",
+      "chat_clean_header_tainted": "false"
+    },
+    "persistent_statepage_across_process_restart": {
+      "prompt_tokens": 2800,
+      "statepage_file_bytes": 100302910,
+      "hash_mode": 1,
+      "process1_cold_prefill_e2e_ms": 1541.6,
+      "process2_cold_nvme_restore_e2e_ms": 308.45,
+      "e2e_speedup_x": 5.0,
+      "process1_needle2_ans": "7.07 ms",
+      "process2_needle3_ans": "0x80",
+      "restore_log": "engine: cowrie: restored K=2688 (100.28 MB, kv=2) in 96.30 ms from /home/omen/cowrie/receipts/_nvme_eureka_states/f83dcedc568c296e_k2688.state.cowrie (SHA-NI verified)",
+      "controls": {
+        "model_mismatch_08b_blocked": true,
+        "kv_quant_mismatch_f16_blocked": true,
+        "bitflip_shani_merkle_blocked": true
+      }
+    },
+    "verdict": "PASS"
+  }
+}

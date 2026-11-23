@@ -1,0 +1,14 @@
+{
+  "suite": "cowrie_shani_parallel_merkle_and_split_precision_kv",
+  "model": "/home/omen/.local/share/models/Qwen3.5-9B-Q4_K_M.gguf",
+  "ctx_tokens": 13800,
+  "x86_shani_enabled": true,
+  "hash_mode": "parallel_4mib_rfc6962_merkle_shani",
+  "modes": [
+    {"mode": "FP16_KV_exact_SSM", "state_bytes": 505166156, "size_reduction_vs_fp16_x": 1.00, "cold_prefill_ms": 3366.37, "atomic_save_ms": 904.40, "cold_nvme_verified_ms": 177.66, "cold_verified_speedup_x": 18.95, "warm_verified_ms": 70.90, "warm_mmap_trusted_ms": 73.95, "warm_trusted_speedup_x": 45.52, "mean_kl_vs_fp16": 0.000e+00, "max_logit_diff_vs_fp16": 0.000e+00, "exact_tok_match": "33/33", "needles_ok": 5},
+    {"mode": "Q8_0_KV_exact_SSM", "state_bytes": 293198156, "size_reduction_vs_fp16_x": 1.72, "cold_prefill_ms": 3400.95, "atomic_save_ms": 491.31, "cold_nvme_verified_ms": 103.93, "cold_verified_speedup_x": 32.72, "warm_verified_ms": 42.26, "warm_mmap_trusted_ms": 43.40, "warm_trusted_speedup_x": 78.36, "mean_kl_vs_fp16": 4.538e-04, "max_logit_diff_vs_fp16": 1.483e+00, "exact_tok_match": "33/33", "needles_ok": 5},
+    {"mode": "Q4_0_KV_exact_SSM", "state_bytes": 180148556, "size_reduction_vs_fp16_x": 2.80, "cold_prefill_ms": 3391.47, "atomic_save_ms": 353.02, "cold_nvme_verified_ms": 68.22, "cold_verified_speedup_x": 49.71, "warm_verified_ms": 27.24, "warm_mmap_trusted_ms": 27.52, "warm_trusted_speedup_x": 123.22, "mean_kl_vs_fp16": 3.993e-04, "max_logit_diff_vs_fp16": 1.456e+00, "exact_tok_match": "33/33", "needles_ok": 5}
+  ],
+  "controls": {"model_mismatch_blocked": true, "kv_quant_mismatch_blocked": true, "bitflip_parallel_merkle_blocked": true},
+  "verdict": "PASS"
+}

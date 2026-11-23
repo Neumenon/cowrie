@@ -1,0 +1,13 @@
+[package]
+name = "cowrie-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cowrie: 16 KB-aligned, content-addressed, trust-tagged binary format for local AI runtimes."
+
+[lib]
+name = "cowrie_core"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[dependencies]
+# Zero external dependencies: compiles offline in <2s with minimal supply-chain surface.
