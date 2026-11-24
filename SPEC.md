@@ -1,6 +1,6 @@
 # Cowrie Wire & AI Container Specification (v1.2.0)
 
-**Status:** Frozen v1.2 (`2026-11-23`) — 100% Plane A `COWR v1` golden-CID compatible; adds 16 KB Zone-Map shards (`CWZM`), crash-safe hash-chained `.cwwal` + `LiveIvfStore`, symmetric 4-runtime KV/StatePage + WAL + `Ed25519` parity (`vLLM` `CowrieKVConnectorV1`, `llama.cpp`, `Eureka LLM`, `Eureka Creative v7`), pure-Rust RFC 8032 `Ed25519` owner-declassification tokens (`COWRIE_DECLASSIFY_V1`), transparent stdio JSON-RPC `cowrie mcp-proxy`, and zero-import `wasm32-unknown-unknown` (`80.4 KiB` gzipped) on top of all `v1.1` hardening.  
+**Status:** Frozen v1.2 (`2026-11-23`) — 100% Plane A `COWR v1` golden-CID compatible; adds 16 KB Zone-Map shards (`CWZM`), crash-safe hash-chained `.cwwal` + `LiveIvfStore`, symmetric 4-runtime KV/StatePage + WAL + `Ed25519` parity (`vLLM` `CowrieKVConnectorV1`, `llama.cpp`, `Eureka LLM`, `Eureka Creative v7`), pure-Rust RFC 8032 `Ed25519` owner-declassification tokens (`COWRIE_DECLASSIFY_V1`), transparent stdio JSON-RPC `cowrie mcp-proxy`, zero-import `wasm32-unknown-unknown` (`80.7 KiB` gzipped), and `26/26` machine-checked `Bend 2.0.35 --verdict` formal invariants (`formal/PROOF.bend`) on top of all `v1.1` hardening.  
 **Lineage:** Successor to legacy `Neumenon/cowrie-legacy` canonical codec, re-architected for tri-consumer AI runtimes.  
 **Scope:** Bijective canonical binary frames (`Plane A`), deterministic progressive attention lenses (`Plane B`), 16 KB-aligned zero-copy tensor / `StatePage` / co-located IVF arenas (`Plane C`), and out-of-band authority + causal taint + `Ed25519` declassification + 16 KB Zone-Maps + RFC 6962 Merkle seals (`Plane D`).
 
@@ -78,7 +78,7 @@ Fixed 8-byte canonical frame header carrying out-of-band trust and epistemic byt
 [48..56)  footer_off   = uint64 LE
 [56..64)  reserved     = 0           // must be 0
 ```
-- All alignment padding bytes between `Plane A` and `Plane C`, and between consecutive `Plane C` regions, MUST be `0x00` (`ERR_NON_ZERO_PAD`).
+- All alignment padding bytes between `Plane A` and `Plane C`, and between consecutive `Plane C` regions, MUST be `0x00` (`ERR_NON_ZERO_PAD`), and `FrameEntry` / `TensorEntry` slices MUST partition `[64 .. 64 + plane_a_len)` and `[plane_c_off .. plane_c_off + plane_c_len)` contiguously with zero unhashed slack bytes (`F3`).
 
 ### 3.2 Plane D — Dual-Tree Merkle Footer & Seek-From-End Trailer
 At `footer_off`:
@@ -93,7 +93,7 @@ At `footer_off`:
 Stores live recurrent SSM + attention KV state at `offset % 16384 == 0`, paired with a `276`-byte `CWSP` descriptor inside Page 0 (`[64..340)`):
 - `model_sha` (64 lowercase hex chars via `cowrie_model_fingerprint`: full-file SHA-NI for `<= 16 MiB`; `file_size + 64 × 64 KiB` strided windows for `> 16 MiB`)
 - `doc_cid` (eternal `CoreHash` or block-aligned prefix digest, 64 lowercase hex chars)
-- `runtime_id` (`[288..304)`, up to 16 ASCII bytes: `"llama.cpp"`, `"eureka-llm"`, `"eureka-creative"`, `"vllm-v1"`) + `layout_ver: u16` (`[304..306)`)
+- `runtime_id` (`[288..304)`, up to 16 ASCII bytes: `"llama.cpp"`, `"eureka-llm"`, `"eureka-creative"`, `"vllm-v1"`; when a caller specifies a non-empty `expected_runtime_id`, an empty or mismatched file `runtime_id` MUST fail closed with `ERR_RUNTIME_MISMATCH`, `F7`) + `layout_ver: u16` (`[304..306)`)
 - `ctx_tokens`, `kv_quant` (`0 = FP16/BF16`, `1 = Q4_0`, `2 = Q8_0/FP8`, `3 = F32`), `ssm_dtype` (`0 = FP16`, `1 = BF16`, `2 = FP32`)
 - `hash_mode` (`0 = flat SHA-256`, `1 = parallel 4 MiB chunked RFC 6962 Merkle SHA-256` over bounded `WorkerPool`, accelerated by x86_64 `SHA-NI` and ARMv8 `SHA2`)
 - Optional **RFC 2104 HMAC-SHA256** tag (`[308..340)`, `hmac_flag = 1` at `page0[75]` when `COWRIE_HMAC_KEY` is configured)
@@ -107,14 +107,15 @@ Stores live recurrent SSM + attention KV state at `offset % 16384 == 0`, paired 
 
 ### 3.5 Plane D Profile C — 16 KB Page-Targeted Scalar Zone-Map Shards (`CWZM`, `v1.2`)
 Packs sorted canonical `COWR` frames into self-verifying `16,384`-byte leaf pages (`[count: u16, res: u16, slots[count] * 20B, frames...]`) and appends a `16 KB`-aligned Plane D Zone-Map directory of **64-byte cache-line entries**:
-- `(min_key: i64, max_key: i64, min_sec: i64, max_sec: i64, leaf_sha256: [u8; 32])` (`64 B` per 16 KB leaf page)
-- Header commits to the RFC 6962 Merkle root over all `leaf_sha256` digests (`hdr[48..82)`).
-- Point and narrow-range queries prune non-overlapping pages in L1 cache and `pread` (`read_exact_at`) **only** matching 16 KB pages, verifying each touched page's `leaf_sha256` via hardware SHA-NI and filtering `(auth & (0x04 | 0x80)) != 0` in `O(1)`.
+- `(min_key: i64, max_key: i64, min_sec: i64, max_sec: i64, leaf_sha256: [u8; 32])` (`64 B` per 16 KB leaf page), enforcing monotonic primary-key fences (`z[p].min_key <= z[p].max_key` and `z[p].max_key <= z[p+1].min_key`, `F2`).
+- Header commits to the RFC 6962 Merkle root over full 64-byte Zone-Map entries (`SHA-256(0x00 || zm_entry_64B)`, `hdr[48..82)`), authenticating both fence bounds and leaf digests (`F2`).
+- Point and narrow-range queries prune non-overlapping pages in L1 cache (with exact monotonic early-break `L23`) and `pread` (`read_exact_at`) **only** matching 16 KB pages, verifying each touched page's `leaf_sha256` via hardware SHA-NI and filtering `(auth & (0x04 | 0x80)) != 0` in `O(1)`.
 
 ### 3.6 Crash-Safe Hash-Chained Framed WAL (`CWAL` / `.cwwal`, `v1.2`)
 Append-only `0600` mutation and audit log beginning with a 32-byte `"CWAL"` v1 genesis header followed by `"CWLR"` records:
 - `[0..4) "CWLR" || [4] kind (0=Frame, 1=Tombstone, 2=IvfVec) || [5..8) 0 || [8..16) seq: u64 LE || [16..20) len: u32 LE || [20..52) prev_sha256 || payload || record_sha256`
-- `open(..., recover_torn_tail = true)` truncates incomplete power-loss tail writes cleanly while rejecting any mid-log tampering or sequence gap (`ERR_ROOT_MISMATCH` / `ERR_CORRUPT_TRAILER`).
+- `open(..., recover_torn_tail = true)` truncates incomplete power-loss tail writes cleanly while rejecting any mid-log tampering, unknown `kind > 2`, or sequence gap (`ERR_ROOT_MISMATCH` / `ERR_CORRUPT_TRAILER` / `ERR_INVALID_CONTRACT`, `L14`).
+- Live-frame replay (`live_frames`) is strictly sequential: `Tombstone(cid)` revokes prior `Frame(cid)` records without touching bystander frames, while a subsequent `Frame(cid)` at a higher `seq` makes `cid` live again (`L24` / `F5`).
 
 ---
 
@@ -123,7 +124,7 @@ Append-only `0600` mutation and audit log beginning with a 32-byte `"CWAL"` v1 g
 Lenses are pure functions of `Plane A` (zero model calls):
 - **`R0` (Alpha32 Handle):** `@<10-char Alpha32 ID>` (lowercase ASCII letters `a-z`, $26^{10} \approx 2^{47}$ space, birthday bound `~12M` records, zero `\p{N}` digit fragmentation) + coarse size bucket + trust tag + title/topic.
 - **`R1` (Structural Atlas):** Schema, authority, field types/lengths, array counts, typed tensor Coordinate Contracts (`<T:dtype[shape]@space>`).
-- **`R2` (Adaptive Attention Lens):** Hoists uniform object tables when `len >= 3` and key density `>= 0.70`, renders `TAG_TENSOR_REF (0x0A)` as `<T:dtype[shape]@space>`, and wraps output in CID-bound fences with automatic interior `<<<` / `>>>` escaping.
+- **`R2` (Adaptive Attention Lens):** Hoists uniform object tables when `len >= 3` and key density `>= 0.70`, renders `TAG_TENSOR_REF (0x0A)` as `<T:dtype[shape]@space>`, and wraps output in CID-bound fences with 3-state Mealy transducer `<<<` / `>>>` escaping across scalar values, map keys, hoisted table column headers, and `<T:...>` boundaries (`L07`, `L08`, `L20`, `L21`; `F1`, `F4`, `F8`).
 
 ---
 

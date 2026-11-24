@@ -5,7 +5,7 @@ Production adapters connecting the single zero-dependency Rust core (`libcowrie_
 ## Symmetric `v1.2.0` Feature Matrix Across All Runtimes
 Every runtime adapter below implements the same five core `v1.2` capabilities over `libcowrie_core`:
 1. **Longest-Prefix `0600` HMAC `StatePages` (`CWSP`):** Cross-restart KV / hybrid SSM+KV offloading bound to 64-stride `cowrie_model_fingerprint`, `runtime_id`, `kv_quant`, `ssm_dtype`, parallel 4 MiB `SHA-NI`/`ARMv8 SHA2` Merkle leaves, and optional `HMAC-SHA256` (`COWRIE_HMAC_KEY`).
-2. **Crash-Safe `.cwwal` Audit & Memory Persistence:** Every stored frame and tool audit event appends to an `0600` SHA-256 hash-chained `.cwwal` write-ahead log (`cowrie_wal_open` / `cowrie_wal_append_frame`) with automatic torn-tail recovery.
+2. **Crash-Safe `.cwwal` Audit & Memory Persistence:** Every stored frame, tombstone revocation, and tool audit event appends to an `0600` SHA-256 hash-chained `.cwwal` write-ahead log (`cowrie_wal_open` / `cowrie_wal_append_frame` / `cowrie_wal_append_tombstone`) with automatic torn-tail recovery and sequential re-insertion replay.
 3. **10-Letter 47-Bit `Alpha32` Handles & Breakout-Escaped `R0–R2` Lenses:** Zero `\p{N}` digit splitting, `~12M` birthday bound, fail-closed collision detection, and automatic `<\<<` / `>\>>` fence escaping.
 4. **Sticky Causal Taint (`BIT_TAINTED = 0x80`) & Scoped RFC 8032 `Ed25519` Declassification:** Whole-context lineage tracking that blocks direct `0x04` and multi-hop `0x80` tool calls unless accompanied by a valid, non-expired `COWRIE_DECLASSIFY_V1` `Ed25519` signature bound to `(target_cid_34, action_u8, expiry_u64)`.
 5. **16 KB `CWZM` Zone-Map & `CWIV` Co-Located Vector Access:** Direct C-ABI access to `0.51 ms` cold NVMe point/range shards and `AVX2`/`NEON` INT8 vector search.
@@ -33,5 +33,5 @@ Every runtime adapter below implements the same five core `v1.2` capabilities ov
 - **`CowrieMemoryStore` + `CowrieVllmRuntime`:** Whole-context causal `0x80` lineage, `.cwwal` WAL persistence, `R0/R2` lenses (`−69.7%` prompt tokens), and `Ed25519` `declassify_tokens` tool gating.
 
 ## 5. WebAssembly SDK (`wasm/cowrie.mjs` + `cowrie_core.wasm`)
-- Build via `make wasm` -> `/tmp/cowrie-cargo-target/wasm32-unknown-unknown/release/cowrie_core.wasm` (`193,456 B` raw / `82,331 B` gzipped, zero external imports).
-- Verified in both **Node.js v22** and **Headless Chrome 135 (`WebAssembly.instantiate`)**: `0.59 ms` instantiation, `1.74 µs` zero-alloc canonical verification + CID, `R0/R1/R2` lenses, 16 KB `CWRF` dual-tree `0x04` Merkle verification, `CWSP` in-RAM StatePage verification, and RFC 8032 `Ed25519` signing/verification.
+- Build via `make wasm` -> `/tmp/cowrie-cargo-target/wasm32-unknown-unknown/release/cowrie_core.wasm` (`193,278 B` raw / `82,668 B` (`80.7 KiB`) gzipped, zero external imports).
+- Verified in both **Node.js v22** and **Headless Chrome 135 (`WebAssembly.instantiate`)**: `0.57 ms` instantiation, `1.72 µs` zero-alloc canonical verification + CID, `R0/R1/R2` lenses, 16 KB `CWRF` dual-tree `0x04` Merkle verification, `CWSP` in-RAM StatePage verification, and RFC 8032 `Ed25519` signing/verification, plus `2,000` lockstep differential vectors against compiled `formal/CowrieKernel.bend`.
