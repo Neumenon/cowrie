@@ -1,7 +1,7 @@
 //! Plane A: Bijective Canonical Core (`COWR`) encoder, strict hardened decoder,
-//! and minimal JSON <-> Value converter.
+//! zero-allocation wire verifier, native `TAG_TENSOR_REF (0x0A)`, and lossless JSON <-> Value converter.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use crate::CowrieError;
 
 pub const MAGIC_FRAME: &[u8; 4] = b"COWR";
@@ -18,8 +18,79 @@ pub const TAG_BYTES: u8 = 0x06;
 pub const TAG_ARRAY: u8 = 0x07;
 pub const TAG_MAP: u8 = 0x08;
 pub const TAG_UINT: u8 = 0x09;
+pub const TAG_TENSOR_REF: u8 = 0x0A;
+
+pub const DTYPE_F32: u8 = 0;
+pub const DTYPE_F16: u8 = 1;
+pub const DTYPE_BF16: u8 = 2;
+pub const DTYPE_I8: u8 = 3;
+pub const DTYPE_U8: u8 = 4;
+pub const DTYPE_Q4_0: u8 = 5;
+pub const DTYPE_Q8_0: u8 = 6;
+pub const DTYPE_I32: u8 = 7;
+pub const DTYPE_F64: u8 = 8;
 
 pub const CANON_QNAN_BITS: u64 = 0x7FF8_0000_0000_0000;
+
+#[inline]
+pub fn dtype_to_str(dtype: u8) -> Option<&'static str> {
+    match dtype {
+        DTYPE_F32 => Some("f32"),
+        DTYPE_F16 => Some("f16"),
+        DTYPE_BF16 => Some("bf16"),
+        DTYPE_I8 => Some("i8"),
+        DTYPE_U8 => Some("u8"),
+        DTYPE_Q4_0 => Some("q4_0"),
+        DTYPE_Q8_0 => Some("q8_0"),
+        DTYPE_I32 => Some("i32"),
+        DTYPE_F64 => Some("f64"),
+        _ => None,
+    }
+}
+
+#[inline]
+pub fn dtype_from_str(s: &str) -> Option<u8> {
+    match s {
+        "f32" | "float32" => Some(DTYPE_F32),
+        "f16" | "fp16" | "float16" => Some(DTYPE_F16),
+        "bf16" | "bfloat16" => Some(DTYPE_BF16),
+        "i8" | "int8" => Some(DTYPE_I8),
+        "u8" | "uint8" => Some(DTYPE_U8),
+        "q4_0" => Some(DTYPE_Q4_0),
+        "q8_0" => Some(DTYPE_Q8_0),
+        "i32" | "int32" => Some(DTYPE_I32),
+        "f64" | "float64" => Some(DTYPE_F64),
+        _ => None,
+    }
+}
+
+/// Compute minimum required Plane C byte footprint for a typed tensor shape, rejecting arithmetic overflow.
+pub fn checked_tensor_min_bytes(dtype: u8, dims: &[u64]) -> Result<u64, CowrieError> {
+    if dims.len() > 8 || dtype_to_str(dtype).is_none() {
+        return Err(CowrieError::InvalidContract);
+    }
+    let mut elems: u64 = 1;
+    for &d in dims {
+        elems = elems.checked_mul(d).ok_or(CowrieError::AllocLimit)?;
+    }
+    match dtype {
+        DTYPE_F32 | DTYPE_I32 => elems.checked_mul(4).ok_or(CowrieError::AllocLimit),
+        DTYPE_F16 | DTYPE_BF16 => elems.checked_mul(2).ok_or(CowrieError::AllocLimit),
+        DTYPE_I8 | DTYPE_U8 => Ok(elems),
+        DTYPE_F64 => elems.checked_mul(8).ok_or(CowrieError::AllocLimit),
+        DTYPE_Q4_0 => {
+            // 32 values per 18-byte block (2B fp16 scale + 16B nibbles)
+            let blocks = elems.checked_add(31).ok_or(CowrieError::AllocLimit)? / 32;
+            blocks.checked_mul(18).ok_or(CowrieError::AllocLimit)
+        }
+        DTYPE_Q8_0 => {
+            // 32 values per 34-byte block (2B fp16 scale + 32B int8)
+            let blocks = elems.checked_add(31).ok_or(CowrieError::AllocLimit)? / 32;
+            blocks.checked_mul(34).ok_or(CowrieError::AllocLimit)
+        }
+        _ => Err(CowrieError::InvalidContract),
+    }
+}
 
 /// Canonical logical value tree for Plane A frames.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +105,13 @@ pub enum Value {
     Bytes(Vec<u8>),
     Array(Vec<Value>),
     Map(Vec<(String, Value)>),
+    /// Native typed Plane C Coordinate Contract (`TAG_TENSOR_REF = 0x0A`).
+    TensorRef {
+        arena_idx: u32,
+        dtype: u8,
+        dims: Vec<u64>,
+        space: String,
+    },
 }
 
 impl Value {
@@ -116,6 +194,58 @@ pub fn decode_uvarint_strict(buf: &[u8], pos: &mut usize) -> Result<u64, CowrieE
             return Ok(val);
         }
         shift += 7;
+    }
+}
+
+/// Stack-inline bitset for `<= 256` dictionary keys (zero heap allocation on 99.9% of frames).
+enum KeyBitset {
+    Inline([u64; 4], usize),
+    Heap(Vec<u64>, usize),
+}
+
+impl KeyBitset {
+    #[inline]
+    fn new(nkeys: usize) -> Self {
+        if nkeys <= 256 {
+            Self::Inline([0u64; 4], nkeys)
+        } else {
+            Self::Heap(vec![0u64; (nkeys + 63) / 64], nkeys)
+        }
+    }
+
+    #[inline]
+    fn mark(&mut self, idx: usize) {
+        let word = idx >> 6;
+        let bit = 1u64 << (idx & 63);
+        match self {
+            Self::Inline(arr, _) => arr[word] |= bit,
+            Self::Heap(vec, _) => vec[word] |= bit,
+        }
+    }
+
+    #[inline]
+    fn all_used(&self) -> bool {
+        let (words, nkeys): (&[u64], usize) = match self {
+            Self::Inline(arr, n) => (&arr[..(*n + 63) / 64], *n),
+            Self::Heap(vec, n) => (vec.as_slice(), *n),
+        };
+        if nkeys == 0 {
+            return true;
+        }
+        let full = nkeys / 64;
+        for &w in &words[..full] {
+            if w != u64::MAX {
+                return false;
+            }
+        }
+        let rem = nkeys & 63;
+        if rem > 0 {
+            let mask = (1u64 << rem) - 1;
+            if words[full] != mask {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -230,6 +360,21 @@ pub fn encode_frame(val: &Value, authority: u8, epistemic: u8) -> Result<Vec<u8>
                     enc(v, km, out, depth + 1)?;
                 }
             }
+            Value::TensorRef { arena_idx, dtype, dims, space } => {
+                if space.is_empty() || space.len() > 256 {
+                    return Err(CowrieError::InvalidContract);
+                }
+                let _ = checked_tensor_min_bytes(*dtype, dims)?;
+                out.push(TAG_TENSOR_REF);
+                encode_uvarint(*arena_idx as u64, out);
+                out.push(*dtype);
+                out.push(dims.len() as u8);
+                for &d in dims {
+                    encode_uvarint(d, out);
+                }
+                encode_uvarint(space.len() as u64, out);
+                out.extend_from_slice(space.as_bytes());
+            }
         }
         Ok(())
     }
@@ -246,8 +391,209 @@ pub struct DecodedFrame {
     pub epistemic: u8,
 }
 
+/// Zero-allocation strict wire verifier: enforces every single canonical `COWR` invariant
+/// (`magic`, `ver`, `flags`, minimal varints, UTF-8 byte-sorted dictionary, zero unused keys,
+/// minimal ints/floats, `TAG_TENSOR_REF` Coordinate Contracts, `MAX_DEPTH = 64`, no trailing bytes)
+/// without allocating a single `Value`, `String`, `Vec<&str>`, or `HashSet` on the heap!
+pub fn verify_frame_zero_alloc(buf: &[u8]) -> Result<(u8, u8), CowrieError> {
+    if buf.len() < 8 {
+        return Err(CowrieError::Truncated);
+    }
+    if &buf[0..4] != MAGIC_FRAME {
+        return Err(CowrieError::BadMagic);
+    }
+    if buf[4] != VERSION {
+        return Err(CowrieError::UnsupportedVer);
+    }
+    let authority = buf[5];
+    let epistemic = buf[6];
+    if buf[7] != 0 {
+        return Err(CowrieError::NonCanonicalFlags);
+    }
+
+    let mut pos = 8usize;
+    let nkeys_u64 = decode_uvarint_strict(buf, &mut pos)?;
+    if nkeys_u64 > (buf.len() - pos) as u64 {
+        return Err(CowrieError::AllocLimit);
+    }
+    let nkeys = nkeys_u64 as usize;
+
+    let mut prev: Option<&[u8]> = None;
+    for _ in 0..nkeys {
+        let klen_u64 = decode_uvarint_strict(buf, &mut pos)?;
+        if klen_u64 > (buf.len() - pos) as u64 {
+            return Err(CowrieError::Truncated);
+        }
+        let klen = klen_u64 as usize;
+        let kb = &buf[pos..pos + klen];
+        pos += klen;
+        if let Some(p) = prev {
+            if kb == p {
+                return Err(CowrieError::DuplicateKey);
+            }
+            if kb < p {
+                return Err(CowrieError::UnsortedDict);
+            }
+        }
+        prev = Some(kb);
+        std::str::from_utf8(kb).map_err(|_| CowrieError::InvalidUtf8)?;
+    }
+
+    let mut used = KeyBitset::new(nkeys);
+
+    fn ver(
+        buf: &[u8],
+        pos: &mut usize,
+        nkeys: usize,
+        used: &mut KeyBitset,
+        depth: usize,
+    ) -> Result<(), CowrieError> {
+        if depth > MAX_DEPTH {
+            return Err(CowrieError::MaxDepth);
+        }
+        if *pos >= buf.len() {
+            return Err(CowrieError::Truncated);
+        }
+        let tag = buf[*pos];
+        *pos += 1;
+
+        if (0x40..=0xBF).contains(&tag) {
+            return Ok(());
+        }
+
+        match tag {
+            TAG_NULL | TAG_FALSE | TAG_TRUE => Ok(()),
+            TAG_INT => {
+                let u = decode_uvarint_strict(buf, pos)?;
+                let v = ((u >> 1) as i64) ^ (-((u & 1) as i64));
+                if (0..=127).contains(&v) {
+                    return Err(CowrieError::NonCanonicalInt);
+                }
+                Ok(())
+            }
+            TAG_UINT => {
+                let u = decode_uvarint_strict(buf, pos)?;
+                if u <= i64::MAX as u64 {
+                    return Err(CowrieError::NonCanonicalUint);
+                }
+                Ok(())
+            }
+            TAG_FLOAT64 => {
+                if *pos + 8 > buf.len() {
+                    return Err(CowrieError::Truncated);
+                }
+                let bits = u64::from_le_bytes(buf[*pos..*pos + 8].try_into().unwrap());
+                *pos += 8;
+                if bits == 0x8000_0000_0000_0000 {
+                    return Err(CowrieError::NonCanonicalFloat);
+                }
+                if (bits & 0x7FF0_0000_0000_0000) == 0x7FF0_0000_0000_0000
+                    && (bits & 0x000F_FFFF_FFFF_FFFF) != 0
+                    && bits != CANON_QNAN_BITS
+                {
+                    return Err(CowrieError::NonCanonicalFloat);
+                }
+                Ok(())
+            }
+            TAG_STR => {
+                let n64 = decode_uvarint_strict(buf, pos)?;
+                if n64 > (buf.len() - *pos) as u64 {
+                    return Err(CowrieError::Truncated);
+                }
+                let n = n64 as usize;
+                std::str::from_utf8(&buf[*pos..*pos + n]).map_err(|_| CowrieError::InvalidUtf8)?;
+                *pos += n;
+                Ok(())
+            }
+            TAG_BYTES => {
+                let n64 = decode_uvarint_strict(buf, pos)?;
+                if n64 > (buf.len() - *pos) as u64 {
+                    return Err(CowrieError::Truncated);
+                }
+                *pos += n64 as usize;
+                Ok(())
+            }
+            TAG_ARRAY => {
+                let n64 = decode_uvarint_strict(buf, pos)?;
+                if n64 > (buf.len() - *pos) as u64 {
+                    return Err(CowrieError::AllocLimit);
+                }
+                for _ in 0..(n64 as usize) {
+                    ver(buf, pos, nkeys, used, depth + 1)?;
+                }
+                Ok(())
+            }
+            TAG_MAP => {
+                let n64 = decode_uvarint_strict(buf, pos)?;
+                if n64.saturating_mul(2) > (buf.len() - *pos) as u64 {
+                    return Err(CowrieError::AllocLimit);
+                }
+                let mut prev_idx: isize = -1;
+                for _ in 0..(n64 as usize) {
+                    let ki_u64 = decode_uvarint_strict(buf, pos)?;
+                    if ki_u64 >= nkeys as u64 {
+                        return Err(CowrieError::BadDictIndex);
+                    }
+                    let ki = ki_u64 as usize;
+                    if ki as isize == prev_idx {
+                        return Err(CowrieError::DuplicateKey);
+                    }
+                    if (ki as isize) < prev_idx {
+                        return Err(CowrieError::UnsortedMapKeys);
+                    }
+                    prev_idx = ki as isize;
+                    used.mark(ki);
+                    ver(buf, pos, nkeys, used, depth + 1)?;
+                }
+                Ok(())
+            }
+            TAG_TENSOR_REF => {
+                let arena_u64 = decode_uvarint_strict(buf, pos)?;
+                if arena_u64 > u32::MAX as u64 {
+                    return Err(CowrieError::InvalidContract);
+                }
+                if *pos + 2 > buf.len() {
+                    return Err(CowrieError::Truncated);
+                }
+                let dtype = buf[*pos];
+                let ndim = buf[*pos + 1] as usize;
+                *pos += 2;
+                if ndim > 8 {
+                    return Err(CowrieError::AllocLimit);
+                }
+                let mut dims_stack = [0u64; 8];
+                for slot in dims_stack.iter_mut().take(ndim) {
+                    *slot = decode_uvarint_strict(buf, pos)?;
+                }
+                let _ = checked_tensor_min_bytes(dtype, &dims_stack[..ndim])?;
+                let slen_u64 = decode_uvarint_strict(buf, pos)?;
+                if slen_u64 > (buf.len() - *pos) as u64 {
+                    return Err(CowrieError::Truncated);
+                }
+                if slen_u64 == 0 || slen_u64 > 256 {
+                    return Err(CowrieError::InvalidContract);
+                }
+                let slen = slen_u64 as usize;
+                std::str::from_utf8(&buf[*pos..*pos + slen]).map_err(|_| CowrieError::InvalidUtf8)?;
+                *pos += slen;
+                Ok(())
+            }
+            _ => Err(CowrieError::ReservedTag),
+        }
+    }
+
+    ver(buf, &mut pos, nkeys, &mut used, 0)?;
+    if pos != buf.len() {
+        return Err(CowrieError::TrailingBytes);
+    }
+    if !used.all_used() {
+        return Err(CowrieError::UnusedDictKey);
+    }
+    Ok((authority, epistemic))
+}
+
 /// Strict hardened decoder: enforces `MAX_DEPTH = 64`, byte-bounded allocations,
-/// minimal varints, UTF-8 byte-sorted dict, zero unused keys, and zero trailing bytes.
+/// minimal varints, UTF-8 byte-sorted dict, stack-inline bitset for unused keys, and zero trailing bytes.
 pub fn decode_frame_strict(buf: &[u8]) -> Result<DecodedFrame, CowrieError> {
     if buf.len() < 8 {
         return Err(CowrieError::Truncated);
@@ -293,13 +639,13 @@ pub fn decode_frame_strict(buf: &[u8]) -> Result<DecodedFrame, CowrieError> {
         keys.push(std::str::from_utf8(kb).map_err(|_| CowrieError::InvalidUtf8)?);
     }
 
-    let mut used: HashSet<usize> = HashSet::with_capacity(keys.len().min(4096));
+    let mut used = KeyBitset::new(keys.len());
 
     fn dec(
         buf: &[u8],
         pos: &mut usize,
         keys: &[&str],
-        used: &mut HashSet<usize>,
+        used: &mut KeyBitset,
         depth: usize,
     ) -> Result<Value, CowrieError> {
         if depth > MAX_DEPTH {
@@ -393,10 +739,11 @@ pub fn decode_frame_strict(buf: &[u8]) -> Result<DecodedFrame, CowrieError> {
                 let mut v = Vec::with_capacity(n.min(4096));
                 let mut prev_idx: isize = -1;
                 for _ in 0..n {
-                    let ki = decode_uvarint_strict(buf, pos)? as usize;
-                    if ki >= keys.len() {
+                    let ki_u64 = decode_uvarint_strict(buf, pos)?;
+                    if ki_u64 >= keys.len() as u64 {
                         return Err(CowrieError::BadDictIndex);
                     }
+                    let ki = ki_u64 as usize;
                     if ki as isize == prev_idx {
                         return Err(CowrieError::DuplicateKey);
                     }
@@ -404,11 +751,49 @@ pub fn decode_frame_strict(buf: &[u8]) -> Result<DecodedFrame, CowrieError> {
                         return Err(CowrieError::UnsortedMapKeys);
                     }
                     prev_idx = ki as isize;
-                    used.insert(ki);
+                    used.mark(ki);
                     let val = dec(buf, pos, keys, used, depth + 1)?;
                     v.push((keys[ki].to_string(), val));
                 }
                 Ok(Value::Map(v))
+            }
+            TAG_TENSOR_REF => {
+                let arena_u64 = decode_uvarint_strict(buf, pos)?;
+                if arena_u64 > u32::MAX as u64 {
+                    return Err(CowrieError::InvalidContract);
+                }
+                if *pos + 2 > buf.len() {
+                    return Err(CowrieError::Truncated);
+                }
+                let dtype = buf[*pos];
+                let ndim = buf[*pos + 1] as usize;
+                *pos += 2;
+                if ndim > 8 {
+                    return Err(CowrieError::AllocLimit);
+                }
+                let mut dims = Vec::with_capacity(ndim);
+                for _ in 0..ndim {
+                    dims.push(decode_uvarint_strict(buf, pos)?);
+                }
+                let _ = checked_tensor_min_bytes(dtype, &dims)?;
+                let slen_u64 = decode_uvarint_strict(buf, pos)?;
+                if slen_u64 > (buf.len() - *pos) as u64 {
+                    return Err(CowrieError::Truncated);
+                }
+                if slen_u64 == 0 || slen_u64 > 256 {
+                    return Err(CowrieError::InvalidContract);
+                }
+                let slen = slen_u64 as usize;
+                let space = std::str::from_utf8(&buf[*pos..*pos + slen])
+                    .map_err(|_| CowrieError::InvalidUtf8)?
+                    .to_string();
+                *pos += slen;
+                Ok(Value::TensorRef {
+                    arena_idx: arena_u64 as u32,
+                    dtype,
+                    dims,
+                    space,
+                })
             }
             _ => Err(CowrieError::ReservedTag),
         }
@@ -418,13 +803,182 @@ pub fn decode_frame_strict(buf: &[u8]) -> Result<DecodedFrame, CowrieError> {
     if pos != buf.len() {
         return Err(CowrieError::TrailingBytes);
     }
-    if used.len() != keys.len() {
+    if !used.all_used() {
         return Err(CowrieError::UnusedDictKey);
     }
     Ok(DecodedFrame { value, authority, epistemic })
 }
 
-/// Zero-dependency strict JSON parser -> canonical `Value` (for CLI `cowrie pack` & FFI).
+#[inline]
+fn validate_rfc8259_number(tok: &str) -> bool {
+    let b = tok.as_bytes();
+    let mut i = 0;
+    if i < b.len() && b[i] == b'-' {
+        i += 1;
+    }
+    if i >= b.len() {
+        return false;
+    }
+    if b[i] == b'0' {
+        i += 1;
+        if i < b.len() && b[i].is_ascii_digit() {
+            return false; // leading zero (e.g., 01, -00) forbidden by RFC 8259
+        }
+    } else if (b'1'..=b'9').contains(&b[i]) {
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+    } else {
+        return false;
+    }
+
+    if i < b.len() && b[i] == b'.' {
+        i += 1;
+        let frac_start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == frac_start {
+            return false; // trailing dot forbidden
+        }
+    }
+
+    if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
+        i += 1;
+        if i < b.len() && (b[i] == b'+' || b[i] == b'-') {
+            i += 1;
+        }
+        let exp_start = i;
+        while i < b.len() && b[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i == exp_start {
+            return false;
+        }
+    }
+    i == b.len()
+}
+
+fn decode_hex_strict(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len() / 2);
+    let mut i = 0;
+    while i < b.len() {
+        let hi = match b[i] {
+            b'0'..=b'9' => b[i] - b'0',
+            b'a'..=b'f' => b[i] - b'a' + 10,
+            b'A'..=b'F' => b[i] - b'A' + 10,
+            _ => return None,
+        };
+        let lo = match b[i + 1] {
+            b'0'..=b'9' => b[i + 1] - b'0',
+            b'a'..=b'f' => b[i + 1] - b'a' + 10,
+            b'A'..=b'F' => b[i + 1] - b'A' + 10,
+            _ => return None,
+        };
+        out.push((hi << 4) | lo);
+        i += 2;
+    }
+    Some(out)
+}
+
+fn try_promote_sentinel_map(pairs: &[(String, Value)]) -> Result<Option<Value>, CowrieError> {
+    if pairs.iter().any(|(k, _)| k == "$bytes") {
+        if pairs.len() == 1 && pairs[0].0 == "$bytes" {
+            if let Value::Str(hex) = &pairs[0].1 {
+                if let Some(raw) = decode_hex_strict(hex) {
+                    return Ok(Some(Value::Bytes(raw)));
+                }
+            }
+        }
+        return Err(CowrieError::InvalidContract);
+    }
+
+    if pairs.iter().any(|(k, _)| k == "$tensor") {
+        let mut idx_opt: Option<u32> = None;
+        let mut dtype_opt: Option<u8> = None;
+        let mut dims_opt: Option<Vec<u64>> = None;
+        let mut space_opt: Option<String> = None;
+
+        for (k, v) in pairs {
+            match k.as_str() {
+                "$tensor" => {
+                    if idx_opt.is_some() {
+                        return Err(CowrieError::DuplicateKey);
+                    }
+                    match v {
+                        Value::Int(n) if *n >= 0 && (*n as u64) <= u32::MAX as u64 => {
+                            idx_opt = Some(*n as u32)
+                        }
+                        Value::Uint(u) if *u <= u32::MAX as u64 => idx_opt = Some(*u as u32),
+                        _ => return Err(CowrieError::InvalidContract),
+                    }
+                }
+                "dtype" => {
+                    if dtype_opt.is_some() {
+                        return Err(CowrieError::DuplicateKey);
+                    }
+                    match v {
+                        Value::Str(s) => {
+                            dtype_opt = Some(dtype_from_str(s).ok_or(CowrieError::InvalidContract)?);
+                        }
+                        _ => return Err(CowrieError::InvalidContract),
+                    }
+                }
+                "shape" => {
+                    if dims_opt.is_some() {
+                        return Err(CowrieError::DuplicateKey);
+                    }
+                    match v {
+                        Value::Array(arr) if arr.len() <= 8 => {
+                            let mut ds = Vec::with_capacity(arr.len());
+                            for item in arr {
+                                match item {
+                                    Value::Int(n) if *n >= 0 => ds.push(*n as u64),
+                                    Value::Uint(u) => ds.push(*u),
+                                    _ => return Err(CowrieError::InvalidContract),
+                                }
+                            }
+                            dims_opt = Some(ds);
+                        }
+                        _ => return Err(CowrieError::InvalidContract),
+                    }
+                }
+                "space" => {
+                    if space_opt.is_some() {
+                        return Err(CowrieError::DuplicateKey);
+                    }
+                    match v {
+                        Value::Str(s) if !s.is_empty() && s.len() <= 256 => {
+                            space_opt = Some(s.clone());
+                        }
+                        _ => return Err(CowrieError::InvalidContract),
+                    }
+                }
+                _ => return Err(CowrieError::InvalidContract),
+            }
+        }
+
+        if let (Some(arena_idx), Some(dtype), Some(dims), Some(space)) =
+            (idx_opt, dtype_opt, dims_opt, space_opt)
+        {
+            let _ = checked_tensor_min_bytes(dtype, &dims)?;
+            return Ok(Some(Value::TensorRef {
+                arena_idx,
+                dtype,
+                dims,
+                space,
+            }));
+        }
+        return Err(CowrieError::InvalidContract);
+    }
+    Ok(None)
+}
+
+/// Zero-dependency strict RFC 8259 JSON parser -> canonical `Value` (for CLI `cowrie pack` & FFI).
 pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
     struct Parser<'a> {
         b: &'a [u8],
@@ -475,6 +1029,9 @@ pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
                         } else {
                             return Err(CowrieError::InvalidJson);
                         }
+                    }
+                    if let Some(promoted) = try_promote_sentinel_map(&pairs)? {
+                        return Ok(promoted);
                     }
                     Ok(Value::Map(pairs))
                 }
@@ -537,8 +1094,14 @@ pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
                     }
                     let tok = std::str::from_utf8(&self.b[s..self.i])
                         .map_err(|_| CowrieError::InvalidUtf8)?;
+                    if !validate_rfc8259_number(tok) {
+                        return Err(CowrieError::InvalidJson);
+                    }
                     if tok.contains('.') || tok.contains('e') || tok.contains('E') {
                         let f: f64 = tok.parse().map_err(|_| CowrieError::InvalidJson)?;
+                        if !f.is_finite() {
+                            return Err(CowrieError::InvalidJson);
+                        }
                         Ok(Value::from_f64(f))
                     } else if let Ok(v) = tok.parse::<i64>() {
                         Ok(Value::Int(v))
@@ -582,7 +1145,10 @@ pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
                             let cp = u32::from_str_radix(hex, 16)
                                 .map_err(|_| CowrieError::InvalidJson)?;
                             self.i += 4;
-                            if (0xD800..=0xDBFF).contains(&cp) {
+                            if (0xDC00..=0xDFFF).contains(&cp) {
+                                // Reject lone low surrogate immediately
+                                return Err(CowrieError::InvalidJson);
+                            } else if (0xD800..=0xDBFF).contains(&cp) {
                                 if self.i + 7 > self.b.len() || &self.b[self.i + 1..self.i + 3] != b"\\u" {
                                     return Err(CowrieError::InvalidJson);
                                 }
@@ -590,6 +1156,10 @@ pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
                                     .map_err(|_| CowrieError::InvalidJson)?;
                                 let cp2 = u32::from_str_radix(hex2, 16)
                                     .map_err(|_| CowrieError::InvalidJson)?;
+                                if !(0xDC00..=0xDFFF).contains(&cp2) {
+                                    // Reject high surrogate followed by non-low surrogate BEFORE subtracting 0xDC00
+                                    return Err(CowrieError::InvalidJson);
+                                }
                                 self.i += 6;
                                 let full = 0x10000 + (((cp - 0xD800) << 10) | (cp2 - 0xDC00));
                                 s.push(char::from_u32(full).ok_or(CowrieError::InvalidJson)?);
@@ -603,6 +1173,9 @@ pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
                 } else {
                     let st = self.i;
                     while self.i < self.b.len() && self.b[self.i] != b'"' && self.b[self.i] != b'\\' {
+                        if self.b[self.i] < 0x20 {
+                            return Err(CowrieError::InvalidJson);
+                        }
                         self.i += 1;
                     }
                     let chunk = std::str::from_utf8(&self.b[st..self.i])
@@ -627,7 +1200,7 @@ pub fn parse_json_to_value(input: &str) -> Result<Value, CowrieError> {
     Ok(val)
 }
 
-/// Render a canonical `Value` as deterministic minified JSON.
+/// Render a canonical `Value` as deterministic, type-lossless minified JSON.
 pub fn value_to_compact_json(v: &Value) -> String {
     fn esc(s: &str, out: &mut String) {
         out.push('"');
@@ -653,16 +1226,20 @@ pub fn value_to_compact_json(v: &Value) -> String {
             Value::FloatBits(bits) => {
                 let f = f64::from_bits(*bits);
                 if f.is_finite() {
-                    out.push_str(&format!("{}", f));
+                    let s = format!("{}", f);
+                    out.push_str(&s);
+                    if !s.contains('.') && !s.contains('e') && !s.contains('E') {
+                        out.push_str(".0");
+                    }
                 } else {
                     out.push_str("null");
                 }
             }
             Value::Str(s) => esc(s, out),
             Value::Bytes(b) => {
-                out.push_str("\"hex:");
+                out.push_str("{\"$bytes\":\"");
                 out.push_str(&crate::sha256::to_hex(b));
-                out.push('"');
+                out.push_str("\"}");
             }
             Value::Array(a) => {
                 out.push('[');
@@ -684,6 +1261,19 @@ pub fn value_to_compact_json(v: &Value) -> String {
                     out.push(':');
                     fmt(x, out);
                 }
+                out.push('}');
+            }
+            Value::TensorRef { arena_idx, dtype, dims, space } => {
+                let dt = dtype_to_str(*dtype).unwrap_or("f32");
+                out.push_str(&format!("{{\"$tensor\":{},\"dtype\":\"{}\",\"shape\":[", arena_idx, dt));
+                for (i, d) in dims.iter().enumerate() {
+                    if i > 0 {
+                        out.push(',');
+                    }
+                    out.push_str(&d.to_string());
+                }
+                out.push_str("],\"space\":");
+                esc(space, out);
                 out.push('}');
             }
         }

@@ -1,0 +1,44 @@
+{
+  "suite": "cowrie_v1_1_hardening_and_zero_alloc_bench",
+  "spec_version": "1.1.0",
+  "date": "2026-11-23",
+  "lib_bytes": 716080,
+  "method": "Native C (gcc -O3, N=200,000 loops on 184B structured+TensorRef COWR frame) + Python ctypes C-ABI (N=2,000 loops x 150 frozen golden+fuzz vectors) on Ryzen 7 7700X (SHA-NI + AVX2); 25-iter median for 64-stride SHA-NI model fingerprint on real 5.59 GiB Qwen3.5-9B-Q4_K_M.gguf",
+  "native_c_frame_verify_184b_ns": {
+    "verify_zero_alloc_no_cid_ns": 169.8,
+    "verify_zero_alloc_with_shani_cid_ns": 278.7,
+    "full_decode_to_json_ns": 1261.5,
+    "speedup_vs_full_decode_x": 7.43,
+    "speedup_vs_v1_0_404ns_decode_x": 2.38
+  },
+  "python_ctypes_150_vectors_ns": {
+    "v1_0_0_no_cid_ns": 831.2,
+    "v1_1_0_no_cid_ns": 716.9,
+    "v1_0_0_with_cid_ns": 939.1,
+    "v1_1_0_with_cid_ns": 833.6,
+    "note": "Includes ~670 ns Python ctypes call/marshaling floor"
+  },
+  "tag_tensor_ref_0x0a": {
+    "v1_0_map_sentinel_bytes": 78,
+    "v1_1_native_0x0a_bytes": 41,
+    "byte_reduction_pct": 47.4
+  },
+  "strided_model_fingerprint": {
+    "target": "Qwen3.5-9B-Q4_K_M.gguf",
+    "file_size_mib": 5594.4,
+    "strides": "64 x 64 KiB (4 MiB total) via SHA-NI",
+    "warm_median_ms": 1.855,
+    "sha256_hex": "7b336e1e3c38218ecbfcc88dcf6d46f4a9e5db1eaffabb31d3990fef5a2de79c"
+  },
+  "security_gates_verified": {
+    "rust_release_unit_tests": "8/8 PASS",
+    "conformance_golden_fuzz_cid_parity": "150/150 bit-identical",
+    "cwrf_plane_c_tensor_bitflips_blocked": "4/4 ERR_ROOT_MISMATCH",
+    "json_surrogate_and_rfc8259_traps_blocked": "6/6 ERR_INVALID_JSON",
+    "r2_fence_breakout_escaped": "PASS (single closing fence enforced)",
+    "alpha32_handle_entropy": "10 lowercase letters (~47.0 bits, birthday bound ~12M records)",
+    "statepage_hmac_runtime_ssm_mode0600": "PASS (ERR_AUTH_MAC_MISMATCH=32, ERR_RUNTIME_MISMATCH=31, ERR_SSM_DTYPE_MISMATCH=30)",
+    "ec_cowrie_c_fail_closed_suite": "6/6 PASS (unknown=403, empty=403, 40-parents=403, 8hex=403, 500-flood-no-evict=403)"
+  },
+  "verdict": "PASS"
+}

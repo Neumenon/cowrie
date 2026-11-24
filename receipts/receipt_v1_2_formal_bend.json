@@ -1,0 +1,95 @@
+{
+  "suite": "cowrie_v1_2_formal_bend_verification",
+  "date": "2026-11-23",
+  "toolchain": "Bend 2.0.35 (`--verdict` Lean-proven BendTT kernel + `.mjs` codegen)",
+  "file_hashes_sha256": {
+    "CowrieKernel.bend": "14d72bfc9fe3837abe8aa956db17272ba502d267aadb7fc994b1bfd184c5c725",
+    "LAWS.bend": "18efac5bf37b9883fd20a0a6a4a106aac89483b5c5f7d641d906fa036c49f877",
+    "PROOF.bend": "ae932265e5f42fb17448b83f5577a046eda7838ecc24d1dd6343a130570323ae"
+  },
+  "stage1_bendtt_kernel_verdict": {
+    "status": "ALL PROOFS CHECK",
+    "trials": 5,
+    "median_ms": 218.33,
+    "min_ms": 215.05
+  },
+  "stage2_bendtt_coverage_and_hygiene": {
+    "status": "PASS",
+    "laws_verified": 26,
+    "law_names": [
+      "L01_propagate_iff",
+      "L02_taint_irrevocable_hops",
+      "L03_sticky_reregister",
+      "L04_unknown_parent_fails_closed",
+      "L05_empty_args_fail_closed",
+      "L06a_wrong_action_token_rejected",
+      "L06b_partial_declass_blocks",
+      "L15_propagate_preserves_origin",
+      "L16_sticky_deep_and_clean_liveness",
+      "L17_gate_exact_iff_and_liveness",
+      "L18_expired_and_forged_sig_rejected",
+      "L19_nth_arg_taint_blocks",
+      "L25_ledger_record_exact_iff",
+      "L07_fence_no_triple",
+      "L08_fence_safe_identity",
+      "L20_fence_preserves_all_non_esc_symbols",
+      "L21_r2_structured_table_header_safe",
+      "L09_canon_roundtrip",
+      "L10_verify_iff_decode",
+      "L11_canon_wire_unique",
+      "L22_map_keys_and_dict_all_used",
+      "L12_zonemap_no_false_neg",
+      "L23_sorted_zonemap_early_break_exact",
+      "L13_merkle_domain_and_odd_safe",
+      "L14_wal_torn_vs_mid_tamper",
+      "L24_wal_tombstone_reinsert_and_statepage_rt"
+    ],
+    "kernel_defs_verified": 87,
+    "proof_defs_verified": 121,
+    "bendtt_bytes": 171349,
+    "unsafe_count": 0,
+    "hole_count": 0,
+    "template_count": 0
+  },
+  "stage3_planted_false_mutant_controls": {
+    "controls_tested": 13,
+    "controls_rejected": 13,
+    "details": {
+      "M1_empty_args_fail_open": "REJECTED (SOME PROOFS FAIL)",
+      "M2_four_bracket_fence_bypass_F1": "REJECTED (SOME PROOFS FAIL)",
+      "M3_non_canonical_int_accepted": "REJECTED (SOME PROOFS FAIL)",
+      "M4_zonemap_strict_lt_false_negative": "REJECTED (SOME PROOFS FAIL)",
+      "M5_wal_mid_tamper_silently_truncated": "REJECTED (SOME PROOFS FAIL)",
+      "M6_underspec_deny_all_gate": "REJECTED (SOME PROOFS FAIL)",
+      "M7_underspec_taint_all_ledger": "REJECTED (SOME PROOFS FAIL)",
+      "M8_underspec_head_only_ledger_lookup": "REJECTED (SOME PROOFS FAIL)",
+      "M9_underspec_wipe_string_fence_sanitizer": "REJECTED (SOME PROOFS FAIL)",
+      "M10_wrongspec_unsanitized_table_col_header_F4": "REJECTED (SOME PROOFS FAIL)",
+      "M11_wrongspec_tensor_ref_boundary_breakout_F8": "REJECTED (SOME PROOFS FAIL)",
+      "M12_wal_tombstone_wipes_bystanders_F5": "REJECTED (SOME PROOFS FAIL)",
+      "M13_statepage_empty_runtime_bypass_F7": "REJECTED (SOME PROOFS FAIL)"
+    }
+  },
+  "stage4_non_bolt_on_differential_lockstep": {
+    "compiled_bend_mjs_bytes": 66138,
+    "lockstep": {
+      "differential_lockstep": "PASS",
+      "total_vectors": 2000,
+      "plane_d_taint_and_gate_vectors": 400,
+      "plane_b_fence_and_table_vectors": 400,
+      "plane_a_wire_and_map_vectors": 600,
+      "plane_d_zonemap_wal_statepage_vectors": 600
+    },
+    "rust_c_abi_catches_verified": {
+      "F1_four_bracket_fence_breakout_fixed": true,
+      "F2_cwzm_fence_merkle_authenticated": true,
+      "F3_cwrf_contiguous_partition_enforced": true,
+      "F4_r2_table_col_header_fence_injection_fixed": true,
+      "F5_wal_zombie_tombstone_reinsert_fixed": true,
+      "F6_partial_sentinel_map_fail_closed": true,
+      "F7_statepage_empty_runtime_id_bypass_fixed": true,
+      "F8_tensor_ref_space_gt_boundary_fixed": true
+    }
+  },
+  "verdict": "PASS"
+}

@@ -1,12 +1,37 @@
-# Cowrie Runtime Adapters
+# Cowrie Runtime & WebAssembly Adapters (`v1.2.0`)
 
-Production adapters connecting the single audited Rust core (`libcowrie_core.so` / `cowrie.h`) to three local AI runtimes:
+Production adapters connecting the single zero-dependency Rust core (`libcowrie_core.so` / `cowrie.h` / `cowrie_core.wasm`) symmetrically across **four local/cloud AI runtimes**, **stdio MCP servers**, and **Browser/Node.js WebAssembly**:
 
-1. **Eureka Engine (`engine_gpu` + `llb-serve`, branch `feat/cowrie`):**
-   - `host/llb_cowrie.h`: Native persistent 16 KB-aligned SHA-NI Merkle `StatePages` over Eureka's hybrid Gated DeltaNet SSM + KV VRAM state (`LLB_COWRIE_STATE_DIR`), surviving cold process restarts with `model_sha`, `kv_quant`, and parallel 4 MiB Merkle verification.
-   - `desktop/engine/metal/src/cowrie_route.h`: Native HTTP Agent Memory + Causal Trust Membrane (`/v1/memory/store`, `/v1/memory/triage`, `/v1/memory/lens`, `/v1/trust/gate`, plus `cowrie_memory_handles` & `cowrie_trust_gate` directly inside `/v1/chat/completions`).
-2. **llama.cpp (`adapters/llama-statepage/`):**
-   - `cowrie_llama_statepage.hpp`: Header-only drop-in adapter for split-precision hybrid `StatePages` (`FP16` / `Q8_0` / `Q4_0` KV + exact recurrent SSM) with strict `ERR_MODEL_MISMATCH`, `ERR_KV_QUANT_MISMATCH`, and `ERR_STATEPAGE_HASH_MISMATCH` guards.
-   - `bench_shani_kvquant.cpp`: Verified live on `Qwen3.5-9B-Q4_K_M` (`13,800` tokens: `64.9 ms` cold NVMe verified / `25.8 ms` warm verified `Q4_0` KV, `50.7×–128.9×`, `KL = 3.99e-04`, `33/33` tokens, `5/5` needles).
-3. **vLLM (`adapters/vllm/`):**
-   - `cowrie_vllm.py`: `CowrieMemoryStore` + `CowrieVllmRuntime` wrapping `vllm.LLM` with `Alpha32 R0` triage, adaptive `R2` lenses, canonical `CoreHash` prefix keying (`enable_prefix_caching=True`), and `BIT_TAINTED` causal tool gating.
+## Symmetric `v1.2.0` Feature Matrix Across All Runtimes
+Every runtime adapter below implements the same five core `v1.2` capabilities over `libcowrie_core`:
+1. **Longest-Prefix `0600` HMAC `StatePages` (`CWSP`):** Cross-restart KV / hybrid SSM+KV offloading bound to 64-stride `cowrie_model_fingerprint`, `runtime_id`, `kv_quant`, `ssm_dtype`, parallel 4 MiB `SHA-NI`/`ARMv8 SHA2` Merkle leaves, and optional `HMAC-SHA256` (`COWRIE_HMAC_KEY`).
+2. **Crash-Safe `.cwwal` Audit & Memory Persistence:** Every stored frame and tool audit event appends to an `0600` SHA-256 hash-chained `.cwwal` write-ahead log (`cowrie_wal_open` / `cowrie_wal_append_frame`) with automatic torn-tail recovery.
+3. **10-Letter 47-Bit `Alpha32` Handles & Breakout-Escaped `R0–R2` Lenses:** Zero `\p{N}` digit splitting, `~12M` birthday bound, fail-closed collision detection, and automatic `<\<<` / `>\>>` fence escaping.
+4. **Sticky Causal Taint (`BIT_TAINTED = 0x80`) & Scoped RFC 8032 `Ed25519` Declassification:** Whole-context lineage tracking that blocks direct `0x04` and multi-hop `0x80` tool calls unless accompanied by a valid, non-expired `COWRIE_DECLASSIFY_V1` `Ed25519` signature bound to `(target_cid_34, action_u8, expiry_u64)`.
+5. **16 KB `CWZM` Zone-Map & `CWIV` Co-Located Vector Access:** Direct C-ABI access to `0.51 ms` cold NVMe point/range shards and `AVX2`/`NEON` INT8 vector search.
+
+---
+
+## 1. Eureka LLM (`adapters/eureka/llb_cowrie.h` + `cowrie_route.h`)
+- **Upstream branches:** `eureka-engine` (`feat/cowrie`, `host/llb_cowrie.h`) and `eureka-linux-parity` (`feat/cowrie`, `desktop/engine/metal/src/cowrie_route.h` + `serve.c`).
+- **`llb_cowrie.h` (`engine_gpu`):** Persistent 16 KB-aligned hybrid Gated DeltaNet SSM + KV `StatePages` (`LLB_COWRIE_STATE_DIR`, `0700` dir / `0600` files), 64-stride `cowrie_model_fingerprint`, `runtime_id="eureka-llm"`, `HMAC-SHA256`, and longest-prefix chunk restore (`5.00×` E2E cold process-kill restart on `Qwen3.5-9B`).
+- **`cowrie_route.h` (`llb-serve`):** Native HTTP Agent Memory + `.cwwal` WAL + `Ed25519` Trust Gate (`/v1/memory/store`, `/v1/memory/triage`, `/v1/memory/lens`, `/v1/trust/gate`, plus inline `cowrie_memory_handles` & `cowrie_declassify` inside `/v1/chat/completions`).
+
+## 2. Eureka Creative Engine v7 (`adapters/eureka/ec_cowrie.{h,c}`)
+- **Live path:** `/home/omen/worktrees/eureka-engine/creative/ec_cowrie.{h,c}`.
+- Cross-restart multimodal text-encoder `StatePages` (`151.7×` Wan 2.2 UMT5-XXL; `200×–2,970×` FLUX.2 Qwen3-4B) plus `ec_cowrie_sp_save_prefix` / `ec_cowrie_sp_load_longest_prefix` chunked prefix scanning.
+- Canonical `CoreHash` ComfyUI 8-node DAG cache (`1.0–9.6 ms` across kills), Studio Vault `R0–R2` lenses (`−99.8%` at `R0`), `creative_audit.cwwal` hash-chained logging, and `ec_cowrie_trust_gate_signed_json` (`Ed25519` owner declassification).
+
+## 3. llama.cpp (`adapters/llama-statepage/cowrie_llama_statepage.hpp`)
+- Header-only C++17 drop-in providing:
+  - `cowrie::statepage::save` / `restore` for split-precision hybrid `Q4_0`/`Q8_0`/`FP16` KV + exact `F32` DeltaNet SSM (`49.7×` cold NVMe / `123.2×` warm on `Qwen3.5-9B`, `KL = 3.99e-04`, plus `3.38 GB/s` cold `O_DIRECT` dual-stream CUDA DMA).
+  - `cowrie::statepage::LlamaPrefixStateCache`: Chunked longest-prefix KV/SSM offloader (`13.72×` speedup on brand-new suffix questions: `9.01 ms vs 123.63 ms` cold prefill, `100%` greedy token parity).
+  - `cowrie::statepage::LlamaCowrieMemory` (`.cwwal` + 47-bit handles + `Ed25519` `DeclassifyToken` gate) and `LlamaZonedShard` (`CWZM`).
+
+## 4. vLLM 0.15+ (`adapters/vllm/cowrie_kv_connector.py` + `cowrie_vllm.py`)
+- **`CowrieKVConnectorV1`:** Native `KVConnectorBase_V1` packing all layers' paged KV blocks into a single `0600` HMAC-authenticated `.state.cowrie` shard (`80.53 ms vs 453.88 ms` cold prefill = `5.64×` cross-process speedup on `11,755` tokens, chunked-prefill safe, `100%` greedy parity).
+- **`CowrieMemoryStore` + `CowrieVllmRuntime`:** Whole-context causal `0x80` lineage, `.cwwal` WAL persistence, `R0/R2` lenses (`−69.7%` prompt tokens), and `Ed25519` `declassify_tokens` tool gating.
+
+## 5. WebAssembly SDK (`wasm/cowrie.mjs` + `cowrie_core.wasm`)
+- Build via `make wasm` -> `/tmp/cowrie-cargo-target/wasm32-unknown-unknown/release/cowrie_core.wasm` (`193,456 B` raw / `82,331 B` gzipped, zero external imports).
+- Verified in both **Node.js v22** and **Headless Chrome 135 (`WebAssembly.instantiate`)**: `0.59 ms` instantiation, `1.74 µs` zero-alloc canonical verification + CID, `R0/R1/R2` lenses, 16 KB `CWRF` dual-tree `0x04` Merkle verification, `CWSP` in-RAM StatePage verification, and RFC 8032 `Ed25519` signing/verification.

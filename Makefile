@@ -2,16 +2,23 @@ CARGO_TARGET_DIR ?= /tmp/cowrie-cargo-target
 BUILD_DIR        ?= /tmp/cowrie-build
 LLAMA_ROOT       ?= /home/omen/prism-llama.cpp
 
-.PHONY: build test conformance adapter bench clean
+.PHONY: build wasm formal test conformance adapter bench clean
 
 build:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo build --release
+
+wasm:
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) RUSTFLAGS="-C strip=symbols" cargo build -p cowrie-core --target wasm32-unknown-unknown --release
+	node wasm/test_wasm.mjs
+
+formal: build wasm
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) COWRIE_LIB_PATH=$(CARGO_TARGET_DIR)/release/libcowrie_core.so python3 formal/verify_formal.py
 
 test:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo test --release
 
 conformance: build
-	COWRIE_LIB=$(CARGO_TARGET_DIR)/release/libcowrie_core.so python3 python/cowrie/conformance.py
+	COWRIE_LIB_PATH=$(CARGO_TARGET_DIR)/release/libcowrie_core.so python3 python/cowrie/conformance.py
 
 adapter: build
 	mkdir -p $(BUILD_DIR)

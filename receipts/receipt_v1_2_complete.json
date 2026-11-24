@@ -1,0 +1,132 @@
+{
+  "suite": "cowrie_v1_2_0_high_medium_roi_complete",
+  "date": "2026-11-23",
+  "workstation": {
+    "cpu": "AMD Ryzen 7 7700X (SHA-NI + AVX2)",
+    "gpu": "NVIDIA GeForce RTX 3090 (24 GiB, PCIe Gen4 x16, CUDA 13.1)",
+    "nvme": "/dev/nvme1n1p3 (/home/omen/.cache, btrfs on physical NVMe)",
+    "cufile_gds_probe": "libcufile.so.1.16.0 present; nvidia_fs kernel module absent & GeForce consumer BAR1 P2P disabled in driver -> optimal RTX 3090 path is 16 KB O_DIRECT + cudaHostAlloc double-buffered dual-stream cudaMemcpyAsync"
+  },
+  "core_build": {
+    "version": "1.2.0",
+    "external_rust_crates": 0,
+    "shared_lib_bytes": 817960,
+    "cli_bin_bytes": 948920,
+    "rust_release_unit_tests": "11/11 PASS",
+    "python_c_abi_conformance": "100% PASS (150 frozen COWR v1 vectors + negatives + DoS + dual Merkle + HMAC StatePage + Ed25519 + CWAL + CWZM)"
+  },
+  "item_03_cwzm_zonemap_vs_sqlite_cold_nvme": {
+    "method": "100,000 structured records (5% 0x04 UNTRUSTED_EXT, 95% 0x02 VERIFIED_TOOL) on physical NVMe (/dev/nvme1n1p3); POSIX_FADV_DONTNEED called before every cold trial (median of 7 trials); CWZM verifies per-page SHA-NI Merkle leaf + byte-0x05 taint filter; SQLite3 uses page_size=4096, INTEGER PRIMARY KEY + CREATE INDEX idx_events_ts + ANALYZE.",
+    "records": 100000,
+    "cwzm_file_bytes": 7569408,
+    "cwzm_leaf_pages_16kb": 459,
+    "sqlite_file_bytes": 8908800,
+    "cwzm_size_saving_vs_sqlite_pct": 15.03,
+    "queries": {
+      "point_1row_0.001pct": {
+        "cwzm_cold_ms": 0.514,
+        "sqlite_cold_ms": 1.031,
+        "cwzm_vs_sqlite_speedup_x": 2.01,
+        "cwzm_pages_touched": 1,
+        "cwzm_leaf_bytes_read": 16384
+      },
+      "sel_0.01pct_10rows": {
+        "cwzm_cold_ms": 0.52,
+        "sqlite_cold_ms": 0.988,
+        "cwzm_vs_sqlite_speedup_x": 1.9,
+        "cwzm_pages_touched": 1,
+        "cwzm_leaf_bytes_read": 16384
+      },
+      "sel_0.1pct_100rows": {
+        "cwzm_cold_ms": 0.526,
+        "sqlite_cold_ms": 1.002,
+        "cwzm_vs_sqlite_speedup_x": 1.9,
+        "cwzm_pages_touched": 1,
+        "cwzm_leaf_bytes_read": 16384
+      },
+      "sel_1.0pct_1000rows": {
+        "cwzm_cold_ms": 0.661,
+        "sqlite_cold_ms": 1.368,
+        "cwzm_vs_sqlite_speedup_x": 2.07,
+        "cwzm_pages_touched": 5,
+        "cwzm_leaf_bytes_read": 81920
+      },
+      "sel_5.0pct_5000rows": {
+        "cwzm_cold_ms": 1.164,
+        "sqlite_cold_ms": 1.838,
+        "cwzm_vs_sqlite_speedup_x": 1.58,
+        "cwzm_pages_touched": 24,
+        "cwzm_leaf_bytes_read": 393216
+      },
+      "sel_10.0pct_10000rows": {
+        "cwzm_cold_ms": 1.291,
+        "sqlite_cold_ms": 2.753,
+        "cwzm_vs_sqlite_speedup_x": 2.13,
+        "cwzm_pages_touched": 46,
+        "cwzm_leaf_bytes_read": 753664
+      },
+      "secondary_ts_0.1pct_100rows": {
+        "cwzm_cold_ms": 0.542,
+        "sqlite_cold_ms": 1.562,
+        "cwzm_vs_sqlite_speedup_x": 2.88,
+        "cwzm_pages_touched": 1,
+        "cwzm_leaf_bytes_read": 16384
+      }
+    }
+  },
+  "item_06_cwwal_and_live_ivf_compaction": {
+    "method": "5,000 canonical frames appended to hash-chained .cwwal on /dev/nvme1n1p3 + 50 durable fsync commits + simulated power-loss torn tail recovery + compaction to 16 KB CWRF; LiveIvfStore 50,000 base INT8x128 CWIV vectors + 500 live WAL delta vectors + AVX2 hybrid search + LSM compaction.",
+    "buffered_append_us_per_op": 4.45,
+    "nvme_fsync_append_median_ms": 1.877,
+    "torn_tail_recovery_5k_ms": 3.14,
+    "compact_5k_to_16kb_shard_ms": 4.96,
+    "live_ivf_base_vecs": 50000,
+    "live_ivf_delta_vecs": 500,
+    "live_ivf_dim": 128,
+    "live_ivf_delta_insert_500_fsync_ms": 3.199,
+    "live_ivf_hybrid_search_median_us": 87.52,
+    "live_ivf_compact_50500_to_cwiv_ms": 12.91
+  },
+  "item_02_vllm_0_15_kv_connector_v1": {
+    "method": "Two separate OS processes (--phase store then --phase restore, full VRAM teardown between processes) on vLLM 0.15.0 V1 Engine (FLASH_ATTN, 12-layer Qwen3ForCausalLM, 11,755-token Cowrie R2 prompt) under house GPU locks; .state.cowrie stored on /dev/nvme1n1p3 with COWRIE_HMAC_KEY.",
+    "vllm_version": "0.15.0",
+    "connector": "CowrieKVConnectorV1",
+    "layers": 12,
+    "prompt_tokens": 11755,
+    "pure_cold_prefill_ms": 453.88,
+    "cold_plus_nvme_save_ms": 445.46,
+    "cross_process_nvme_restore_ms": 80.53,
+    "restore_speedup_vs_cold_x": 5.64,
+    "cross_process_greedy_token_parity": true,
+    "single_shard_bytes": 144130142,
+    "hmac_sha256_verified": true,
+    "merkle_4mib_mode": 1,
+    "cli_state_inspect_verified": true
+  },
+  "item_05_and_07b_ed25519_and_mcp_wire_firewall": {
+    "method": "Pure-Rust RFC 8032 Ed25519 (verified bit-for-bit on RFC 8032 §7.1 vectors) + live `cowrie mcp-proxy` wrapping stdio JSON-RPC MCP server with .cwwal audit trail.",
+    "ed25519_sign_median_us": 810.43,
+    "ed25519_verify_strict_median_us": 808.2,
+    "clean_pre_taint_shell_allowed": true,
+    "web_fetch_auto_tainted_0x04": true,
+    "unsigned_tainted_shell_blocked_at_wire": true,
+    "wrong_action_token_replay_blocked": true,
+    "ed25519_signed_declassify_allowed": true,
+    "wire_gate_block_median_us": 13.15,
+    "audit_wal_verified_entries": 3
+  },
+  "item_01_odirect_pinned_dualstream_cuda_dma": {
+    "method": "192 MiB 16 KB-aligned StatePage payload on /dev/nvme1n1p3 (POSIX_FADV_DONTNEED before every cold trial, median of 5 trials under GPU locks): pageable pread + cudaMemcpy vs O_DIRECT + double-buffered 8 MiB cudaHostAlloc + 2 CUDA streams cudaMemcpyAsync.",
+    "payload_mib": 192,
+    "header_align_bytes": 16384,
+    "o_direct_active": true,
+    "cold_pageable_pread_memcpy_ms": 77.88,
+    "cold_pageable_gbps": 2.59,
+    "cold_odirect_pinned_dualstream_ms": 59.62,
+    "cold_odirect_pinned_gbps": 3.38,
+    "cold_speedup_x": 1.31,
+    "warm_pinned_pcie4_ms": 7.51,
+    "warm_pinned_pcie4_gbps": 26.79
+  },
+  "verdict": "PASS"
+}

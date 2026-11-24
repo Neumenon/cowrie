@@ -1,0 +1,111 @@
+{
+  "suite": "cowrie_v1_2_0_wasm32_and_four_runtime_parity",
+  "date": "2026-11-23",
+  "workstation": {
+    "cpu": "AMD Ryzen 7 7700X (SHA-NI + AVX2)",
+    "gpu": "NVIDIA GeForce RTX 3090 (24 GiB, PCIe Gen4 x16, CUDA 13.1)",
+    "nvme": "/dev/nvme1n1p3 (/home/omen/.cache, btrfs on physical NVMe)",
+    "node": "v22",
+    "browser": "Headless Chrome 135.0.7049.42 (WebAssembly.instantiate)"
+  },
+  "wasm32_unknown_unknown": {
+    "method": "`cargo build --release --target wasm32-unknown-unknown -p cowrie-core` (`CARGO_TARGET_DIR=/tmp/cowrie-cargo-target`), zero external Rust crates, zero host env imports (`WebAssembly.Module.imports(mod).length == 0`); verified in both Node.js v22 (`node wasm/test_wasm.mjs`) and Headless Chrome 135 via Playwright.",
+    "wasm_raw_bytes": 193456,
+    "wasm_raw_kib": 188.92,
+    "wasm_gzip9_bytes": 82331,
+    "wasm_gzip9_kib": 80.4,
+    "node_v22_instantiate_ms": 0.59,
+    "node_v22_verify_frame_with_cid_ns": 1739.4,
+    "frozen_cowr_v1_vectors": "150/150 PASS",
+    "negative_and_dos_vectors": "20/20 REJECTED",
+    "dual_tree_0x04_merkle_bitflips": "14/14 REJECTED",
+    "cwsp_in_ram_statepage_verify": "PASS",
+    "rfc8032_ed25519_declassify_sign_verify": "PASS",
+    "chrome_135_browser_wasm": "PASS"
+  },
+  "four_runtime_v1_2_symmetry": {
+    "shared_capabilities": [
+      "Longest-prefix 0600 HMAC StatePages (CWSP) + 64-stride cowrie_model_fingerprint",
+      "Crash-safe 0600 SHA-256 hash-chained .cwwal WAL persistence",
+      "10-letter 47-bit Alpha32 handles (@abcdefghij) + breakout-escaped R0-R2 lenses",
+      "Sticky causal taint (BIT_TAINTED = 0x80) + scoped RFC 8032 Ed25519 COWRIE_DECLASSIFY_V1 gate",
+      "16 KB CWZM Zone-Map & CWIV Co-Located Vector C-ABI access"
+    ],
+    "vllm_0_15_0": {
+      "files": [
+        "adapters/vllm/cowrie_kv_connector.py",
+        "adapters/vllm/cowrie_vllm.py"
+      ],
+      "kv_connector_cross_restart_11755_tok": {
+        "cold_prefill_ms": 453.88,
+        "restore_ms": 80.53,
+        "speedup_x": 5.64,
+        "greedy_token_parity": true
+      },
+      "memory_wal_and_ed25519_gate": "PASS (3 .cwwal entries, wrong-action blocked, signed shell_exec allowed)"
+    },
+    "llama_cpp": {
+      "files": [
+        "adapters/llama-statepage/cowrie_llama_statepage.hpp"
+      ],
+      "hybrid_q4_0_statepage_13800_tok": {
+        "cold_prefill_ms": 3391.5,
+        "cold_nvme_restore_ms": 68.2,
+        "warm_mmap_restore_ms": 27.2,
+        "speedup_cold_x": 49.7,
+        "speedup_warm_x": 123.2
+      },
+      "prefix_state_cache_cross_process_gpu": {
+        "model": "Qwen3.5-0.8B-Q4_K_M.gguf (COWRIE_KV_Q8_0 + COWRIE_SSM_FP32 + COWRIE_HMAC_KEY)",
+        "shared_prefix_tokens": 1488,
+        "shard_bytes_mb": 29.95,
+        "cold_prefill_ms": 123.63,
+        "exact_prefix_restore_ms": 46.46,
+        "exact_prefix_speedup_x": 2.66,
+        "new_suffix_question_restore_ms": 9.01,
+        "new_suffix_speedup_x": 13.72,
+        "greedy_token_parity": true
+      },
+      "memory_wal_and_ed25519_gate": "PASS (LlamaCowrieMemory + LlamaZonedShard)"
+    },
+    "eureka_creative_v7": {
+      "files": [
+        "/home/omen/worktrees/eureka-engine/creative/ec_cowrie.h",
+        "/home/omen/worktrees/eureka-engine/creative/ec_cowrie.c",
+        "adapters/eureka/ec_cowrie.h",
+        "adapters/eureka/ec_cowrie.c"
+      ],
+      "longest_prefix_matched_tokens": 128,
+      "creative_audit_wal_entries": 3,
+      "signed_ed25519_trust_gate": "PASS (-Wall -Wextra -Werror)"
+    },
+    "eureka_llm": {
+      "files": [
+        "adapters/eureka/llb_cowrie.h",
+        "adapters/eureka/cowrie_route.h"
+      ],
+      "git_branches": {
+        "eureka_engine_feat_cowrie": {
+          "before_sha": "e86e41ac3c383847871c5ebc942c1899b5a92e27",
+          "after_sha": "979dfe10ddf2d2d490452f1c615c0de08200b0ac"
+        },
+        "eureka_linux_parity_feat_cowrie": {
+          "before_sha": "7ba2d2b704a6ee708b3335e771eabc0ef024b813",
+          "after_sha": "b8fca2efbdac66b2c339e203987aa2b8dd60879f"
+        }
+      },
+      "engine_gpu_tu_compile": "PASS (86K-line BEND_CUDA TU + -O2)",
+      "llb_serve_http_e2e": {
+        "status": "PASS",
+        "handle_len": 11,
+        "wal_entries": 3,
+        "wal_bytes": 380,
+        "empty_lineage_blocked_403": true,
+        "unsigned_2hop_blocked_403": true,
+        "wrong_action_ed25519_blocked_403": true,
+        "valid_ed25519_declassify_allowed_200": true
+      }
+    }
+  },
+  "verdict": "PASS"
+}

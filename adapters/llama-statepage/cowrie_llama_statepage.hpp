@@ -1,24 +1,36 @@
 #pragma once
-// Drop-in C++ adapter connecting llama.cpp hybrid SSM+KV state to Cowrie
-// (`libcowrie_core.so` / `cowrie.h`). Supports split-precision KV quantization
-// (FP16 / Q8_0 / Q4_0 KV + exact recurrent SSM), zero-copy 16 KB-aligned mmap restore,
-// parallel 4 MiB SHA-NI Merkle verification, and strict model_sha + kv_quant contracts.
+// Drop-in C++17 Adapter connecting `llama.cpp` to Cowrie v1.2 (`libcowrie_core.so` / `cowrie.h`).
+// Provides 100% feature symmetry with `vLLM` (`CowrieKVConnectorV1` + `CowrieVllmRuntime`):
+//   1. Split-precision hybrid SSM+KV `StatePage` atomic save & zero-copy `mmap` restore (`Q4_0`/`Q8_0`/`FP16` KV
+//      + exact recurrent SSM, 64-stride `cowrie_model_fingerprint`, `runtime_id="llama.cpp"`, `HMAC-SHA256`).
+//   2. `LlamaPrefixStateCache`: directory-indexed longest-prefix StatePage offloader (`llama_{ntok}_{cid}.state.cowrie`)
+//      that skips cached prefill tokens across full process kills and evaluates only new suffix tokens.
+//   3. `LlamaCowrieMemory`: in-process + `.cwwal` WAL-backed canonical `COWR` memory store, 47-bit `@handle`
+//      collision-safe resolution, `R0`/`R1`/`R2` lenses, sticky `0x80` causal taint, and RFC 8032 `Ed25519`
+//      owner-declassification tokens (`COWRIE_DECLASSIFY_V1`).
+//   4. `LlamaZonedShard` (`CWZM`) & `LlamaIvfIndex` (`CWIV`) RAII wrappers.
 
 #include "llama.h"
 #include "cowrie.h"
 
-#include <sys/stat.h>
-#include <cstdio>
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <cstring>
+#include <ctime>
+#include <dirent.h>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace cowrie {
 
-/// Construct llama_context_params configured for split-precision hybrid StatePages.
-/// GQA Attention KV cache uses `kv_quant` (FP16 / Q8_0 / Q4_0) while recurrent SSM layers
-/// (e.g., Qwen3.5 Gated DeltaNet) remain exact in llama.cpp.
+inline constexpr const char* LLAMA_CPP_RUNTIME_ID = "llama.cpp";
+inline constexpr uint16_t    LLAMA_CPP_LAYOUT_VER = 1;
+
 inline llama_context_params make_statepage_context_params(
     uint32_t n_ctx,
     uint8_t kv_quant = COWRIE_KV_FP16,
@@ -47,32 +59,68 @@ inline llama_context_params make_statepage_context_params(
     return cp;
 }
 
-/// Fast deterministic 64-hex model identity fingerprint (first 4 MB + exact file byte size).
 inline std::string fingerprint_gguf_model(const std::string& gguf_path) {
-    struct stat st{};
-    if (stat(gguf_path.c_str(), &st) != 0) {
-        throw std::runtime_error("cowrie: cannot stat model file: " + gguf_path);
-    }
-    const size_t head = 4 * 1024 * 1024;
-    std::vector<uint8_t> buf(head + 8, 0);
-    FILE* f = fopen(gguf_path.c_str(), "rb");
-    if (!f) throw std::runtime_error("cowrie: cannot open model file: " + gguf_path);
-    size_t nr = fread(buf.data(), 1, head, f);
-    fclose(f);
-    uint64_t fsz = (uint64_t)st.st_size;
-    memcpy(buf.data() + nr, &fsz, 8);
     char hex[65] = {0};
-    cowrie_sha256_hex(buf.data(), nr + 8, hex);
+    int rc = cowrie_model_fingerprint(gguf_path.c_str(), hex);
+    if (rc != 0) {
+        throw std::runtime_error(
+            std::string("cowrie: model fingerprint failed (") + cowrie_err_name(rc) + "): " + gguf_path
+        );
+    }
+    return std::string(hex, 64);
+}
+
+inline std::string sha256_bytes(const void* data, size_t len) {
+    char hex[65] = {0};
+    static const uint8_t dummy = 0;
+    const uint8_t* ptr = (data && len > 0) ? static_cast<const uint8_t*>(data) : &dummy;
+    cowrie_sha256_hex(ptr, len, hex);
     return std::string(hex, 64);
 }
 
 inline std::string sha256_string(const std::string& s) {
-    char hex[65] = {0};
-    cowrie_sha256_hex(reinterpret_cast<const uint8_t*>(s.data()), s.size(), hex);
-    return std::string(hex, 64);
+    return sha256_bytes(s.data(), s.size());
 }
 
-/// Extract live hybrid SSM+KV state for `seq_id` and atomically save as a 16 KB-aligned StatePage.
+inline std::string to_hex_bytes(const uint8_t* b, size_t n) {
+    static const char H[] = "0123456789abcdef";
+    std::string out(2 * n, '\0');
+    for (size_t i = 0; i < n; ++i) {
+        out[2 * i]     = H[(b[i] >> 4) & 0xFu];
+        out[2 * i + 1] = H[b[i] & 0xFu];
+    }
+    return out;
+}
+
+inline bool from_hex_exact(const std::string& hex, uint8_t* out, size_t expected_bytes) {
+    if (hex.size() != 2 * expected_bytes) return false;
+    auto nib = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < expected_bytes; ++i) {
+        int hi = nib(hex[2 * i]);
+        int lo = nib(hex[2 * i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+    return true;
+}
+
+inline void ensure_private_dir_0700(const std::string& path) {
+    std::string cur;
+    for (size_t i = 0; i < path.size(); ++i) {
+        cur.push_back(path[i]);
+        if (path[i] == '/' && cur.size() > 1) {
+            mkdir(cur.c_str(), 0700);
+        }
+    }
+    mkdir(path.c_str(), 0700);
+    chmod(path.c_str(), 0700);
+}
+
 inline int save_llama_statepage(
     llama_context* ctx,
     llama_seq_id seq_id,
@@ -90,10 +138,12 @@ inline int save_llama_statepage(
     size_t got = llama_state_seq_get_data(ctx, buf.data(), sz, seq_id);
     if (got == 0) return -2;
     if (out_state_bytes) *out_state_bytes = got;
-    return cowrie_statepage_save(
+    return cowrie_statepage_save_ext(
         out_path.c_str(),
         model_sha.c_str(),
         doc_cid.c_str(),
+        LLAMA_CPP_RUNTIME_ID,
+        LLAMA_CPP_LAYOUT_VER,
         ctx_tokens,
         kv_quant,
         ssm_dtype,
@@ -102,9 +152,6 @@ inline int save_llama_statepage(
     );
 }
 
-/// Open a 16 KB-aligned StatePage via Rust `libcowrie_core.so`, strictly verify alignment,
-/// `model_sha`, optional `expected_kv_quant` (-1 = any), and parallel SHA-NI Merkle hash,
-/// then zero-copy restore directly into `llama_state_seq_set_data()`.
 inline int restore_llama_statepage(
     llama_context* ctx,
     llama_seq_id seq_id,
@@ -112,13 +159,16 @@ inline int restore_llama_statepage(
     const std::string& expected_model_sha,
     bool verify_hash = true,
     size_t* out_restored_bytes = nullptr,
-    int expected_kv_quant = -1
+    int expected_kv_quant = -1,
+    int expected_ssm_dtype = -1
 ) {
     CowrieStatePageHandle* h = nullptr;
-    int rc = cowrie_statepage_open_checked(
+    int rc = cowrie_statepage_open_full(
         sp_path.c_str(),
         expected_model_sha.c_str(),
+        LLAMA_CPP_RUNTIME_ID,
         expected_kv_quant,
+        expected_ssm_dtype,
         verify_hash ? 1 : 0,
         &h
     );
@@ -132,5 +182,402 @@ inline int restore_llama_statepage(
     if (out_restored_bytes) *out_restored_bytes = loaded;
     return 0;
 }
+
+// =========================================================================
+// 1. LlamaPrefixStateCache — Parity with vLLM `CowrieKVConnectorV1`
+// =========================================================================
+
+class LlamaPrefixStateCache {
+public:
+    LlamaPrefixStateCache(
+        std::string cache_dir,
+        std::string model_sha,
+        uint32_t block_size = 16,
+        uint8_t kv_quant = COWRIE_KV_FP16,
+        uint8_t ssm_dtype = COWRIE_SSM_FP32
+    )
+        : dir_(std::move(cache_dir)),
+          model_sha_(std::move(model_sha)),
+          block_size_(block_size ? block_size : 16),
+          kv_quant_(kv_quant),
+          ssm_dtype_(ssm_dtype) {
+        ensure_private_dir_0700(dir_);
+    }
+
+    static uint32_t aligned_prefix_tokens(size_t n_tokens, uint32_t block_size) {
+        if (n_tokens <= 1 || block_size == 0) return 0;
+        return static_cast<uint32_t>(((n_tokens - 1) / block_size) * block_size);
+    }
+
+    std::string prefix_cid(const llama_token* tokens, uint32_t n_tokens) const {
+        return sha256_bytes(tokens, static_cast<size_t>(n_tokens) * sizeof(llama_token));
+    }
+
+    std::string shard_path(uint32_t n_tokens, const std::string& cid_hex) const {
+        return dir_ + "/llama_" + std::to_string(n_tokens) + "_" + cid_hex.substr(0, 32) + ".state.cowrie";
+    }
+
+    std::vector<uint32_t> candidate_lengths(uint32_t max_tokens) const {
+        std::vector<uint32_t> out;
+        DIR* d = opendir(dir_.c_str());
+        if (!d) return out;
+        while (struct dirent* de = readdir(d)) {
+            std::string name(de->d_name);
+            if (name.rfind("llama_", 0) != 0 || name.find(".state.cowrie") == std::string::npos) continue;
+            size_t u2 = name.find('_', 6);
+            if (u2 == std::string::npos || u2 <= 6) continue;
+            uint32_t nt = static_cast<uint32_t>(std::strtoul(name.substr(6, u2 - 6).c_str(), nullptr, 10));
+            if (nt > 0 && nt <= max_tokens && (nt % block_size_) == 0) {
+                if (std::find(out.begin(), out.end(), nt) == out.end()) out.push_back(nt);
+            }
+        }
+        closedir(d);
+        std::sort(out.begin(), out.end(), std::greater<uint32_t>());
+        return out;
+    }
+
+    /// Find and zero-copy restore the longest verified cached prefix (`< n_tokens`) into `ctx`.
+    /// Returns number of restored prefix tokens (`0` on miss).
+    uint32_t restore_longest_prefix(
+        llama_context* ctx,
+        llama_seq_id seq_id,
+        const llama_token* tokens,
+        size_t n_tokens,
+        size_t* out_restored_bytes = nullptr
+    ) const {
+        uint32_t max_valid = aligned_prefix_tokens(n_tokens, block_size_);
+        if (max_valid == 0) return 0;
+        for (uint32_t nt : candidate_lengths(max_valid)) {
+            std::string cid = prefix_cid(tokens, nt);
+            std::string sp = shard_path(nt, cid);
+            struct stat st {};
+            if (stat(sp.c_str(), &st) != 0) continue;
+            int rc = restore_llama_statepage(
+                ctx, seq_id, sp, model_sha_, true, out_restored_bytes,
+                static_cast<int>(kv_quant_), static_cast<int>(ssm_dtype_)
+            );
+            if (rc == 0) return nt;
+        }
+        return 0;
+    }
+
+    /// Evaluate `tokens[0..n_tokens)` using longest-prefix StatePage restore + suffix `llama_decode`
+    /// + automatic saving of newly computed block-aligned prefixes!
+    int eval_with_prefix_cache(
+        llama_context* ctx,
+        llama_seq_id seq_id,
+        const llama_token* tokens,
+        size_t n_tokens,
+        uint32_t n_batch = 512,
+        uint32_t* out_matched_tokens = nullptr,
+        size_t* out_state_bytes = nullptr
+    ) const {
+        if (!ctx || !tokens || n_tokens == 0) return -1;
+        uint32_t matched = restore_longest_prefix(ctx, seq_id, tokens, n_tokens, out_state_bytes);
+        if (out_matched_tokens) *out_matched_tokens = matched;
+
+        uint32_t target_save = aligned_prefix_tokens(n_tokens, block_size_);
+        bool want_save = (target_save > matched);
+        if (want_save) {
+            std::string scid = prefix_cid(tokens, target_save);
+            struct stat st {};
+            if (stat(shard_path(target_save, scid).c_str(), &st) == 0) want_save = false;
+        }
+
+        auto decode_span = [&](size_t start_pos, size_t end_pos) -> int {
+            size_t pos = start_pos;
+            while (pos < end_pos) {
+                uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(n_batch, end_pos - pos));
+                llama_batch b = llama_batch_get_one(const_cast<llama_token*>(tokens + pos), static_cast<int32_t>(chunk));
+                if (llama_decode(ctx, b) != 0) return -4;
+                pos += chunk;
+            }
+            return 0;
+        };
+
+        if (want_save) {
+            int rc = decode_span(matched, target_save);
+            if (rc != 0) return rc;
+            std::string scid = prefix_cid(tokens, target_save);
+            size_t saved_b = 0;
+            rc = save_llama_statepage(
+                ctx, seq_id, shard_path(target_save, scid), model_sha_, scid,
+                target_save, kv_quant_, ssm_dtype_, &saved_b
+            );
+            if (rc != 0) return rc;
+            if (out_state_bytes && *out_state_bytes == 0) *out_state_bytes = saved_b;
+            return decode_span(target_save, n_tokens);
+        }
+        return decode_span(matched, n_tokens);
+    }
+
+private:
+    std::string dir_;
+    std::string model_sha_;
+    uint32_t    block_size_;
+    uint8_t     kv_quant_;
+    uint8_t     ssm_dtype_;
+};
+
+// =========================================================================
+// 2. LlamaCowrieMemory — Parity with `CowrieMemoryStore` + `Ed25519` + `.cwwal`
+// =========================================================================
+
+struct DeclassifyToken {
+    std::string cid_hex;
+    uint64_t    expiry_unix = 0;
+    std::string sig_hex;
+};
+
+struct LlamaMemoryRecord {
+    std::string          cid_hex;
+    std::string          handle;
+    uint8_t              authority = 0;
+    uint8_t              epistemic = 0;
+    std::vector<uint8_t> frame_bytes;
+    std::string          r0;
+    bool                 tainted = false;
+};
+
+struct GateDecision {
+    bool        allowed = false;
+    bool        privileged = true;
+    bool        tainted = false;
+    size_t      declassified_count = 0;
+    std::string error;
+    std::string tainted_source;
+};
+
+class LlamaCowrieMemory {
+public:
+    explicit LlamaCowrieMemory(
+        const std::string& persist_dir = "",
+        const std::string& owner_pubkey_hex = ""
+    ) {
+        if (!owner_pubkey_hex.empty()) {
+            has_owner_pk_ = from_hex_exact(owner_pubkey_hex, owner_pk_, 32);
+        } else if (const char* env_pk = std::getenv("COWRIE_OWNER_PUBKEY")) {
+            has_owner_pk_ = from_hex_exact(env_pk, owner_pk_, 32);
+        }
+        if (!persist_dir.empty()) {
+            ensure_private_dir_0700(persist_dir);
+            std::string wal_p = persist_dir + "/memory.cwwal";
+            if (cowrie_wal_open(wal_p.c_str(), 1, &wal_) != 0) {
+                wal_ = nullptr;
+            }
+        }
+    }
+
+    ~LlamaCowrieMemory() {
+        if (wal_) {
+            cowrie_wal_close(wal_);
+            wal_ = nullptr;
+        }
+    }
+
+    LlamaCowrieMemory(const LlamaCowrieMemory&) = delete;
+    LlamaCowrieMemory& operator=(const LlamaCowrieMemory&) = delete;
+
+    static int action_code(const std::string& action) {
+        if (action == "read_only" || action == "read_only_safe" || action == "search") return COWRIE_ACT_READ_ONLY;
+        if (action == "shell_exec") return COWRIE_ACT_SHELL_EXEC;
+        if (action == "cred_read")  return COWRIE_ACT_CRED_READ;
+        if (action == "fs_write")   return COWRIE_ACT_FS_WRITE;
+        if (action == "net_exfil")  return COWRIE_ACT_NET_EXFIL;
+        return -1;
+    }
+
+    const LlamaMemoryRecord* resolve(const std::string& key) const {
+        auto it = by_cid_.find(key);
+        if (it != by_cid_.end()) return &it->second;
+        auto hit = by_handle_.find(key);
+        if (hit != by_handle_.end()) {
+            return hit->second.size() == 1 ? &by_cid_.at(hit->second[0]) : nullptr;
+        }
+        if (key.size() >= 32 && key[0] != '@') {
+            const LlamaMemoryRecord* found = nullptr;
+            for (const auto& kv : by_cid_) {
+                if (kv.first.compare(0, key.size(), key) == 0) {
+                    if (found) return nullptr;
+                    found = &kv.second;
+                }
+            }
+            return found;
+        }
+        return nullptr;
+    }
+
+    LlamaMemoryRecord store_json(
+        const std::string& json_utf8,
+        uint8_t base_authority = COWRIE_AUTH_VERIFIED_TOOL,
+        const std::vector<std::string>& parents = {},
+        uint8_t epistemic = COWRIE_EPI_OBSERVED
+    ) {
+        std::vector<uint8_t> pauths;
+        pauths.reserve(parents.size());
+        for (const auto& pid : parents) {
+            const LlamaMemoryRecord* pr = resolve(pid);
+            pauths.push_back(pr ? pr->authority : static_cast<uint8_t>(COWRIE_AUTH_UNTRUSTED_EXT | COWRIE_BIT_TAINTED));
+        }
+        uint8_t eff_auth = cowrie_propagate_authority(
+            base_authority, pauths.empty() ? nullptr : pauths.data(), pauths.size()
+        );
+
+        CowrieBuf wbuf{nullptr, 0, 0};
+        int rc = cowrie_encode_json(
+            reinterpret_cast<const uint8_t*>(json_utf8.data()), json_utf8.size(),
+            eff_auth, epistemic, &wbuf
+        );
+        if (rc != 0) throw std::runtime_error(std::string("cowrie_encode_json: ") + cowrie_err_name(rc));
+        std::vector<uint8_t> wire(wbuf.data, wbuf.data + wbuf.len);
+        cowrie_buf_free(wbuf);
+
+        uint8_t va = 0, ve = 0, cid34[34] = {0};
+        rc = cowrie_frame_verify(wire.data(), wire.size(), &va, &ve, cid34);
+        if (rc != 0) throw std::runtime_error(std::string("cowrie_frame_verify: ") + cowrie_err_name(rc));
+
+        CowrieBuf r0b{nullptr, 0, 0};
+        rc = cowrie_project_lens(wire.data(), wire.size(), COWRIE_LENS_R0, 0, &r0b);
+        if (rc != 0) throw std::runtime_error("cowrie_project_lens R0 failed");
+        std::string r0_str(reinterpret_cast<const char*>(r0b.data), r0b.len);
+        cowrie_buf_free(r0b);
+
+        std::string cid_hex = to_hex_bytes(cid34, 34);
+        size_t sp = r0_str.find(' ');
+        std::string handle = (sp == std::string::npos) ? r0_str : r0_str.substr(0, sp);
+
+        // Sticky taint on re-registration
+        auto ex = by_cid_.find(cid_hex);
+        if (ex != by_cid_.end() && ex->second.tainted && !cowrie_is_tainted(eff_auth)) {
+            eff_auth |= COWRIE_BIT_TAINTED;
+        }
+
+        LlamaMemoryRecord rec;
+        rec.cid_hex = cid_hex;
+        rec.handle = handle;
+        rec.authority = eff_auth;
+        rec.epistemic = epistemic;
+        rec.frame_bytes = std::move(wire);
+        rec.r0 = std::move(r0_str);
+        rec.tainted = cowrie_is_tainted(eff_auth) != 0;
+
+        by_cid_[cid_hex] = rec;
+        auto& bucket = by_handle_[handle];
+        if (std::find(bucket.begin(), bucket.end(), cid_hex) == bucket.end()) {
+            bucket.push_back(cid_hex);
+        }
+
+        if (wal_) {
+            uint64_t seq = 0;
+            uint8_t out_c[34];
+            cowrie_wal_append_frame(wal_, rec.frame_bytes.data(), rec.frame_bytes.size(), 1, &seq, out_c);
+        }
+        return rec;
+    }
+
+    std::string project_lens(const std::string& key, uint8_t tier = COWRIE_LENS_R2) const {
+        const LlamaMemoryRecord* rec = resolve(key);
+        if (!rec) throw std::runtime_error("Unknown or ambiguous Cowrie handle/CID: " + key);
+        CowrieBuf lb{nullptr, 0, 0};
+        int rc = cowrie_project_lens(rec->frame_bytes.data(), rec->frame_bytes.size(), tier, 0, &lb);
+        if (rc != 0) throw std::runtime_error(std::string("cowrie_project_lens: ") + cowrie_err_name(rc));
+        std::string s(reinterpret_cast<const char*>(lb.data), lb.len);
+        cowrie_buf_free(lb);
+        return s;
+    }
+
+    GateDecision check_tool_gate(
+        const std::string& action,
+        const std::vector<std::string>& arg_ids,
+        const std::vector<DeclassifyToken>& tokens = {},
+        uint64_t now_unix = 0
+    ) const {
+        GateDecision dec;
+        int acode = action_code(action);
+        dec.privileged = (acode != COWRIE_ACT_READ_ONLY);
+        uint64_t now_ts = now_unix ? now_unix : static_cast<uint64_t>(std::time(nullptr));
+
+        if (dec.privileged && arg_ids.empty()) {
+            dec.tainted = true;
+            dec.tainted_source = "<empty_lineage>";
+            dec.error = "ERR_TAINTED_EXECUTION_BLOCKED";
+            return dec;
+        }
+        for (const auto& aid : arg_ids) {
+            const LlamaMemoryRecord* rec = resolve(aid);
+            if (!rec) {
+                dec.tainted = true;
+                dec.tainted_source = aid;
+                dec.error = "ERR_TAINTED_EXECUTION_BLOCKED";
+                return dec;
+            }
+            if (rec->tainted) {
+                bool ok_sig = false;
+                uint8_t cid34[34];
+                if (dec.privileged && has_owner_pk_ && acode > 0 && from_hex_exact(rec->cid_hex, cid34, 34)) {
+                    for (const auto& t : tokens) {
+                        uint8_t sig64[64];
+                        if (t.cid_hex == rec->cid_hex && from_hex_exact(t.sig_hex, sig64, 64)) {
+                            if (cowrie_declassify_verify(
+                                    owner_pk_, cid34, static_cast<uint8_t>(acode),
+                                    t.expiry_unix, sig64, now_ts) == 0) {
+                                ok_sig = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (ok_sig) {
+                    dec.declassified_count++;
+                } else {
+                    dec.tainted = true;
+                    dec.tainted_source = aid;
+                    if (dec.privileged) {
+                        dec.error = "ERR_TAINTED_EXECUTION_BLOCKED";
+                        return dec;
+                    }
+                }
+            }
+        }
+        dec.allowed = true;
+        return dec;
+    }
+
+    size_t wal_entries() const {
+        return wal_ ? cowrie_wal_len(wal_) : 0;
+    }
+
+private:
+    std::unordered_map<std::string, LlamaMemoryRecord>         by_cid_;
+    std::unordered_map<std::string, std::vector<std::string>>  by_handle_;
+    CowrieWalHandle*                                           wal_ = nullptr;
+    uint8_t                                                    owner_pk_[32] = {0};
+    bool                                                       has_owner_pk_ = false;
+};
+
+// =========================================================================
+// 3. LlamaZonedShard (`CWZM`) & LlamaIvfIndex (`CWIV`) RAII Wrappers
+// =========================================================================
+
+class LlamaZonedShard {
+public:
+    explicit LlamaZonedShard(const std::string& path) {
+        int rc = cowrie_zoned_open(path.c_str(), &h_);
+        if (rc != 0) throw std::runtime_error(std::string("cowrie_zoned_open: ") + cowrie_err_name(rc));
+    }
+    ~LlamaZonedShard() { if (h_) cowrie_zoned_close(h_); }
+    LlamaZonedShard(const LlamaZonedShard&) = delete;
+    LlamaZonedShard& operator=(const LlamaZonedShard&) = delete;
+
+    std::pair<size_t, size_t> query_keys(int64_t lo, int64_t hi, bool trusted_only = true, bool verify_merkle = true) const {
+        size_t cnt = 0, bread = 0;
+        int rc = cowrie_zoned_query_keys(h_, lo, hi, trusted_only ? 1 : 0, verify_merkle ? 1 : 0, &cnt, &bread);
+        if (rc != 0) throw std::runtime_error(std::string("cowrie_zoned_query_keys: ") + cowrie_err_name(rc));
+        return {cnt, bread};
+    }
+
+private:
+    CowrieZonedHandle* h_ = nullptr;
+};
 
 } // namespace cowrie

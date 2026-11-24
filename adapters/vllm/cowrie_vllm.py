@@ -1,9 +1,11 @@
-"""Cowrie Adapter for vLLM (`CowrieVllmRuntime`) & Universal Agent Memory Store.
+"""Cowrie Adapter for vLLM (`CowrieVllmRuntime`) & Hardened Agent Memory Store (v1.2).
 
-Unifies:
-  1. Canonical Plane A Agent Memory (`libcowrie_core.so`), Alpha32 R0 triage, and adaptive R2 lenses.
-  2. Sticky Causal-DAG Trust Membrane (`0x04 UNTRUSTED_EXT`, `BIT_TAINTED = 0x80`) gating privileged tool calls.
-  3. CoreHash-keyed prefix canonicalization for vLLM `enable_prefix_caching=True` + 16 KB StatePage helpers.
+Unifies (with 100% parity across `llama.cpp`, `Eureka LLM`, and `Eureka Creative v7`):
+  1. Canonical Plane A Agent Memory (`libcowrie_core.so`), 47-bit Alpha32 R0 triage, and fence-escaped R2 lenses.
+  2. Crash-safe hash-chained `.cwwal` mutation & audit log (`cowrie.Wal`) + `0700` `O_EXCL` persistence.
+  3. Sticky Causal-DAG Trust Membrane (`0x04 UNTRUSTED_EXT`, `BIT_TAINTED = 0x80`) with collision-fail-closed
+     resolution, whole-context synthesis lineage, and scoped RFC 8032 `Ed25519` owner-declassification tokens
+     (`COWRIE_DECLASSIFY_V1`).
 """
 
 import json
@@ -40,23 +42,70 @@ class MemoryRecord:
 
 
 class CowrieMemoryStore:
-    """In-process + optional disk-backed Agent Memory & Causal Trust Membrane over `libcowrie_core.so`."""
+    """In-process + optional `0700` `.cwwal` / `.cwfr` disk-backed Agent Memory & Causal Trust Membrane."""
 
-    def __init__(self, persist_dir: Optional[str] = None):
+    def __init__(self, persist_dir: Optional[str] = None, owner_pubkey_hex: Optional[str] = None):
         self.persist_dir = Path(persist_dir) if persist_dir else None
-        if self.persist_dir:
-            self.persist_dir.mkdir(parents=True, exist_ok=True)
+        pk_env = owner_pubkey_hex or os.environ.get("COWRIE_OWNER_PUBKEY", "")
+        self.owner_pubkey: Optional[bytes] = bytes.fromhex(pk_env) if len(pk_env) == 64 else None
         self._by_cid: Dict[str, MemoryRecord] = {}
-        self._by_handle: Dict[str, MemoryRecord] = {}
+        self._by_handle: Dict[str, List[MemoryRecord]] = {}
+        self._wal: Optional[cowrie.Wal] = None
+        if self.persist_dir:
+            self.persist_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(self.persist_dir, 0o700)
+            self._wal = cowrie.Wal(str(self.persist_dir / "memory.cwwal"), recover_torn_tail=True)
+            self._reload_disk()
+
+    def close(self):
+        if self._wal is not None:
+            self._wal.close()
+            self._wal = None
+
+    def _reload_disk(self):
+        if not self.persist_dir:
+            return
+        for p in sorted(self.persist_dir.glob("*.cwfr")):
+            raw = p.read_bytes()
+            ver = cowrie.verify_frame(raw)
+            cid_hex = ver["cid"].hex()
+            r0 = cowrie.project_lens(raw, "r0", 0)
+            handle = r0.split(" ", 1)[0]
+            rec = MemoryRecord(
+                cid_hex=cid_hex,
+                handle=handle,
+                authority=ver["authority"],
+                epistemic=ver["epistemic"],
+                frame_bytes=raw,
+                r0=r0,
+                parents=[],
+            )
+            self._index_record(rec)
+
+    def _index_record(self, rec: MemoryRecord):
+        existing = self._by_cid.get(rec.cid_hex)
+        if existing and existing.tainted and not rec.tainted:
+            rec.authority |= cowrie.BIT_TAINTED
+        self._by_cid[rec.cid_hex] = rec
+        bucket = self._by_handle.setdefault(rec.handle, [])
+        for i, item in enumerate(bucket):
+            if item.cid_hex == rec.cid_hex:
+                bucket[i] = rec
+                return
+        bucket.append(rec)
 
     def resolve(self, key: str) -> Optional[MemoryRecord]:
-        if key in self._by_handle:
-            return self._by_handle[key]
+        """Resolve a full 68-hex CID or unambiguous 47-bit `@handle`.
+        Returns `None` if unknown OR if a `@handle` collided across multiple distinct CIDs (fail closed!)."""
         if key in self._by_cid:
             return self._by_cid[key]
-        for cid, rec in self._by_cid.items():
-            if len(key) >= 8 and cid.startswith(key):
-                return rec
+        if key in self._by_handle:
+            bucket = self._by_handle[key]
+            return bucket[0] if len(bucket) == 1 else None
+        if len(key) >= 32 and not key.startswith("@"):
+            matches = [rec for cid, rec in self._by_cid.items() if cid.startswith(key)]
+            if len(matches) == 1:
+                return matches[0]
         return None
 
     def store(
@@ -67,9 +116,16 @@ class CowrieMemoryStore:
         parents: Sequence[str] = (),
     ) -> MemoryRecord:
         parent_auths = []
+        resolved_parent_cids = []
         for p in parents:
             rec = self.resolve(p)
-            parent_auths.append(rec.authority if rec else (cowrie.AUTH_UNTRUSTED_EXT | cowrie.BIT_TAINTED))
+            if rec is not None:
+                parent_auths.append(rec.authority)
+                resolved_parent_cids.append(rec.cid_hex)
+            else:
+                parent_auths.append(cowrie.AUTH_UNTRUSTED_EXT | cowrie.BIT_TAINTED)
+                resolved_parent_cids.append(p)
+
         eff_auth = cowrie.propagate_authority(authority, parent_auths)
         wire = cowrie.encode_json(payload, eff_auth, epistemic)
         ver = cowrie.verify_frame(wire)
@@ -83,12 +139,27 @@ class CowrieMemoryStore:
             epistemic=epistemic,
             frame_bytes=wire,
             r0=r0,
-            parents=list(parents),
+            parents=resolved_parent_cids,
         )
-        self._by_cid[cid_hex] = rec
-        self._by_handle[handle] = rec
+        self._index_record(rec)
+        if self._wal is not None:
+            self._wal.append_frame(wire, fsync=True)
         if self.persist_dir:
-            (self.persist_dir / f"{cid_hex[:16]}.cwfr").write_bytes(wire)
+            out_file = self.persist_dir / f"{cid_hex}.cwfr"
+            tmp_file = self.persist_dir / f".{cid_hex}.{os.getpid()}.tmp"
+            fd = os.open(str(tmp_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                with os.fdopen(fd, "wb") as f:
+                    f.write(wire)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(str(tmp_file), str(out_file))
+            except Exception:
+                try:
+                    os.unlink(str(tmp_file))
+                except OSError:
+                    pass
+                raise
         return rec
 
     def triage_r0(self) -> str:
@@ -97,27 +168,75 @@ class CowrieMemoryStore:
     def project(self, key: str, tier: str = "r2") -> str:
         rec = self.resolve(key)
         if not rec:
-            raise KeyError(f"Unknown Cowrie handle/CID: {key}")
+            raise KeyError(f"Unknown or ambiguous Cowrie handle/CID: {key}")
         return cowrie.project_lens(rec.frame_bytes, tier, 0)
+
+    def _is_cid_declassified(
+        self,
+        cid_hex: str,
+        action: str,
+        declassify_tokens: Sequence[Dict[str, Any]],
+        owner_pubkey: Optional[bytes],
+        now_unix: int,
+    ) -> bool:
+        if owner_pubkey is None or len(owner_pubkey) != 32 or action not in cowrie.ACTION_CODES:
+            return False
+        try:
+            cid_b = bytes.fromhex(cid_hex)
+        except ValueError:
+            return False
+        if len(cid_b) != 34:
+            return False
+        for tok in declassify_tokens:
+            if tok.get("cid") != cid_hex:
+                continue
+            try:
+                sig_b = bytes.fromhex(str(tok.get("sig", "")))
+                exp = int(tok.get("expiry", 0))
+            except (ValueError, TypeError):
+                continue
+            if len(sig_b) == 64 and cowrie.verify_declassification(
+                owner_pubkey, cid_b, action, exp, sig_b, now_unix
+            ):
+                return True
+        return False
 
     def check_tool_gate(
         self,
         action: str,
         arg_ids: Sequence[str],
         owner_override: bool = False,
+        declassify_tokens: Sequence[Dict[str, Any]] = (),
+        owner_pubkey_hex: Optional[str] = None,
+        now_unix: Optional[int] = None,
     ) -> Dict[str, Any]:
         privileged = action in PRIVILEGED_ACTIONS
+        pk = bytes.fromhex(owner_pubkey_hex) if (owner_pubkey_hex and len(owner_pubkey_hex) == 64) else self.owner_pubkey
+        now_ts = int(time.time()) if now_unix is None else int(now_unix)
+
         tainted_src = None
-        for aid in arg_ids:
-            rec = self.resolve(aid)
-            if rec is None or rec.tainted:
-                tainted_src = aid
-                break
+        declassified_count = 0
+        if privileged and len(arg_ids) == 0:
+            tainted_src = "<empty_lineage>"
+        else:
+            for aid in arg_ids:
+                rec = self.resolve(aid)
+                if rec is None:
+                    tainted_src = aid
+                    break
+                if rec.tainted:
+                    if privileged and self._is_cid_declassified(rec.cid_hex, action, declassify_tokens, pk, now_ts):
+                        declassified_count += 1
+                    else:
+                        tainted_src = aid
+                        break
+
         allowed = (not privileged) or owner_override or (tainted_src is None)
         res = {
             "allowed": allowed,
             "privileged": privileged,
             "tainted": tainted_src is not None,
+            "declassified_count": declassified_count,
             "action": action,
         }
         if not allowed:
@@ -128,7 +247,8 @@ class CowrieMemoryStore:
 
 class CowrieVllmRuntime:
     """Wraps a live `vllm.LLM` engine with Cowrie R0/R2 attention lenses, CoreHash prefix
-    canonicalization (`enable_prefix_caching=True`), and `BIT_TAINTED` causal trust gating."""
+    canonicalization (`enable_prefix_caching=True`), whole-context `BIT_TAINTED` lineage tracking,
+    and RFC 8032 `Ed25519` owner-declassification tokens."""
 
     def __init__(self, llm: Any, memory: Optional[CowrieMemoryStore] = None):
         self.llm = llm
@@ -142,8 +262,16 @@ class CowrieVllmRuntime:
         tier: str = "r2",
         action: str = "read_only",
         owner_override: bool = False,
+        declassify_tokens: Sequence[Dict[str, Any]] = (),
+        owner_pubkey_hex: Optional[str] = None,
     ) -> Dict[str, Any]:
-        gate = self.memory.check_tool_gate(action, memory_handles, owner_override=owner_override)
+        gate = self.memory.check_tool_gate(
+            action,
+            memory_handles,
+            owner_override=owner_override,
+            declassify_tokens=declassify_tokens,
+            owner_pubkey_hex=owner_pubkey_hex,
+        )
         if not gate["allowed"]:
             return {"blocked": True, "gate": gate, "text": "", "prompt_tokens": 0, "latency_ms": 0.0}
 
@@ -153,12 +281,21 @@ class CowrieVllmRuntime:
         outs = self.llm.generate([prompt], sampling_params, use_tqdm=False)
         dt_ms = (time.perf_counter() - t0) * 1000.0
         o0 = outs[0]
+        text = o0.outputs[0].text
+        synth_rec = self.memory.store(
+            {"title": "vllm_synthesis", "question": question, "answer": text},
+            authority=cowrie.AUTH_MODEL_SYNTH,
+            epistemic=cowrie.EPI_DERIVED,
+            parents=list(memory_handles),
+        )
         return {
             "blocked": False,
             "gate": gate,
-            "tainted": gate["tainted"],
+            "tainted": synth_rec.tainted,
+            "output_cid": synth_rec.cid_hex,
+            "output_handle": synth_rec.handle,
             "prompt_tokens": len(o0.prompt_token_ids),
             "gen_tokens": len(o0.outputs[0].token_ids),
             "latency_ms": round(dt_ms, 2),
-            "text": o0.outputs[0].text,
+            "text": text,
         }

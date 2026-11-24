@@ -1,0 +1,1152 @@
+// ec_cowrie.c — Zero-Build-Dep Cowrie (v1.1 Hardened) Bridge for Eureka Creative Engine
+// Pure portable C11 using dlopen("libcowrie_core.so") only; clean fallback when library absent.
+
+#define _POSIX_C_SOURCE 200809L
+#include "ec_cowrie.h"
+
+#include <dirent.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+// ===========================================================================
+// 1. Exact libcowrie_core.so C-ABI Function Pointers (cowrie-core/src/ffi.rs)
+// ===========================================================================
+typedef struct {
+  uint8_t *data;
+  size_t   len;
+  size_t   cap;
+} cw_buf_t;
+
+typedef struct CowrieStatePageHandle cw_sp_handle_t;
+typedef struct CowrieWalHandle       cw_wal_handle_t;
+
+typedef void           (*fn_buf_free_t)(cw_buf_t);
+typedef const char    *(*fn_err_name_t)(int);
+typedef uint8_t        (*fn_has_shani_t)(void);
+typedef int            (*fn_sha256_hex_t)(const uint8_t *, size_t, char *);
+typedef int            (*fn_model_fp_t)(const char *, char *);
+typedef int            (*fn_encode_json_t)(const uint8_t *, size_t, uint8_t, uint8_t, cw_buf_t *);
+typedef int            (*fn_decode_json_t)(const uint8_t *, size_t, cw_buf_t *);
+typedef int            (*fn_frame_verify_t)(const uint8_t *, size_t, uint8_t *, uint8_t *, uint8_t *);
+typedef int            (*fn_project_lens_t)(const uint8_t *, size_t, uint8_t, size_t, cw_buf_t *);
+typedef uint8_t        (*fn_propagate_auth_t)(uint8_t, const uint8_t *, size_t);
+typedef uint8_t        (*fn_is_tainted_t)(uint8_t);
+typedef int            (*fn_sp_save_t)(const char *, const char *, const char *, uint32_t, uint8_t, uint8_t, const uint8_t *, size_t);
+typedef int            (*fn_sp_save_ext_t)(const char *, const char *, const char *, const char *, uint16_t, uint32_t, uint8_t, uint8_t, const uint8_t *, size_t);
+typedef int            (*fn_sp_open_chk_t)(const char *, const char *, int, uint8_t, cw_sp_handle_t **);
+typedef int            (*fn_sp_open_full_t)(const char *, const char *, const char *, int, int, uint8_t, cw_sp_handle_t **);
+typedef const uint8_t *(*fn_sp_data_t)(const cw_sp_handle_t *);
+typedef size_t         (*fn_sp_len_t)(const cw_sp_handle_t *);
+typedef void           (*fn_sp_close_t)(cw_sp_handle_t *);
+typedef int            (*fn_declassify_verify_t)(const uint8_t *, const uint8_t *, uint8_t, uint64_t, const uint8_t *, uint64_t);
+typedef int            (*fn_wal_open_t)(const char *, uint8_t, cw_wal_handle_t **);
+typedef int            (*fn_wal_append_t)(cw_wal_handle_t *, const uint8_t *, size_t, uint8_t, uint64_t *, uint8_t *);
+typedef size_t         (*fn_wal_len_t)(const cw_wal_handle_t *);
+typedef void           (*fn_wal_close_t)(cw_wal_handle_t *);
+
+typedef struct {
+  void                   *dl;
+  int                     loaded;
+  int                     shani;
+  fn_buf_free_t           buf_free;
+  fn_err_name_t           err_name;
+  fn_has_shani_t          has_shani;
+  fn_sha256_hex_t         sha256_hex;
+  fn_model_fp_t           model_fp;
+  fn_encode_json_t        encode_json;
+  fn_decode_json_t        decode_json;
+  fn_frame_verify_t       frame_verify;
+  fn_project_lens_t       project_lens;
+  fn_propagate_auth_t     propagate_auth;
+  fn_is_tainted_t         is_tainted;
+  fn_sp_save_t            sp_save;
+  fn_sp_save_ext_t        sp_save_ext;
+  fn_sp_open_chk_t        sp_open_checked;
+  fn_sp_open_full_t       sp_open_full;
+  fn_sp_data_t            sp_data;
+  fn_sp_len_t             sp_len;
+  fn_sp_close_t           sp_close;
+  fn_declassify_verify_t  declassify_verify;
+  fn_wal_open_t           wal_open;
+  fn_wal_append_t         wal_append;
+  fn_wal_len_t            wal_len;
+  fn_wal_close_t          wal_close;
+} cw_api_t;
+
+static const char     *EC_RUNTIME_ID = "eureka-creative";
+static cw_api_t        g_cw;
+static cw_wal_handle_t *g_audit_wal = NULL;
+static char            g_audit_wal_dir[320] = {0};
+static pthread_once_t  g_cw_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t g_cw_mu   = PTHREAD_MUTEX_INITIALIZER;
+
+static _Atomic uint64_t g_sp_saves      = 0;
+static _Atomic uint64_t g_sp_hits       = 0;
+static _Atomic uint64_t g_sp_misses     = 0;
+static _Atomic uint64_t g_sp_mismatches = 0;
+
+static char g_cache_dir[320] = "/tmp/eureka-creative-build/artifacts/cowrie_cache";
+
+#define EC_TRUST_MAX 4096
+typedef struct {
+  int     used;
+  char    cid_hex[69];
+  char    handle[24];
+  char    source[64];
+  char    label[96];
+  uint8_t authority;
+  uint8_t epistemic;
+  int     tainted;
+  size_t  raw_bytes;
+  size_t  cowr_bytes;
+  char    r0[160];
+  char    r1[1024];
+} trust_rec_t;
+
+static trust_rec_t g_trust[EC_TRUST_MAX];
+static int         g_trust_next  = 0;
+static int         g_trust_count = 0;
+
+static void cw_load_once(void) {
+  memset(&g_cw, 0, sizeof g_cw);
+  const char *env_cache = getenv("EC_COWRIE_CACHE_DIR");
+  if (env_cache && env_cache[0]) {
+    snprintf(g_cache_dir, sizeof g_cache_dir, "%s", env_cache);
+  }
+
+  const char *env_lib = getenv("COWRIE_LIB");
+  const char *cands[5];
+  int nc = 0;
+  if (env_lib && env_lib[0]) cands[nc++] = env_lib;
+  cands[nc++] = "/tmp/cowrie-cargo-target/release/libcowrie_core.so";
+  cands[nc++] = "/home/omen/.local/lib/libcowrie_core.so";
+  cands[nc++] = "/usr/local/lib/libcowrie_core.so";
+  cands[nc++] = "libcowrie_core.so";
+
+  void *h = NULL;
+  for (int i = 0; i < nc && !h; i++) {
+    h = dlopen(cands[i], RTLD_NOW | RTLD_LOCAL);
+  }
+  if (!h) return;
+
+  g_cw.dl              = h;
+  g_cw.buf_free        = (fn_buf_free_t)dlsym(h, "cowrie_buf_free");
+  g_cw.err_name        = (fn_err_name_t)dlsym(h, "cowrie_err_name");
+  g_cw.has_shani       = (fn_has_shani_t)dlsym(h, "cowrie_has_shani");
+  g_cw.sha256_hex      = (fn_sha256_hex_t)dlsym(h, "cowrie_sha256_hex");
+  g_cw.model_fp        = (fn_model_fp_t)dlsym(h, "cowrie_model_fingerprint");
+  g_cw.encode_json     = (fn_encode_json_t)dlsym(h, "cowrie_encode_json");
+  g_cw.decode_json     = (fn_decode_json_t)dlsym(h, "cowrie_decode_to_json");
+  g_cw.frame_verify    = (fn_frame_verify_t)dlsym(h, "cowrie_frame_verify");
+  g_cw.project_lens    = (fn_project_lens_t)dlsym(h, "cowrie_project_lens");
+  g_cw.propagate_auth  = (fn_propagate_auth_t)dlsym(h, "cowrie_propagate_authority");
+  g_cw.is_tainted      = (fn_is_tainted_t)dlsym(h, "cowrie_is_tainted");
+  g_cw.sp_save         = (fn_sp_save_t)dlsym(h, "cowrie_statepage_save");
+  g_cw.sp_save_ext     = (fn_sp_save_ext_t)dlsym(h, "cowrie_statepage_save_ext");
+  g_cw.sp_open_checked = (fn_sp_open_chk_t)dlsym(h, "cowrie_statepage_open_checked");
+  g_cw.sp_open_full    = (fn_sp_open_full_t)dlsym(h, "cowrie_statepage_open_full");
+  g_cw.sp_data         = (fn_sp_data_t)dlsym(h, "cowrie_statepage_data");
+  g_cw.sp_len          = (fn_sp_len_t)dlsym(h, "cowrie_statepage_len");
+  g_cw.sp_close        = (fn_sp_close_t)dlsym(h, "cowrie_statepage_close");
+  g_cw.declassify_verify = (fn_declassify_verify_t)dlsym(h, "cowrie_declassify_verify");
+  g_cw.wal_open        = (fn_wal_open_t)dlsym(h, "cowrie_wal_open");
+  g_cw.wal_append      = (fn_wal_append_t)dlsym(h, "cowrie_wal_append_frame");
+  g_cw.wal_len         = (fn_wal_len_t)dlsym(h, "cowrie_wal_len");
+  g_cw.wal_close       = (fn_wal_close_t)dlsym(h, "cowrie_wal_close");
+
+  if (!g_cw.buf_free || !g_cw.sha256_hex || !g_cw.encode_json || !g_cw.frame_verify ||
+      !g_cw.project_lens || !g_cw.propagate_auth || !g_cw.is_tainted ||
+      !g_cw.sp_save || !g_cw.sp_open_checked || !g_cw.sp_data || !g_cw.sp_len || !g_cw.sp_close) {
+    dlclose(h);
+    memset(&g_cw, 0, sizeof g_cw);
+    return;
+  }
+  g_cw.loaded = 1;
+  g_cw.shani  = g_cw.has_shani ? (int)g_cw.has_shani() : 0;
+}
+
+int ec_cowrie_init(void) {
+  pthread_once(&g_cw_once, cw_load_once);
+  return g_cw.loaded ? 0 : -1;
+}
+
+int ec_cowrie_available(void) {
+  pthread_once(&g_cw_once, cw_load_once);
+  return g_cw.loaded;
+}
+
+int ec_cowrie_has_shani(void) {
+  pthread_once(&g_cw_once, cw_load_once);
+  return g_cw.loaded ? g_cw.shani : 0;
+}
+
+// Create private 0700 cache directories (prevents multi-user /tmp StatePage poisoning)
+static void cw_mkdir_p(const char *path) {
+  char tmp[384];
+  snprintf(tmp, sizeof tmp, "%s", path);
+  for (char *p = tmp + 1; *p; p++) {
+    if (*p == '/') {
+      *p = '\0';
+      mkdir(tmp, 0700);
+      *p = '/';
+    }
+  }
+  mkdir(tmp, 0700);
+  chmod(tmp, 0700);
+}
+
+void ec_cowrie_set_cache_dir(const char *dir) {
+  pthread_once(&g_cw_once, cw_load_once);
+  const char *env_cache = getenv("EC_COWRIE_CACHE_DIR");
+  const char *use = (env_cache && env_cache[0]) ? env_cache : dir;
+  if (!use || !use[0]) return;
+  pthread_mutex_lock(&g_cw_mu);
+  snprintf(g_cache_dir, sizeof g_cache_dir, "%s", use);
+  cw_mkdir_p(g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+}
+
+const char *ec_cowrie_get_cache_dir(void) {
+  pthread_once(&g_cw_once, cw_load_once);
+  return g_cache_dir;
+}
+
+void ec_cowrie_get_stats(ec_cowrie_stats_t *out) {
+  if (!out) return;
+  memset(out, 0, sizeof *out);
+  pthread_once(&g_cw_once, cw_load_once);
+  out->enabled       = g_cw.loaded;
+  out->shani         = g_cw.shani;
+  out->sp_saves      = atomic_load(&g_sp_saves);
+  out->sp_hits       = atomic_load(&g_sp_hits);
+  out->sp_misses     = atomic_load(&g_sp_misses);
+  out->sp_mismatches = atomic_load(&g_sp_mismatches);
+  pthread_mutex_lock(&g_cw_mu);
+  out->trust_entries = g_trust_count;
+  snprintf(out->cache_dir, sizeof out->cache_dir, "%s", g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+}
+
+// ===========================================================================
+// 2. Hashing & Unified Strided Model Contract Fingerprinting
+// ===========================================================================
+static void cw_bytes_to_hex(const uint8_t *in, size_t n, char *out) {
+  static const char H[] = "0123456789abcdef";
+  for (size_t i = 0; i < n; i++) {
+    out[2 * i]     = H[(in[i] >> 4) & 0xFu];
+    out[2 * i + 1] = H[in[i] & 0xFu];
+  }
+  out[2 * n] = '\0';
+}
+
+static void cw_fallback_hex64(const void *data, size_t len, char out_hex_65[65]) {
+  uint64_t h[4] = {
+    14695981039346656037ULL, 0x9E3779B97F4A7C15ULL,
+    0xBF58476D1CE4E5B9ULL,   0x94D049BB133111EBULL
+  };
+  const uint8_t *p = (const uint8_t *)data;
+  for (size_t i = 0; i < len; i++) {
+    for (int k = 0; k < 4; k++) {
+      h[k] ^= (uint64_t)p[i] ^ ((uint64_t)k << 8);
+      h[k] *= 1099511628211ULL;
+    }
+  }
+  snprintf(out_hex_65, 65, "%016llx%016llx%016llx%016llx",
+           (unsigned long long)h[0], (unsigned long long)h[1],
+           (unsigned long long)h[2], (unsigned long long)h[3]);
+}
+
+int ec_cowrie_sha256_hex(const void *data, size_t len, char out_hex_65[65]) {
+  if (!out_hex_65) return -1;
+  pthread_once(&g_cw_once, cw_load_once);
+  if (g_cw.loaded && g_cw.sha256_hex) {
+    static const uint8_t dummy = 0;
+    const uint8_t *ptr = (data && len > 0) ? (const uint8_t *)data : &dummy;
+    if (g_cw.sha256_hex(ptr, len, out_hex_65) == 0) return 0;
+  }
+  cw_fallback_hex64(data ? data : "", len, out_hex_65);
+  return 0;
+}
+
+int ec_cowrie_file_fingerprint(const char *path, char out_hex_65[65]) {
+  if (!out_hex_65) return -1;
+  out_hex_65[0] = '\0';
+  if (!path || !path[0]) {
+    return ec_cowrie_sha256_hex("empty", 5, out_hex_65);
+  }
+  pthread_once(&g_cw_once, cw_load_once);
+  if (g_cw.loaded && g_cw.model_fp) {
+    if (g_cw.model_fp(path, out_hex_65) == 0) return 0;
+  }
+  struct stat st;
+  if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) {
+    return ec_cowrie_sha256_hex(path, strlen(path), out_hex_65);
+  }
+  FILE *f = fopen(path, "rb");
+  if (!f) {
+    return ec_cowrie_sha256_hex(path, strlen(path), out_hex_65);
+  }
+  const size_t CHUNK = 65536;
+  const size_t STRIDES = 8;
+  uint8_t *buf = (uint8_t *)malloc(8 + STRIDES * CHUNK);
+  if (!buf) {
+    fclose(f);
+    return ec_cowrie_sha256_hex(path, strlen(path), out_hex_65);
+  }
+  uint64_t fsz = (uint64_t)st.st_size;
+  memcpy(buf, &fsz, 8);
+  size_t pos = 8;
+  if (fsz <= CHUNK * STRIDES) {
+    pos += fread(buf + pos, 1, (size_t)fsz, f);
+  } else {
+    uint64_t span = fsz - CHUNK;
+    for (size_t i = 0; i < STRIDES; i++) {
+      long off = (long)((i + 1 == STRIDES) ? span : (span * i) / (STRIDES - 1));
+      if (fseek(f, off, SEEK_SET) == 0) {
+        pos += fread(buf + pos, 1, CHUNK, f);
+      }
+    }
+  }
+  fclose(f);
+  int rc = ec_cowrie_sha256_hex(buf, pos, out_hex_65);
+  free(buf);
+  return rc;
+}
+
+int ec_cowrie_composite_sha(const char *const *parts, int n_parts, char out_hex_65[65]) {
+  char joined[2048];
+  size_t pos = 0;
+  joined[0] = '\0';
+  for (int i = 0; i < n_parts && pos + 8 < sizeof joined; i++) {
+    const char *s = (parts && parts[i]) ? parts[i] : "";
+    int n = snprintf(joined + pos, sizeof joined - pos, "%s%s", i ? "|" : "", s);
+    if (n > 0) pos += (size_t)n;
+  }
+  return ec_cowrie_sha256_hex(joined, pos, out_hex_65);
+}
+
+// ===========================================================================
+// 3. Phase A: 16 KB-Aligned SHA-NI StatePage Persistence
+// ===========================================================================
+static void cw_sp_build_path(const char *ns, const char *doc_cid, char *out_path, size_t cap) {
+  pthread_mutex_lock(&g_cw_mu);
+  char dir[320];
+  snprintf(dir, sizeof dir, "%s", g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+  snprintf(out_path, cap, "%s/%s_%.24s.state.cowrie", dir, ns ? ns : "sp", doc_cid);
+}
+
+int ec_cowrie_sp_save_file(
+    const char *path,
+    const char *model_sha_64,
+    const char *doc_cid_64,
+    uint32_t ctx_tokens, uint8_t kv_quant,
+    const void *state_data, size_t state_len) {
+  pthread_once(&g_cw_once, cw_load_once);
+  if (!g_cw.loaded || !path || !model_sha_64 || !doc_cid_64 || !state_data || state_len == 0) {
+    return -1;
+  }
+  int rc = g_cw.sp_save_ext
+      ? g_cw.sp_save_ext(path, model_sha_64, doc_cid_64, EC_RUNTIME_ID, 1,
+                         ctx_tokens, kv_quant, 0, (const uint8_t *)state_data, state_len)
+      : g_cw.sp_save(path, model_sha_64, doc_cid_64, ctx_tokens, kv_quant, 0,
+                     (const uint8_t *)state_data, state_len);
+  if (rc == 0) {
+    atomic_fetch_add(&g_sp_saves, 1);
+    return 0;
+  }
+  return -rc;
+}
+
+int ec_cowrie_sp_load_file(
+    const char *path,
+    const char *expected_model_sha_64,
+    int expected_kv_quant,
+    void *out_buf, size_t max_len, size_t *out_actual_len) {
+  pthread_once(&g_cw_once, cw_load_once);
+  if (!g_cw.loaded || !path || !out_buf) return -1;
+  cw_sp_handle_t *h = NULL;
+  int rc = g_cw.sp_open_full
+      ? g_cw.sp_open_full(path, expected_model_sha_64, EC_RUNTIME_ID, expected_kv_quant, -1, 1, &h)
+      : g_cw.sp_open_checked(path, expected_model_sha_64, expected_kv_quant, 1, &h);
+  if (rc != 0 || !h) {
+    if (rc == EC_COWRIE_ERR_MODEL_MISMATCH ||
+        rc == EC_COWRIE_ERR_STATEPAGE_HASH_MISMATCH ||
+        rc == EC_COWRIE_ERR_KV_QUANT_MISMATCH ||
+        rc == EC_COWRIE_ERR_SSM_DTYPE_MISMATCH ||
+        rc == EC_COWRIE_ERR_RUNTIME_MISMATCH ||
+        rc == EC_COWRIE_ERR_AUTH_MAC_MISMATCH) {
+      atomic_fetch_add(&g_sp_mismatches, 1);
+    } else {
+      atomic_fetch_add(&g_sp_misses, 1);
+    }
+    return rc > 0 ? -rc : -1;
+  }
+  size_t slen = g_cw.sp_len(h);
+  const uint8_t *sptr = g_cw.sp_data(h);
+  if (out_actual_len) *out_actual_len = slen;
+  if (!sptr || slen == 0 || slen > max_len) {
+    g_cw.sp_close(h);
+    atomic_fetch_add(&g_sp_misses, 1);
+    return -1;
+  }
+  memcpy(out_buf, sptr, slen);
+  g_cw.sp_close(h);
+  atomic_fetch_add(&g_sp_hits, 1);
+  return 0;
+}
+
+int ec_cowrie_sp_save(
+    const char *ns,
+    const char *model_sha_64,
+    const void *key_data, size_t key_len,
+    uint32_t ctx_tokens, uint8_t kv_quant,
+    const void *state_data, size_t state_len) {
+  if (!ec_cowrie_available() || !model_sha_64 || strlen(model_sha_64) != 64 || !state_data || state_len == 0) {
+    return -1;
+  }
+  pthread_mutex_lock(&g_cw_mu);
+  cw_mkdir_p(g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+
+  char doc_cid[65];
+  ec_cowrie_sha256_hex(key_data, key_len, doc_cid);
+  char path[512];
+  cw_sp_build_path(ns, doc_cid, path, sizeof path);
+  return ec_cowrie_sp_save_file(path, model_sha_64, doc_cid, ctx_tokens, kv_quant, state_data, state_len);
+}
+
+int ec_cowrie_sp_load(
+    const char *ns,
+    const char *expected_model_sha_64,
+    const void *key_data, size_t key_len,
+    int expected_kv_quant,
+    void *out_buf, size_t expected_len) {
+  if (!ec_cowrie_available() || !expected_model_sha_64 || strlen(expected_model_sha_64) != 64 ||
+       !out_buf || expected_len == 0) {
+    return -1;
+  }
+  char doc_cid[65];
+  ec_cowrie_sha256_hex(key_data, key_len, doc_cid);
+  char path[512];
+  cw_sp_build_path(ns, doc_cid, path, sizeof path);
+
+  struct stat st;
+  if (stat(path, &st) != 0) {
+    atomic_fetch_add(&g_sp_misses, 1);
+    return -1;
+  }
+  size_t actual = 0;
+  int rc = ec_cowrie_sp_load_file(path, expected_model_sha_64, expected_kv_quant, out_buf, expected_len, &actual);
+  if (rc != 0) return rc;
+  if (actual != expected_len) return -1;
+  return 0;
+}
+
+int ec_cowrie_sp_purge_prefix(const char *ns_prefix) {
+  pthread_once(&g_cw_once, cw_load_once);
+  pthread_mutex_lock(&g_cw_mu);
+  char dir[320];
+  snprintf(dir, sizeof dir, "%s", g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+
+  DIR *d = opendir(dir);
+  if (!d) return 0;
+  size_t plen = ns_prefix ? strlen(ns_prefix) : 0;
+  int removed = 0;
+  struct dirent *de;
+  while ((de = readdir(d)) != NULL) {
+    if (de->d_name[0] == '.') continue;
+    if (!strstr(de->d_name, ".state.cowrie")) continue;
+    if (plen > 0 && strncmp(de->d_name, ns_prefix, plen) != 0) continue;
+    char full[600];
+    snprintf(full, sizeof full, "%s/%s", dir, de->d_name);
+    if (unlink(full) == 0) removed++;
+  }
+  closedir(d);
+  return removed;
+}
+
+int ec_cowrie_sp_save_prefix(
+    const char *ns,
+    const char *model_sha_64,
+    const int32_t *token_ids, uint32_t num_tokens, uint32_t block_size,
+    uint8_t kv_quant,
+    const void *state_data, size_t state_len) {
+  if (!ec_cowrie_available() || !model_sha_64 || strlen(model_sha_64) != 64 ||
+      !token_ids || num_tokens == 0 || block_size == 0 || (num_tokens % block_size) != 0 ||
+      !state_data || state_len == 0) {
+    return -1;
+  }
+  pthread_mutex_lock(&g_cw_mu);
+  cw_mkdir_p(g_cache_dir);
+  char dir[320];
+  snprintf(dir, sizeof dir, "%s", g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+
+  char doc_cid[65];
+  ec_cowrie_sha256_hex(token_ids, (size_t)num_tokens * sizeof(int32_t), doc_cid);
+  char path[512];
+  snprintf(path, sizeof path, "%s/%s_p%u_%.24s.state.cowrie",
+           dir, ns ? ns : "pfx", (unsigned)num_tokens, doc_cid);
+  return ec_cowrie_sp_save_file(path, model_sha_64, doc_cid, num_tokens, kv_quant, state_data, state_len);
+}
+
+uint32_t ec_cowrie_sp_load_longest_prefix(
+    const char *ns,
+    const char *expected_model_sha_64,
+    const int32_t *token_ids, uint32_t num_tokens, uint32_t block_size,
+    int expected_kv_quant,
+    void *out_buf, size_t max_len, size_t *out_actual_len) {
+  if (!ec_cowrie_available() || !expected_model_sha_64 || strlen(expected_model_sha_64) != 64 ||
+      !token_ids || num_tokens <= 1 || block_size == 0 || !out_buf) {
+    return 0;
+  }
+  uint32_t max_valid = ((num_tokens - 1u) / block_size) * block_size;
+  if (max_valid == 0) return 0;
+
+  pthread_mutex_lock(&g_cw_mu);
+  char dir[320];
+  snprintf(dir, sizeof dir, "%s", g_cache_dir);
+  pthread_mutex_unlock(&g_cw_mu);
+
+  char prefix_tag[96];
+  int ptag_len = snprintf(prefix_tag, sizeof prefix_tag, "%s_p", ns ? ns : "pfx");
+  DIR *d = opendir(dir);
+  if (!d) return 0;
+
+  uint32_t cands[256];
+  int nc = 0;
+  struct dirent *de;
+  while ((de = readdir(d)) != NULL && nc < 256) {
+    if (strncmp(de->d_name, prefix_tag, (size_t)ptag_len) != 0) continue;
+    if (!strstr(de->d_name, ".state.cowrie")) continue;
+    char *endp = NULL;
+    unsigned long nt = strtoul(de->d_name + ptag_len, &endp, 10);
+    if (!endp || *endp != '_' || nt == 0 || nt > max_valid || (nt % block_size) != 0) continue;
+    int dup = 0;
+    for (int k = 0; k < nc; k++) if (cands[k] == (uint32_t)nt) { dup = 1; break; }
+    if (!dup) cands[nc++] = (uint32_t)nt;
+  }
+  closedir(d);
+
+  // Sort candidate lengths descending so we restore the longest verified prefix!
+  for (int i = 0; i < nc; i++) {
+    for (int j = i + 1; j < nc; j++) {
+      if (cands[j] > cands[i]) { uint32_t t = cands[i]; cands[i] = cands[j]; cands[j] = t; }
+    }
+  }
+
+  for (int i = 0; i < nc; i++) {
+    uint32_t nt = cands[i];
+    char doc_cid[65];
+    ec_cowrie_sha256_hex(token_ids, (size_t)nt * sizeof(int32_t), doc_cid);
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s_p%u_%.24s.state.cowrie",
+             dir, ns ? ns : "pfx", (unsigned)nt, doc_cid);
+    struct stat st;
+    if (stat(path, &st) != 0) continue;
+    if (ec_cowrie_sp_load_file(path, expected_model_sha_64, expected_kv_quant, out_buf, max_len, out_actual_len) == 0) {
+      return nt;
+    }
+  }
+  return 0;
+}
+
+// ===========================================================================
+// 4. Phase B: Hardened Fail-Closed Trust Membrane, Gate & R0/R1/R2 Lenses
+// ===========================================================================
+static void cw_json_esc(const char *src, char *dst, size_t cap) {
+  size_t j = 0;
+  for (size_t i = 0; src && src[i] && j + 6 < cap; i++) {
+    unsigned char c = (unsigned char)src[i];
+    if (c == '"' || c == '\\') { dst[j++] = '\\'; dst[j++] = (char)c; }
+    else if (c == '\n') { dst[j++] = '\\'; dst[j++] = 'n'; }
+    else if (c == '\r') { dst[j++] = '\\'; dst[j++] = 'r'; }
+    else if (c == '\t') { dst[j++] = '\\'; dst[j++] = 't'; }
+    else if (c >= 0x20) dst[j++] = (char)c;
+  }
+  dst[j] = '\0';
+}
+
+static void cw_extract_handle(const char *r0, const char *cid_hex, char out_handle[24]) {
+  if (r0) {
+    const char *at = strchr(r0, '@');
+    if (at) {
+      size_t j = 0;
+      while (at[j] && at[j] != ' ' && at[j] != '\n' && at[j] != '\r' &&
+             at[j] != '\t' && at[j] != ')' && at[j] != ']' && at[j] != '|' && j + 1 < 24) {
+        out_handle[j] = at[j];
+        j++;
+      }
+      out_handle[j] = '\0';
+      if (j >= 2) return;
+    }
+  }
+  snprintf(out_handle, 24, "@%.10s", (cid_hex && cid_hex[0]) ? cid_hex : "0000000000");
+}
+
+uint8_t ec_cowrie_propagate_authority(uint8_t base_auth, const uint8_t *parents, size_t n_parents) {
+  pthread_once(&g_cw_once, cw_load_once);
+  if (g_cw.loaded && g_cw.propagate_auth) {
+    return g_cw.propagate_auth(base_auth, parents, n_parents);
+  }
+  uint8_t eff = base_auth;
+  if ((eff & (EC_COWRIE_BIT_TAINTED | EC_COWRIE_AUTH_UNTRUSTED_EXT)) != 0) {
+    eff |= EC_COWRIE_BIT_TAINTED;
+  }
+  for (size_t i = 0; i < n_parents; i++) {
+    if ((parents[i] & (EC_COWRIE_BIT_TAINTED | EC_COWRIE_AUTH_UNTRUSTED_EXT)) != 0) {
+      eff |= EC_COWRIE_BIT_TAINTED;
+    }
+  }
+  return eff;
+}
+
+int ec_cowrie_is_tainted(uint8_t authority) {
+  pthread_once(&g_cw_once, cw_load_once);
+  if (g_cw.loaded && g_cw.is_tainted) {
+    return (int)g_cw.is_tainted(authority);
+  }
+  return ((authority & (EC_COWRIE_BIT_TAINTED | EC_COWRIE_AUTH_UNTRUSTED_EXT)) != 0) ? 1 : 0;
+}
+
+// Strict collision-aware lookup:
+// - Accepts exact 68-hex CID, >= 32-hex unambiguous prefix, or unambiguous `@handle`.
+// - Rejects short 8-char prefix guesses (`[HIGH-01]`).
+// - If >= 2 distinct CIDs collide on the same `@handle` or prefix, sets `*out_ambiguous = 1` and returns NULL!
+static trust_rec_t *trust_find_strict_locked(const char *id, int *out_ambiguous) {
+  if (out_ambiguous) *out_ambiguous = 0;
+  if (!id || !id[0]) return NULL;
+  size_t ilen = strlen(id);
+  trust_rec_t *found = NULL;
+
+  for (int i = 0; i < EC_TRUST_MAX; i++) {
+    if (!g_trust[i].used) continue;
+    int match = 0;
+    if (!strcmp(g_trust[i].cid_hex, id)) {
+      return &g_trust[i]; // Exact 34-byte multihash CID match
+    }
+    if (id[0] == '@' && !strcmp(g_trust[i].handle, id)) {
+      match = 1;
+    } else if (id[0] != '@' && ilen >= 32 && !strncmp(g_trust[i].cid_hex, id, ilen)) {
+      match = 1;
+    }
+    if (match) {
+      if (found && strcmp(found->cid_hex, g_trust[i].cid_hex) != 0) {
+        if (out_ambiguous) *out_ambiguous = 1;
+        return NULL; // Ambiguous handle collision -> fail closed!
+      }
+      found = &g_trust[i];
+    }
+  }
+  return found;
+}
+
+static trust_rec_t *trust_alloc_slot_locked(void) {
+  // First pass: prefer unused or untainted slots so tainted lineage is never evicted by clean churn!
+  for (int step = 0; step < EC_TRUST_MAX; step++) {
+    int idx = (g_trust_next + step) % EC_TRUST_MAX;
+    if (!g_trust[idx].used) {
+      g_trust_count++;
+      g_trust_next = (idx + 1) % EC_TRUST_MAX;
+      return &g_trust[idx];
+    }
+  }
+  for (int step = 0; step < EC_TRUST_MAX; step++) {
+    int idx = (g_trust_next + step) % EC_TRUST_MAX;
+    if (!g_trust[idx].tainted) {
+      g_trust_next = (idx + 1) % EC_TRUST_MAX;
+      return &g_trust[idx];
+    }
+  }
+  // All 4,096 slots are tainted; overwrite oldest tainted slot (any evicted ID becomes unknown -> still fails closed!).
+  trust_rec_t *dst = &g_trust[g_trust_next % EC_TRUST_MAX];
+  g_trust_next = (g_trust_next + 1) % EC_TRUST_MAX;
+  return dst;
+}
+
+static void cw_audit_wal_append_locked(const uint8_t *frame, size_t flen) {
+  if (!g_cw.loaded || !g_cw.wal_open || !g_cw.wal_append || !frame || flen == 0) return;
+  if (strcmp(g_audit_wal_dir, g_cache_dir) != 0) {
+    if (g_audit_wal && g_cw.wal_close) {
+      g_cw.wal_close(g_audit_wal);
+      g_audit_wal = NULL;
+    }
+    cw_mkdir_p(g_cache_dir);
+    char wpath[512];
+    snprintf(wpath, sizeof wpath, "%s/creative_audit.cwwal", g_cache_dir);
+    if (g_cw.wal_open(wpath, 1, &g_audit_wal) == 0) {
+      snprintf(g_audit_wal_dir, sizeof g_audit_wal_dir, "%s", g_cache_dir);
+    } else {
+      g_audit_wal = NULL;
+    }
+  }
+  if (g_audit_wal) {
+    uint64_t seq = 0;
+    uint8_t cid[34];
+    g_cw.wal_append(g_audit_wal, frame, flen, 1, &seq, cid);
+  }
+}
+
+size_t ec_cowrie_audit_wal_len(void) {
+  pthread_once(&g_cw_once, cw_load_once);
+  pthread_mutex_lock(&g_cw_mu);
+  size_t n = (g_audit_wal && g_cw.wal_len) ? g_cw.wal_len(g_audit_wal) : 0;
+  pthread_mutex_unlock(&g_cw_mu);
+  return n;
+}
+
+static int cw_hex_to_bytes(const char *hex, uint8_t *out, size_t nbytes) {
+  if (!hex || strlen(hex) != 2 * nbytes) return 0;
+  for (size_t i = 0; i < nbytes; i++) {
+    int v[2];
+    for (int k = 0; k < 2; k++) {
+      char c = hex[2 * i + k];
+      if (c >= '0' && c <= '9') v[k] = c - '0';
+      else if (c >= 'a' && c <= 'f') v[k] = c - 'a' + 10;
+      else if (c >= 'A' && c <= 'F') v[k] = c - 'A' + 10;
+      else return 0;
+    }
+    out[i] = (uint8_t)((v[0] << 4) | v[1]);
+  }
+  return 1;
+}
+
+static int cw_action_code(const char *act) {
+  if (!act) return -1;
+  if (!strcmp(act, "read_only") || !strcmp(act, "read_only_safe") || !strcmp(act, "search")) return 0;
+  if (!strcmp(act, "shell_exec") || !strcmp(act, "custom_node_exec")) return 1;
+  if (!strcmp(act, "cred_read")) return 2;
+  if (!strcmp(act, "fs_write") || !strcmp(act, "model_install")) return 3;
+  if (!strcmp(act, "net_exfil") || !strcmp(act, "webhook_post")) return 4;
+  return -1;
+}
+
+int ec_cowrie_canonical_json_cid(
+    const char *json, size_t json_len, uint8_t authority,
+    char out_cid_hex[69], size_t *out_cowr_len) {
+  if (!json || !out_cid_hex) return -1;
+  out_cid_hex[0] = '\0';
+  if (out_cowr_len) *out_cowr_len = 0;
+  if (!ec_cowrie_available()) return -1;
+
+  cw_buf_t frame = {0};
+  int rc = g_cw.encode_json((const uint8_t *)json, json_len, authority, EC_COWRIE_EPI_OBSERVED, &frame);
+  if (rc != 0 || !frame.data || frame.len == 0) {
+    if (frame.data) g_cw.buf_free(frame);
+    return rc > 0 ? -rc : -1;
+  }
+  uint8_t v_auth = 0, v_epi = 0, cid34[34] = {0};
+  int vrc = g_cw.frame_verify(frame.data, frame.len, &v_auth, &v_epi, cid34);
+  if (vrc == 0) {
+    cw_bytes_to_hex(cid34, 34, out_cid_hex);
+    if (out_cowr_len) *out_cowr_len = frame.len;
+  }
+  g_cw.buf_free(frame);
+  return vrc == 0 ? 0 : -vrc;
+}
+
+int ec_cowrie_trust_register_json(
+    const char *json, size_t json_len,
+    uint8_t base_authority,
+    const char *source, const char *label,
+    const char *const *parent_ids, int n_parents,
+    ec_cowrie_trust_meta_t *out_meta) {
+  if (out_meta) memset(out_meta, 0, sizeof *out_meta);
+  if (!json || json_len == 0 || n_parents < 0) return -1;
+
+  // Dynamically inspect ALL parents (zero `np < 32` truncation; unknown/ambiguous parent fails closed as tainted!)
+  uint8_t stack_pauths[64];
+  uint8_t *pauths = stack_pauths;
+  if (n_parents > 64) {
+    pauths = (uint8_t *)malloc((size_t)n_parents);
+    if (!pauths) return -1;
+  }
+  size_t np = 0;
+  pthread_mutex_lock(&g_cw_mu);
+  for (int i = 0; i < n_parents; i++) {
+    int ambig = 0;
+    const char *pid = parent_ids ? parent_ids[i] : NULL;
+    trust_rec_t *pr = trust_find_strict_locked(pid, &ambig);
+    if (pr && !ambig) {
+      pauths[np++] = pr->authority;
+    } else {
+      pauths[np++] = (uint8_t)(EC_COWRIE_AUTH_UNTRUSTED_EXT | EC_COWRIE_BIT_TAINTED);
+    }
+  }
+  pthread_mutex_unlock(&g_cw_mu);
+
+  uint8_t eff_auth = ec_cowrie_propagate_authority(base_authority, pauths, np);
+  if (pauths != stack_pauths) free(pauths);
+  int tainted = ec_cowrie_is_tainted(eff_auth);
+
+  ec_cowrie_trust_meta_t meta;
+  memset(&meta, 0, sizeof meta);
+  meta.authority = eff_auth;
+  meta.epistemic = EC_COWRIE_EPI_OBSERVED;
+  meta.tainted   = tainted;
+  meta.raw_bytes = json_len;
+
+  if (ec_cowrie_available()) {
+    cw_buf_t frame = {0};
+    int rc = g_cw.encode_json((const uint8_t *)json, json_len, eff_auth, EC_COWRIE_EPI_OBSERVED, &frame);
+    if (rc == 0 && frame.data && frame.len > 0) {
+      uint8_t v_auth = 0, v_epi = 0, cid34[34] = {0};
+      if (g_cw.frame_verify(frame.data, frame.len, &v_auth, &v_epi, cid34) == 0) {
+        meta.ok         = 1;
+        meta.authority  = v_auth;
+        meta.epistemic  = v_epi;
+        meta.tainted    = ec_cowrie_is_tainted(v_auth);
+        meta.cowr_bytes = frame.len;
+        cw_bytes_to_hex(cid34, 34, meta.cid_hex);
+
+        cw_buf_t b0 = {0}, b1 = {0};
+        if (g_cw.project_lens(frame.data, frame.len, 0, 0, &b0) == 0 && b0.data && b0.len > 0) {
+          size_t cp = b0.len < sizeof(meta.r0) - 1 ? b0.len : sizeof(meta.r0) - 1;
+          memcpy(meta.r0, b0.data, cp);
+          meta.r0[cp] = '\0';
+        }
+        if (b0.data) g_cw.buf_free(b0);
+
+        if (g_cw.project_lens(frame.data, frame.len, 1, 0, &b1) == 0 && b1.data && b1.len > 0) {
+          size_t cp = b1.len < sizeof(meta.r1) - 1 ? b1.len : sizeof(meta.r1) - 1;
+          memcpy(meta.r1, b1.data, cp);
+          meta.r1[cp] = '\0';
+        }
+        if (b1.data) g_cw.buf_free(b1);
+
+        cw_extract_handle(meta.r0, meta.cid_hex, meta.handle);
+        pthread_mutex_lock(&g_cw_mu);
+        cw_audit_wal_append_locked(frame.data, frame.len);
+        pthread_mutex_unlock(&g_cw_mu);
+      }
+    }
+    if (frame.data) g_cw.buf_free(frame);
+  }
+
+  if (!meta.ok) {
+    char h64[65];
+    ec_cowrie_sha256_hex(json, json_len, h64);
+    snprintf(meta.cid_hex, sizeof meta.cid_hex, "1220%s", h64);
+    snprintf(meta.handle, sizeof meta.handle, "@%.10s", h64);
+    snprintf(meta.r0, sizeof meta.r0, "%s auth=0x%02x %zuB", meta.handle, eff_auth, json_len);
+    meta.cowr_bytes = json_len;
+    meta.ok = 1;
+  }
+
+  // Upsert into Creative Trust Store (sticky taint: re-registering an existing CID cannot clear taint!)
+  pthread_mutex_lock(&g_cw_mu);
+  trust_rec_t *dst = trust_find_strict_locked(meta.cid_hex, NULL);
+  if (dst && dst->tainted && !meta.tainted) {
+    meta.authority |= EC_COWRIE_BIT_TAINTED;
+    meta.tainted = 1;
+  }
+  if (!dst) {
+    dst = trust_alloc_slot_locked();
+  }
+  dst->used       = 1;
+  dst->authority  = meta.authority;
+  dst->epistemic  = meta.epistemic;
+  dst->tainted    = meta.tainted;
+  dst->raw_bytes  = meta.raw_bytes;
+  dst->cowr_bytes = meta.cowr_bytes;
+  snprintf(dst->cid_hex, sizeof dst->cid_hex, "%s", meta.cid_hex);
+  snprintf(dst->handle,  sizeof dst->handle,  "%s", meta.handle);
+  snprintf(dst->source,  sizeof dst->source,  "%s", source ? source : "external");
+  snprintf(dst->label,   sizeof dst->label,   "%s", label  ? label  : "workflow");
+  snprintf(dst->r0,      sizeof dst->r0,      "%s", meta.r0);
+  snprintf(dst->r1,      sizeof dst->r1,      "%s", meta.r1);
+  pthread_mutex_unlock(&g_cw_mu);
+
+  if (out_meta) *out_meta = meta;
+  return 0;
+}
+
+static int cw_is_readonly_action(const char *action) {
+  if (!action || !action[0]) return 0;
+  return (!strcmp(action, "read_only") ||
+          !strcmp(action, "read_only_safe") ||
+          !strcmp(action, "search") ||
+          !strcmp(action, "preview") ||
+          !strcmp(action, "inspect")) ? 1 : 0;
+}
+
+int ec_cowrie_trust_gate_json(
+    const char *action,
+    const char *const *arg_ids, int n_args,
+    int owner_override,
+    char *out_json, size_t out_cap) {
+  const char *act = (action && action[0]) ? action : "unknown";
+  int ro = cw_is_readonly_action(act);
+
+  uint8_t stack_pauths[64];
+  uint8_t *pauths = stack_pauths;
+  size_t alloc_n = (n_args > 0) ? (size_t)n_args : 1u;
+  if (alloc_n > 64) {
+    pauths = (uint8_t *)malloc(alloc_n);
+    if (!pauths) {
+      snprintf(out_json, out_cap, "{\"ok\":false,\"allowed\":false,\"error\":\"ERR_ALLOC_LIMIT\"}");
+      return 403;
+    }
+  }
+
+  size_t np = 0;
+  char tainted_src[96] = {0};
+  int unknown_args = 0;
+
+  pthread_mutex_lock(&g_cw_mu);
+  if (n_args <= 0 && !ro) {
+    // Privileged call with empty lineage fails closed!
+    pauths[np++] = (uint8_t)(EC_COWRIE_AUTH_UNTRUSTED_EXT | EC_COWRIE_BIT_TAINTED);
+    unknown_args++;
+    snprintf(tainted_src, sizeof tainted_src, "<empty_lineage>");
+  } else {
+    for (int i = 0; i < n_args; i++) {
+      const char *aid = arg_ids ? arg_ids[i] : NULL;
+      int ambig = 0;
+      trust_rec_t *r = (aid && aid[0]) ? trust_find_strict_locked(aid, &ambig) : NULL;
+      if (r && !ambig) {
+        pauths[np++] = r->authority;
+        if (r->tainted && !tainted_src[0]) {
+          snprintf(tainted_src, sizeof tainted_src, "%s (%s)", r->handle, r->source);
+        }
+      } else {
+        // Unknown or colliding handle fails closed as tainted!
+        pauths[np++] = (uint8_t)(EC_COWRIE_AUTH_UNTRUSTED_EXT | EC_COWRIE_BIT_TAINTED);
+        unknown_args++;
+        if (!tainted_src[0]) {
+          snprintf(tainted_src, sizeof tainted_src, "%s (%s)",
+                   (aid && aid[0]) ? aid : "<null>",
+                   ambig ? "ambiguous_collision" : "unknown_id");
+        }
+      }
+    }
+  }
+  pthread_mutex_unlock(&g_cw_mu);
+
+  uint8_t eff_auth = ec_cowrie_propagate_authority(EC_COWRIE_AUTH_VERIFIED_TOOL, pauths, np);
+  if (pauths != stack_pauths) free(pauths);
+  int tainted = ec_cowrie_is_tainted(eff_auth);
+
+  char e_act[128], e_src[160];
+  cw_json_esc(act, e_act, sizeof e_act);
+  cw_json_esc(tainted_src, e_src, sizeof e_src);
+
+  if (tainted && !ro && !owner_override) {
+    snprintf(out_json, out_cap,
+        "{\"ok\":false,\"allowed\":false,\"error\":\"ERR_TAINTED_EXECUTION_BLOCKED\","
+        "\"code\":%d,\"action\":\"%s\",\"effective_authority\":%u,\"tainted\":true,"
+        "\"tainted_source\":\"%s\",\"checked_args\":%zu,\"unknown_args\":%d,"
+        "\"owner_override_required\":true}",
+        EC_COWRIE_ERR_TAINTED_EXEC_BLOCKED, e_act, (unsigned)eff_auth,
+        e_src, np, unknown_args);
+    return 403;
+  }
+
+  snprintf(out_json, out_cap,
+      "{\"ok\":true,\"allowed\":true,\"action\":\"%s\",\"effective_authority\":%u,"
+      "\"tainted\":%s,\"tainted_source\":\"%s\",\"read_only\":%s,\"owner_override\":%s,"
+      "\"checked_args\":%zu,\"unknown_args\":%d}",
+      e_act, (unsigned)eff_auth, tainted ? "true" : "false", e_src,
+      ro ? "true" : "false", owner_override ? "true" : "false",
+      np, unknown_args);
+  return 200;
+}
+
+int ec_cowrie_trust_gate_signed_json(
+    const char *action,
+    const char *const *arg_ids, int n_args,
+    const ec_cowrie_declassify_tok_t *tokens, int n_tokens,
+    const char *owner_pubkey_hex,
+    uint64_t now_unix,
+    char *out_json, size_t out_cap) {
+  pthread_once(&g_cw_once, cw_load_once);
+  const char *act = (action && action[0]) ? action : "unknown";
+  int ro = cw_is_readonly_action(act);
+  if (ro) {
+    return ec_cowrie_trust_gate_json(act, arg_ids, n_args, 0, out_json, out_cap);
+  }
+  const char *pk_hex = (owner_pubkey_hex && owner_pubkey_hex[0])
+      ? owner_pubkey_hex : getenv("EC_COWRIE_OWNER_PUBKEY");
+  uint8_t pk[32];
+  int has_pk = (pk_hex && cw_hex_to_bytes(pk_hex, pk, 32) && g_cw.loaded && g_cw.declassify_verify);
+  int acode = cw_action_code(act);
+
+  if (n_args <= 0) {
+    return ec_cowrie_trust_gate_json(act, arg_ids, n_args, 0, out_json, out_cap);
+  }
+
+  int declassified_cnt = 0;
+  char bad_src[96] = {0};
+  pthread_mutex_lock(&g_cw_mu);
+  for (int i = 0; i < n_args; i++) {
+    const char *aid = arg_ids ? arg_ids[i] : NULL;
+    int ambig = 0;
+    trust_rec_t *r = (aid && aid[0]) ? trust_find_strict_locked(aid, &ambig) : NULL;
+    if (!r || ambig) {
+      snprintf(bad_src, sizeof bad_src, "%s (%s)",
+               (aid && aid[0]) ? aid : "<null>", ambig ? "ambiguous" : "unknown_id");
+      break;
+    }
+    if (r->tainted) {
+      int approved = 0;
+      uint8_t cid34[34];
+      if (has_pk && acode > 0 && cw_hex_to_bytes(r->cid_hex, cid34, 34)) {
+        for (int t = 0; t < n_tokens; t++) {
+          uint8_t sig64[64];
+          if (tokens && tokens[t].cid_hex && !strcmp(tokens[t].cid_hex, r->cid_hex) &&
+              cw_hex_to_bytes(tokens[t].sig_hex, sig64, 64)) {
+            if (g_cw.declassify_verify(pk, cid34, (uint8_t)acode, tokens[t].expiry_unix, sig64, now_unix) == 0) {
+              approved = 1;
+              break;
+            }
+          }
+        }
+      }
+      if (approved) {
+        declassified_cnt++;
+      } else {
+        snprintf(bad_src, sizeof bad_src, "%s (%s)", r->handle, r->source);
+        break;
+      }
+    }
+  }
+  pthread_mutex_unlock(&g_cw_mu);
+
+  char e_act[128], e_src[160];
+  cw_json_esc(act, e_act, sizeof e_act);
+  cw_json_esc(bad_src, e_src, sizeof e_src);
+
+  if (bad_src[0]) {
+    snprintf(out_json, out_cap,
+        "{\"ok\":false,\"allowed\":false,\"error\":\"ERR_TAINTED_EXECUTION_BLOCKED\","
+        "\"code\":%d,\"action\":\"%s\",\"tainted\":true,\"tainted_source\":\"%s\","
+        "\"ed25519_required\":true}",
+        EC_COWRIE_ERR_TAINTED_EXEC_BLOCKED, e_act, e_src);
+    return 403;
+  }
+  snprintf(out_json, out_cap,
+      "{\"ok\":true,\"allowed\":true,\"action\":\"%s\",\"tainted\":false,"
+      "\"ed25519_declassified\":%d,\"checked_args\":%d}",
+      e_act, declassified_cnt, n_args);
+  return 200;
+}
+
+int ec_cowrie_trust_triage_json(char *out_json, size_t out_cap) {
+  if (!out_json || out_cap < 64) return -1;
+  pthread_mutex_lock(&g_cw_mu);
+  int pos = snprintf(out_json, out_cap,
+      "{\"ok\":true,\"cowrie_enabled\":%s,\"cowrie_shani\":%s,\"count\":%d,\"entries\":[",
+      ec_cowrie_available() ? "true" : "false",
+      ec_cowrie_has_shani() ? "true" : "false",
+      g_trust_count);
+  int emitted = 0;
+  for (int i = 0; i < EC_TRUST_MAX && (size_t)pos + 512 < out_cap; i++) {
+    const trust_rec_t *r = &g_trust[i];
+    if (!r->used) continue;
+    char e_src[96], e_lbl[128], e_r0[256];
+    cw_json_esc(r->source, e_src, sizeof e_src);
+    cw_json_esc(r->label,  e_lbl, sizeof e_lbl);
+    cw_json_esc(r->r0,     e_r0,  sizeof e_r0);
+    pos += snprintf(out_json + pos, out_cap - (size_t)pos,
+        "%s{\"handle\":\"%s\",\"cid\":\"%s\",\"authority\":%u,\"tainted\":%s,"
+        "\"source\":\"%s\",\"label\":\"%s\",\"raw_bytes\":%zu,\"cowr_bytes\":%zu,\"r0\":\"%s\"}",
+        emitted ? "," : "", r->handle, r->cid_hex, (unsigned)r->authority,
+        r->tainted ? "true" : "false", e_src, e_lbl, r->raw_bytes, r->cowr_bytes, e_r0);
+    emitted++;
+  }
+  pos += snprintf(out_json + pos, out_cap - (size_t)pos, "]}");
+  pthread_mutex_unlock(&g_cw_mu);
+  return pos;
+}
+
+int ec_cowrie_lens_response_json(
+    const char *target,
+    const char *raw_json, size_t raw_len,
+    uint8_t authority, int tier,
+    char *out_json, size_t out_cap) {
+  if (!target || !raw_json || !out_json || out_cap < 256) return -1;
+  if (tier < 0) tier = 0;
+  if (tier > 2) tier = 2;
+  const char *tier_name = (tier == 0) ? "r0" : (tier == 1 ? "r1" : "r2");
+
+  char cid_hex[69] = {0};
+  char handle[24]  = {0};
+  size_t cowr_len  = raw_len;
+  size_t lens_len  = raw_len;
+  char *lens_esc   = NULL;
+
+  if (ec_cowrie_available()) {
+    cw_buf_t frame = {0};
+    int rc = g_cw.encode_json((const uint8_t *)raw_json, raw_len, authority, EC_COWRIE_EPI_OBSERVED, &frame);
+    if (rc == 0 && frame.data && frame.len > 0) {
+      cowr_len = frame.len;
+      uint8_t va = 0, ve = 0, cid34[34] = {0};
+      if (g_cw.frame_verify(frame.data, frame.len, &va, &ve, cid34) == 0) {
+        cw_bytes_to_hex(cid34, 34, cid_hex);
+      }
+      cw_buf_t r0b = {0};
+      if (g_cw.project_lens(frame.data, frame.len, 0, 0, &r0b) == 0 && r0b.data && r0b.len > 0) {
+        char r0tmp[160];
+        size_t cp = r0b.len < sizeof(r0tmp) - 1 ? r0b.len : sizeof(r0tmp) - 1;
+        memcpy(r0tmp, r0b.data, cp); r0tmp[cp] = '\0';
+        cw_extract_handle(r0tmp, cid_hex, handle);
+      } else {
+        cw_extract_handle(NULL, cid_hex, handle);
+      }
+      if (r0b.data) g_cw.buf_free(r0b);
+
+      cw_buf_t lb = {0};
+      if (g_cw.project_lens(frame.data, frame.len, (uint8_t)tier, 0, &lb) == 0 && lb.data) {
+        lens_len = lb.len;
+        char *lstr = (char *)malloc(lb.len + 1);
+        size_t ecap = lb.len * 2 + 64;
+        if (ecap > out_cap - 512) ecap = out_cap - 512;
+        lens_esc = (char *)malloc(ecap);
+        if (lstr && lens_esc) {
+          memcpy(lstr, lb.data, lb.len);
+          lstr[lb.len] = '\0';
+          cw_json_esc(lstr, lens_esc, ecap);
+        }
+        free(lstr);
+      }
+      if (lb.data) g_cw.buf_free(lb);
+    }
+    if (frame.data) g_cw.buf_free(frame);
+  }
+
+  if (!lens_esc) {
+    char h64[65];
+    ec_cowrie_sha256_hex(raw_json, raw_len, h64);
+    snprintf(cid_hex, sizeof cid_hex, "1220%s", h64);
+    snprintf(handle, sizeof handle, "@%.10s", h64);
+    size_t ecap = raw_len * 2 + 64;
+    if (ecap > out_cap - 512) ecap = out_cap - 512;
+    lens_esc = (char *)malloc(ecap);
+    if (!lens_esc) return -1;
+    cw_json_esc(raw_json, lens_esc, ecap);
+    lens_len = raw_len;
+  }
+
+  double red_pct = (raw_len > 0) ? (100.0 * (1.0 - ((double)lens_len / (double)raw_len))) : 0.0;
+  int n = snprintf(out_json, out_cap,
+      "{\"ok\":true,\"target\":\"%s\",\"tier\":\"%s\","
+      "\"cowrie_enabled\":%s,\"cowrie_shani\":%s,"
+      "\"cid\":\"%s\",\"handle\":\"%s\","
+      "\"raw_bytes\":%zu,\"cowr_bytes\":%zu,\"lens_bytes\":%zu,"
+      "\"reduction_pct\":%.1f,\"lens\":\"%s\"}",
+      target, tier_name,
+      ec_cowrie_available() ? "true" : "false",
+      ec_cowrie_has_shani() ? "true" : "false",
+      cid_hex, handle, raw_len, cowr_len, lens_len, red_pct, lens_esc);
+  free(lens_esc);
+  return n;
+}

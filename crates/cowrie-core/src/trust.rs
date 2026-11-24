@@ -63,7 +63,8 @@ impl ToolAction {
     }
 }
 
-/// Causal lineage DAG tracking frames by 34-byte CID and enforcing transitive taint checks.
+/// Causal lineage DAG tracking frames strictly by full 34-byte CID and enforcing transitive taint checks.
+/// Sticky rule: re-registering an existing CID can NEVER clear `BIT_TAINTED` once set.
 #[derive(Default, Debug)]
 pub struct TrustLedger {
     nodes: HashMap<[u8; 34], (u8, Vec<[u8; 34]>)>,
@@ -80,6 +81,11 @@ impl TrustLedger {
         let mut eff = base_authority;
         if is_tainted(eff) {
             eff |= BIT_TAINTED;
+        }
+        if let Some(&(existing_auth, _)) = self.nodes.get(&cid) {
+            if is_tainted(existing_auth) {
+                eff |= BIT_TAINTED;
+            }
         }
         for p in parents {
             if let Some(&(p_auth, _)) = self.nodes.get(p) {
@@ -99,7 +105,8 @@ impl TrustLedger {
         self.nodes.get(cid).map(|(a, _)| *a)
     }
 
-    /// Policy gate enforced before invoking a tool with arguments derived from `arg_cids`.
+    /// Policy gate enforced before invoking a tool with arguments/context derived from `arg_cids`.
+    /// Empty `arg_cids` on a privileged call without `owner_override` fails closed (`TaintedExecutionBlocked`).
     pub fn check_tool_call(
         &self,
         action: ToolAction,
@@ -109,10 +116,48 @@ impl TrustLedger {
         if !action.is_privileged() || owner_override {
             return Ok(());
         }
+        if arg_cids.is_empty() {
+            return Err(CowrieError::TaintedExecutionBlocked);
+        }
         for cid in arg_cids {
             match self.nodes.get(cid) {
                 Some(&(auth, _)) if !is_tainted(auth) => {}
                 _ => return Err(CowrieError::TaintedExecutionBlocked),
+            }
+        }
+        Ok(())
+    }
+
+    /// Policy gate supporting scoped cryptographic `Ed25519` owner-declassification tokens (`COWRIE_DECLASSIFY_V1`).
+    /// Each tainted argument CID must be individually covered by a valid, non-expired `Ed25519` signature
+    /// for `action` under `owner_pubkey`; any uncovered tainted or unknown CID still fails closed!
+    pub fn check_tool_call_signed(
+        &self,
+        action: ToolAction,
+        arg_cids: &[[u8; 34]],
+        tokens: &[crate::ed25519::DeclassificationToken],
+        owner_pubkey: Option<&[u8; 32]>,
+        now_unix_secs: u64,
+    ) -> Result<(), CowrieError> {
+        if !action.is_privileged() {
+            return Ok(());
+        }
+        if arg_cids.is_empty() {
+            return Err(CowrieError::TaintedExecutionBlocked);
+        }
+        for cid in arg_cids {
+            let clean = matches!(self.nodes.get(cid), Some(&(auth, _)) if !is_tainted(auth));
+            if clean {
+                continue;
+            }
+            let Some(pk) = owner_pubkey else {
+                return Err(CowrieError::TaintedExecutionBlocked);
+            };
+            let approved = tokens
+                .iter()
+                .any(|t| &t.target_cid == cid && t.verify(pk, action, now_unix_secs).is_ok());
+            if !approved {
+                return Err(CowrieError::TaintedExecutionBlocked);
             }
         }
         Ok(())
