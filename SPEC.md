@@ -6,14 +6,12 @@
 
 ---
 
-## 1. Design Law
-
-> **Core is physics, profiles are chemistry, lenses are optics.**
+## 1. Architectural Principles
 
 - **CoreHash** commits strictly to `Plane A` canonical bytes, raw `Plane C` data payloads, and `Plane D` trust metadata.
-- **Satellites** (`StatePages`, model embeddings, learned `R0` synopses, `CWIV` vector clusters) are bound to `(core_hash, model_sha, runtime_id, kv_quant, ssm_dtype)` and live outside `CoreHash` so model churn never mutates eternal archive identity.
-- **Compression** (`zstd`, `lz4`) is transport-only and never part of canonical identity.
-- **Universal Page Alignment:** `PAGE_ALIGN = 16,384` bytes (`align_log2 = 14`), aligned simultaneously to Apple Silicon 16 KB Unified Memory pages, Linux 4×4 KB NVMe/`O_DIRECT` DMA pages, Android ARM64 16 KB pages, and 256×64 B SIMD cache lines.
+- **Satellites** (`StatePages`, model embeddings, learned `R0` synopses, `CWIV` vector clusters) are bound to `(core_hash, model_sha, runtime_id, kv_quant, ssm_dtype)` outside `CoreHash`, preserving permanent document CIDs across model upgrades.
+- **Transport Compression** (`zstd`, `lz4`) operates at the transport layer outside canonical frame identity (`flags == 0x00`).
+- **Universal Page Alignment:** `PAGE_ALIGN = 16,384` bytes (`align_log2 = 14`), matching Apple Silicon 16 KB Unified Memory pages, Linux 4×4 KB NVMe/`O_DIRECT` DMA pages, Android ARM64 16 KB pages, and 256×64 B SIMD cache lines.
 
 ---
 
@@ -78,7 +76,7 @@ Fixed 8-byte canonical frame header carrying out-of-band trust and epistemic byt
 [48..56)  footer_off   = uint64 LE
 [56..64)  reserved     = 0           // must be 0
 ```
-- All alignment padding bytes between `Plane A` and `Plane C`, and between consecutive `Plane C` regions, MUST be `0x00` (`ERR_NON_ZERO_PAD`), and `FrameEntry` / `TensorEntry` slices MUST partition `[64 .. 64 + plane_a_len)` and `[plane_c_off .. plane_c_off + plane_c_len)` contiguously with zero unhashed slack bytes (`F3`).
+- All alignment padding bytes between `Plane A` and `Plane C`, and between consecutive `Plane C` regions, MUST be `0x00` (`ERR_NON_ZERO_PAD`), and `FrameEntry` / `TensorEntry` slices MUST partition `[64 .. 64 + plane_a_len)` and `[plane_c_off .. plane_c_off + plane_c_len)` contiguously with zero unhashed slack bytes.
 
 ### 3.2 Plane D — Dual-Tree Merkle Footer & Seek-From-End Trailer
 At `footer_off`:
@@ -93,7 +91,7 @@ At `footer_off`:
 Stores live recurrent SSM + attention KV state at `offset % 16384 == 0`, paired with a `276`-byte `CWSP` descriptor inside Page 0 (`[64..340)`):
 - `model_sha` (64 lowercase hex chars via `cowrie_model_fingerprint`: full-file SHA-NI for `<= 16 MiB`; `file_size + 64 × 64 KiB` strided windows for `> 16 MiB`)
 - `doc_cid` (eternal `CoreHash` or block-aligned prefix digest, 64 lowercase hex chars)
-- `runtime_id` (`[288..304)`, up to 16 ASCII bytes: `"llama.cpp"`, `"eureka-llm"`, `"eureka-creative"`, `"vllm-v1"`; when a caller specifies a non-empty `expected_runtime_id`, an empty or mismatched file `runtime_id` MUST fail closed with `ERR_RUNTIME_MISMATCH`, `F7`) + `layout_ver: u16` (`[304..306)`)
+- `runtime_id` (`[288..304)`, up to 16 ASCII bytes: `"llama.cpp"`, `"eureka-llm"`, `"eureka-creative"`, `"vllm-v1"`; when a caller specifies a non-empty `expected_runtime_id`, an empty or mismatched file `runtime_id` MUST fail closed with `ERR_RUNTIME_MISMATCH`) + `layout_ver: u16` (`[304..306)`)
 - `ctx_tokens`, `kv_quant` (`0 = FP16/BF16`, `1 = Q4_0`, `2 = Q8_0/FP8`, `3 = F32`), `ssm_dtype` (`0 = FP16`, `1 = BF16`, `2 = FP32`)
 - `hash_mode` (`0 = flat SHA-256`, `1 = parallel 4 MiB chunked RFC 6962 Merkle SHA-256` over bounded `WorkerPool`, accelerated by x86_64 `SHA-NI` and ARMv8 `SHA2`)
 - Optional **RFC 2104 HMAC-SHA256** tag (`[308..340)`, `hmac_flag = 1` at `page0[75]` when `COWRIE_HMAC_KEY` is configured)
@@ -107,24 +105,24 @@ Stores live recurrent SSM + attention KV state at `offset % 16384 == 0`, paired 
 
 ### 3.5 Plane D Profile C — 16 KB Page-Targeted Scalar Zone-Map Shards (`CWZM`, `v1.2`)
 Packs sorted canonical `COWR` frames into self-verifying `16,384`-byte leaf pages (`[count: u16, res: u16, slots[count] * 20B, frames...]`) and appends a `16 KB`-aligned Plane D Zone-Map directory of **64-byte cache-line entries**:
-- `(min_key: i64, max_key: i64, min_sec: i64, max_sec: i64, leaf_sha256: [u8; 32])` (`64 B` per 16 KB leaf page), enforcing monotonic primary-key fences (`z[p].min_key <= z[p].max_key` and `z[p].max_key <= z[p+1].min_key`, `F2`).
-- Header commits to the RFC 6962 Merkle root over full 64-byte Zone-Map entries (`SHA-256(0x00 || zm_entry_64B)`, `hdr[48..82)`), authenticating both fence bounds and leaf digests (`F2`).
-- Point and narrow-range queries prune non-overlapping pages in L1 cache (with exact monotonic early-break `L23`) and `pread` (`read_exact_at`) **only** matching 16 KB pages, verifying each touched page's `leaf_sha256` via hardware SHA-NI and filtering `(auth & (0x04 | 0x80)) != 0` in `O(1)`.
+- `(min_key: i64, max_key: i64, min_sec: i64, max_sec: i64, leaf_sha256: [u8; 32])` (`64 B` per 16 KB leaf page), enforcing monotonic primary-key fences (`z[p].min_key <= z[p].max_key` and `z[p].max_key <= z[p+1].min_key`).
+- Header commits to the RFC 6962 Merkle root over full 64-byte Zone-Map entries (`SHA-256(0x00 || zm_entry_64B)`, `hdr[48..82)`), authenticating both fence bounds and leaf digests.
+- Point and narrow-range queries prune non-overlapping pages in L1 cache and `pread` (`read_exact_at`) matching 16 KB pages, verifying each touched page's `leaf_sha256` via hardware SHA-NI and filtering `(auth & (0x04 | 0x80)) != 0` in `O(1)`.
 
 ### 3.6 Crash-Safe Hash-Chained Framed WAL (`CWAL` / `.cwwal`, `v1.2`)
 Append-only `0600` mutation and audit log beginning with a 32-byte `"CWAL"` v1 genesis header followed by `"CWLR"` records:
 - `[0..4) "CWLR" || [4] kind (0=Frame, 1=Tombstone, 2=IvfVec) || [5..8) 0 || [8..16) seq: u64 LE || [16..20) len: u32 LE || [20..52) prev_sha256 || payload || record_sha256`
-- `open(..., recover_torn_tail = true)` truncates incomplete power-loss tail writes cleanly while rejecting any mid-log tampering, unknown `kind > 2`, or sequence gap (`ERR_ROOT_MISMATCH` / `ERR_CORRUPT_TRAILER` / `ERR_INVALID_CONTRACT`, `L14`).
-- Live-frame replay (`live_frames`) is strictly sequential: `Tombstone(cid)` revokes prior `Frame(cid)` records without touching bystander frames, while a subsequent `Frame(cid)` at a higher `seq` makes `cid` live again (`L24` / `F5`).
+- `open(..., recover_torn_tail = true)` truncates incomplete power-loss tail writes cleanly and rejects any mid-log tampering, unknown `kind > 2`, or sequence gap (`ERR_ROOT_MISMATCH` / `ERR_CORRUPT_TRAILER` / `ERR_INVALID_CONTRACT`).
+- Live-frame replay (`live_frames`) is sequential: `Tombstone(cid)` revokes prior `Frame(cid)` records while preserving other frames, and a subsequent `Frame(cid)` at a higher `seq` restores `cid` to the live set.
 
 ---
 
 ## 4. Plane B — Deterministic Progressive Lenses (`R0`, `R1`, `R2`)
 
 Lenses are pure functions of `Plane A` (zero model calls):
-- **`R0` (Alpha32 Handle):** `@<10-char Alpha32 ID>` (lowercase ASCII letters `a-z`, $26^{10} \approx 2^{47}$ space, birthday bound `~12M` records, zero `\p{N}` digit fragmentation) + coarse size bucket + trust tag + title/topic.
+- **`R0` (Alpha32 Handle):** `@<10-char Alpha32 ID>` (lowercase ASCII letters `a-z`, $26^{10} \approx 2^{47}$ space, birthday bound `~12M` records) + coarse size bucket + trust tag + title/topic.
 - **`R1` (Structural Atlas):** Schema, authority, field types/lengths, array counts, typed tensor Coordinate Contracts (`<T:dtype[shape]@space>`).
-- **`R2` (Adaptive Attention Lens):** Hoists uniform object tables when `len >= 3` and key density `>= 0.70`, renders `TAG_TENSOR_REF (0x0A)` as `<T:dtype[shape]@space>`, and wraps output in CID-bound fences with 3-state Mealy transducer `<<<` / `>>>` escaping across scalar values, map keys, hoisted table column headers, and `<T:...>` boundaries (`L07`, `L08`, `L20`, `L21`; `F1`, `F4`, `F8`).
+- **`R2` (Adaptive Attention Lens):** Hoists uniform object tables when `len >= 3` and key density `>= 0.70`, renders `TAG_TENSOR_REF (0x0A)` as `<T:dtype[shape]@space>`, and wraps output in CID-bound fences with 3-state Mealy transducer `<<<` / `>>>` escaping across scalar values, map keys, hoisted table column headers, and `<T:...>` descriptors.
 
 ---
 
