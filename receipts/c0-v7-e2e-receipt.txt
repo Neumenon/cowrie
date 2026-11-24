@@ -1,0 +1,24 @@
+===========================================================================
+Eureka Creative Studio v4 — 4 Flagship Native CUDA Engines Proof (:35741)
+===========================================================================
+  [PASS] E2E.1 Auth + /v1/creative/health (v4 4-Engine) GPU=NVIDIA GeForce RTX 3090 flux2=True acestep=True trellis2=True wan22=True
+  [PASS] E2E.2 5-Way Parallel API Burst (All Modalities) 5 concurrent requests finished in 865.8ms (RT=1445.2 FPS)
+  [PASS] E2E.3 Binary Proofs: PNG + GLB/PLY + 5x WAV    PNG=196947B GLB=119008B(1552t) WAV_RMS=0.102 4-stems=OK
+  [PASS] E2E.4 Hardware NVENC H.264 + AAC MP4 (ffprobe) enc=h264_nvenc 320x180 h264+aac 82858B
+  [PASS] E2E.5 Async Job Queue + Live SSE Stream        job_id=1 sse_events=8 final=done (100%)
+  [PASS] E2E.6 Multi-Arch BF16/FP8 Model Load API (5/5) loaded=5/5 (z_image_s3dit, acestep_1_5, trellis2_ovoxel_3d, wan2.2, ltx2.5)
+  [PASS] E2E.7 Director Plan -> 4-Modality DAG + Cache  cold=4/4 warm_hits=4/4 outputs=PNG+GLB+WAV+MP4
+  [PASS] E2E.8 Path-Traversal Security Guard            rejected cleanly
+  [PASS] E2E.9 Multi-Drive Vault + LoRA/Ckpt Discovery  roots=6 ckpts=20 loras=1 total_free=294.1GB
+  [PASS] E2E.10 Prompt Library + User Recipes CRUD      builtins=12 cameras=7 user_crud=OK
+  [PASS] E2E.11 ComfyUI Import (LiteGraph UI + PNG tEXt) lg_nodes=5 ckpt_resolved=OK lora_resolved=True png_tEXt=OK
+  [PASS] E2E.12 Photoreal FLUX.2-klein-4B + LoRA Fusion base(dit=1012ms,vae=461ms,png=787072B) lora(fused=3,warm_txt=0.9ms,delta=VERIFIED)
+  [PASS] E2E.13 Real ACE-Step 1.5 Turbo (48kHz + 4 Stems) sr=48000Hz ch=2 dur=10.0s rms=0.134 dit=272ms vae=110ms total=4874ms
+  [PASS] E2E.14 Real TRELLIS.2 1.3B 3D (GLB 2.0 + PLY)  verts=16629 tris=33248 glb=932172B flow=10972ms dec=74ms
+  [PASS] E2E.15 Real Wan 2.2 TI2V-5B + Synced Audio MP4 enc=h264_nvenc 832x480x17f h264+aac(48kHz) dit=17944ms vae=8357ms mp4=357690B
+  [PASS] E2E.16 ComfyUI Importer v2 (Subgraph+4-Modality) sg_flux2=OK wan_pos_vs_neg=OK(121f) ace_audio=OK(118bpm,90s,alias) trellis_3d=OK(alias)
+  [PASS] E2E.17 ComfyUI Node Graph (SSE+Merkle+PNG tEXt) nodes_schema=29 tpls=5 cold=8/8 warm_tweak=hits:6+exec:2(7ms!) png_roundtrip=OK(8n)
+  [PASS] E2E.18 Cowrie v2 (ColdRestart+Trust403+Lens)   cold_dag=8/8(1ms) shuf=6/8(9ms) qwen3_sp=5.9ms sp_hits=9 gate=403/200/200 lens=-22.6%/-97.5%/-99.5%
+===========================================================================
+E2E v7 VERDICT: ALL 18 PRODUCTION E2E TESTS PASS
+===========================================================================

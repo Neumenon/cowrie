@@ -1,0 +1,2573 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Making Cowrie — Format Divergence, Complete v1.2 Architecture, 15 Wins &amp; Local/Cloud Future</title>
+<style>
+  @font-face {
+    font-family: 'Inter';
+    src: url('making-cowrie-assets/fonts/Inter-Regular.ttf') format('truetype');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Inter';
+    src: url('making-cowrie-assets/fonts/Inter-Italic.ttf') format('truetype');
+    font-weight: 400; font-style: italic; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Inter';
+    src: url('making-cowrie-assets/fonts/Inter-Medium.ttf') format('truetype');
+    font-weight: 500; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Inter';
+    src: url('making-cowrie-assets/fonts/Inter-SemiBold.ttf') format('truetype');
+    font-weight: 600; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Inter';
+    src: url('making-cowrie-assets/fonts/Inter-Bold.ttf') format('truetype');
+    font-weight: 700; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Inter Display';
+    src: url('making-cowrie-assets/fonts/InterDisplay-SemiBold.ttf') format('truetype');
+    font-weight: 600; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Inter Display';
+    src: url('making-cowrie-assets/fonts/InterDisplay-Bold.ttf') format('truetype');
+    font-weight: 700; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('making-cowrie-assets/fonts/jetbrains-mono-var-latin.woff2') format('woff2');
+    font-weight: 400 600; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Source Code Pro';
+    src: url('making-cowrie-assets/fonts/SourceCodePro-Regular.otf') format('opentype');
+    font-weight: 400; font-style: normal; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Source Code Pro';
+    src: url('making-cowrie-assets/fonts/SourceCodePro-Semibold.otf') format('opentype');
+    font-weight: 600; font-style: normal; font-display: swap;
+  }
+
+  :root {
+    --bg:         #FCFCFA;
+    --surface:    #F5F5F1;
+    --ink:        #111318;
+    --body:       #262A32;
+    --muted:      #5E6673;
+    --subtle:     #8B929E;
+    --rule:       #E3E5E8;
+    --rule-dark:  #111318;
+
+    --blue:       #1D4ED8;
+    --blue-tint:  rgba(29, 78, 216, 0.075);
+    --red:        #C2352A;
+    --red-tint:   rgba(194, 53, 42, 0.075);
+
+    --toc-w:      222px;
+    --prose-w:    650px;
+    --wide-w:     840px;
+
+    --f-display:  'Inter Display', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --f-sans:     'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --f-mono:     'JetBrains Mono', 'Source Code Pro', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    scroll-behavior: smooth;
+    background: var(--bg);
+    color: var(--body);
+    font-family: var(--f-sans);
+    font-size: 17px;
+    line-height: 1.68;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    min-height: 100vh;
+  }
+
+  .progress {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    z-index: 60;
+    pointer-events: none;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--blue);
+    transition: width 80ms linear;
+  }
+
+  .toc-rail {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: var(--toc-w);
+    padding: 44px 20px 32px 26px;
+    overflow-y: auto;
+    z-index: 40;
+  }
+  .toc-title {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink);
+    margin-bottom: 18px;
+  }
+  .toc-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .toc-list li { margin-bottom: 3px; }
+  .toc-list a {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    padding: 4px 0 4px 10px;
+    margin-left: -10px;
+    border-left: 2px solid transparent;
+    text-decoration: none;
+    font-size: 13px;
+    line-height: 1.38;
+    color: var(--muted);
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .toc-list a:hover { color: var(--ink); }
+  .toc-list a.active {
+    color: var(--ink);
+    font-weight: 600;
+    border-left-color: var(--blue);
+  }
+  .toc-list li.sub a {
+    padding-left: 22px;
+    font-size: 12px;
+    color: var(--subtle);
+  }
+  .toc-list li.sub a:hover, .toc-list li.sub a.active { color: var(--ink); }
+  .toc-n {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    color: var(--subtle);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .toc-list a.active .toc-n { color: var(--blue); }
+  .toc-foot {
+    margin-top: 28px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .toc-foot a {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .toc-foot a:hover { color: var(--blue); }
+
+  .mob-bar {
+    display: none;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: var(--bg);
+    border-bottom: 1px solid var(--rule);
+    padding: 12px 18px;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .mob-bar button {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    background: none;
+    border: 1px solid var(--rule);
+    color: var(--ink);
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+
+  main {
+    margin-left: var(--toc-w);
+    padding: 64px 40px 120px;
+  }
+  .prose { max-width: var(--prose-w); margin: 0 auto; }
+
+  header.doc-head {
+    max-width: var(--prose-w);
+    margin: 0 auto 44px;
+    padding-bottom: 32px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .doc-kicker {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  h1.doc-title {
+    font-family: var(--f-display);
+    font-size: clamp(34px, 4.4vw, 46px);
+    font-weight: 700;
+    line-height: 1.08;
+    letter-spacing: -0.032em;
+    color: var(--ink);
+    margin: 0 0 16px;
+  }
+  p.doc-deck {
+    font-size: 19px;
+    line-height: 1.54;
+    color: var(--muted);
+    margin: 0 0 18px;
+    font-weight: 400;
+  }
+  .doc-meta {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    color: var(--subtle);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+  }
+  .doc-meta a { color: var(--blue); text-decoration: none; }
+  .doc-meta a:hover { text-decoration: underline; }
+
+  section.chapter {
+    margin-top: 92px;
+    padding-top: 40px;
+    border-top: 1px solid var(--rule);
+  }
+  section.chapter.first-sec {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .ch-kicker {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .ch-kicker span { color: var(--blue); margin-right: 6px; }
+
+  h2 {
+    font-family: var(--f-display);
+    font-size: clamp(24px, 3vw, 30px);
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+    margin: 0 0 22px;
+  }
+  h3 {
+    font-family: var(--f-sans);
+    font-size: 18.5px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+    margin: 40px 0 10px;
+  }
+  h3.plane-head {
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    margin-top: 48px;
+  }
+  h3.plane-head .pl-tag {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--blue);
+    display: block;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+  }
+
+  p { margin: 0 0 1.15em; color: var(--body); }
+  strong { color: var(--ink); font-weight: 600; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: 0.85em;
+    background: rgba(17, 19, 24, 0.048);
+    padding: 1.5px 4.5px;
+    border-radius: 3px;
+    color: var(--ink);
+  }
+  h2 code, h3 code, h4 code, .doc-meta code, thead th code {
+    background: none;
+    padding: 0;
+    font-size: 0.92em;
+    color: inherit;
+    text-transform: none;
+  }
+
+  a.ref {
+    color: var(--blue);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(29, 78, 216, 0.25);
+  }
+  a.ref:hover { border-bottom-color: var(--blue); }
+
+  .win-strip {
+    margin: 18px 0 28px;
+    padding: 6px 0 6px 16px;
+    border-left: 2px solid var(--blue);
+    font-size: 15px;
+    line-height: 1.58;
+    color: var(--body);
+  }
+  .win-strip .ws-k {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--blue);
+    display: block;
+    margin-bottom: 3px;
+  }
+
+  figure.viz {
+    max-width: var(--wide-w);
+    margin: 30px auto 36px;
+  }
+  .viz-canvas {
+    background: var(--surface);
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 22px 24px;
+  }
+  .viz-canvas.plain {
+    background: transparent;
+    padding: 14px 0;
+  }
+  .viz-canvas svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  figcaption {
+    max-width: var(--wide-w);
+    margin-top: 10px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+  }
+  figcaption .fnum {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--ink);
+    margin-right: 8px;
+  }
+  figcaption .fsrc {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--subtle);
+  }
+
+  .ctrl-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .seg-group { display: flex; flex-wrap: wrap; gap: 4px; }
+  .seg-btn {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 4px 9px 6px;
+    cursor: pointer;
+    transition: color 120ms ease, border-color 120ms ease;
+  }
+  .seg-btn:hover { color: var(--ink); }
+  .seg-btn.active { color: var(--blue); font-weight: 600; border-bottom-color: var(--blue); }
+  .seg-btn.fault.active { color: var(--red); border-bottom-color: var(--red); }
+  .action-link {
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--blue);
+    background: none;
+    border: none;
+    padding: 4px 6px;
+    cursor: pointer;
+  }
+  .action-link:hover { text-decoration: underline; }
+
+  .byte-strip { display: flex; flex-wrap: wrap; gap: 3px; margin: 10px 0 14px; }
+  .bcell {
+    min-width: 34px;
+    padding: 5px 4px 4px;
+    text-align: center;
+    background: var(--bg);
+    border-bottom: 2px solid var(--rule);
+    font-family: var(--f-mono);
+  }
+  .bcell .hx { display: block; font-size: 12px; font-weight: 600; color: var(--ink); }
+  .bcell .lb { display: block; font-size: 9px; color: var(--subtle); margin-top: 2px; }
+  .bcell.k-blue { border-bottom-color: var(--blue); background: var(--blue-tint); }
+  .bcell.k-blue .hx { color: var(--blue); }
+  .bcell.k-red  { border-bottom-color: var(--red); background: var(--red-tint); }
+  .bcell.k-red  .hx { color: var(--red); }
+
+  .readout-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 8px 24px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--f-mono);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .readout-line .ok { color: var(--ink); font-weight: 600; }
+  .readout-line .blue { color: var(--blue); font-weight: 600; }
+  .readout-line .err { color: var(--red); font-weight: 600; }
+  .readout-line .sub { color: var(--muted); font-weight: 400; }
+
+  .code-view {
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    line-height: 1.58;
+    color: var(--ink);
+    background: var(--bg);
+    padding: 14px 16px;
+    margin: 12px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+    border-left: 2px solid var(--rule);
+  }
+  .bpe-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px 0;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--f-mono);
+    font-size: 12px;
+  }
+  .bpe-tok { padding: 2px 5px; border-right: 1px solid var(--rule); color: var(--body); }
+  .bpe-tok:last-child { border-right: none; }
+  .bpe-tok.split { border-bottom: 2px solid var(--red); color: var(--red); }
+  .bpe-tok.clean { border-bottom: 2px solid var(--blue); color: var(--blue); font-weight: 600; }
+
+  .tbl-wrap {
+    max-width: var(--wide-w);
+    margin: 28px auto 34px;
+    overflow-x: auto;
+  }
+  table.booktabs {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+    border-top: 1.5px solid var(--rule-dark);
+    border-bottom: 1.5px solid var(--rule-dark);
+  }
+  table.booktabs thead th {
+    font-family: var(--f-mono);
+    font-size: 10.2px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    text-align: left;
+    color: var(--muted);
+    padding: 9px 8px 8px;
+    border-bottom: 1px solid var(--rule-dark);
+    vertical-align: bottom;
+    line-height: 1.3;
+  }
+  table.booktabs tbody td {
+    padding: 9px 8px;
+    border-bottom: 1px solid #ECEEF0;
+    color: var(--body);
+    vertical-align: top;
+  }
+  table.booktabs tbody tr:last-child td { border-bottom: none; }
+  table.booktabs th.num, table.booktabs td.num {
+    text-align: right;
+    font-family: var(--f-mono);
+    font-size: 12.5px;
+    white-space: nowrap;
+  }
+  table.booktabs td.row-head { font-weight: 600; color: var(--ink); white-space: nowrap; }
+  table.booktabs td.row-head small {
+    display: block;
+    font-family: var(--f-mono);
+    font-size: 10.2px;
+    font-weight: 400;
+    color: var(--subtle);
+    margin-top: 1px;
+  }
+  table.booktabs tr.highlight td { background: var(--blue-tint); }
+  table.booktabs tr.highlight td.row-head { color: var(--blue); }
+  table.booktabs tr.clickable { cursor: pointer; transition: background 100ms ease; }
+  table.booktabs tr.clickable:hover td { background: rgba(17, 19, 24, 0.03); }
+  table.booktabs tr.clickable.selected td { background: var(--blue-tint); }
+  table.booktabs tbody td.dot-yes, .dot-yes { color: var(--blue); font-weight: 600; white-space: nowrap; }
+  table.booktabs tbody td.dot-no,  .dot-no  { color: #B4B9C2; }
+  table.booktabs tbody td.dot-win, .dot-win { color: var(--ink); font-weight: 500; white-space: nowrap; }
+  table.booktabs tbody td.dot-note,.dot-note { color: var(--muted); font-size: 12.5px; }
+  table.booktabs tbody td.nowrap { white-space: nowrap; }
+  .tbl-cap {
+    margin-top: 9px;
+    font-size: 13px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ledger {
+    max-width: var(--wide-w);
+    margin: 26px auto 18px;
+    border-top: 1.5px solid var(--rule-dark);
+  }
+  .ledger-row {
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 0 18px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  .ledger-num {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--blue);
+    padding-top: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ledger-num.trouble { color: var(--red); }
+  .ledger-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-bottom: 8px;
+  }
+  .ledger-head h4 {
+    font-size: 16.5px;
+    font-weight: 600;
+    color: var(--ink);
+    margin: 0;
+    line-height: 1.3;
+  }
+  .ledger-metric {
+    font-family: var(--f-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--blue);
+    white-space: nowrap;
+  }
+  .ledger-metric.trouble { color: var(--red); }
+  .ledger-p {
+    margin: 0 0 8px;
+    font-size: 14.8px;
+    line-height: 1.6;
+    color: var(--body);
+  }
+  .ledger-meta {
+    font-family: var(--f-mono);
+    font-size: 11px;
+    color: var(--subtle);
+  }
+  .ledger-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 28px;
+    font-size: 14.2px;
+    line-height: 1.56;
+    margin-top: 4px;
+  }
+  .ledger-cols dt {
+    font-family: var(--f-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 3px;
+  }
+  .ledger-cols dt.red { color: var(--red); }
+  .ledger-cols dt.blue { color: var(--blue); }
+  .ledger-cols dd { margin: 0 0 8px; color: var(--body); }
+
+  ul.clean-list { margin: 14px 0 22px; padding-left: 18px; }
+  ul.clean-list li { margin-bottom: 10px; color: var(--body); }
+
+  footer.colophon {
+    max-width: var(--prose-w);
+    margin: 72px auto 0;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    font-family: var(--f-mono);
+    font-size: 11.5px;
+    color: var(--subtle);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  footer.colophon a { color: var(--muted); text-decoration: none; }
+  footer.colophon a:hover { color: var(--blue); }
+
+  svg .leaf-hit { cursor: pointer; }
+  svg .leaf-hit:hover rect { stroke: var(--blue); stroke-width: 1.6; }
+
+  @media (max-width: 1040px) {
+    .toc-rail {
+      background: var(--bg);
+      border-right: 1px solid var(--rule);
+      transform: translateX(-100%);
+      transition: transform 160ms ease;
+    }
+    .toc-rail.open { transform: translateX(0); }
+    .mob-bar { display: flex; }
+    main { margin-left: 0; padding: 36px 20px 88px; }
+    .ledger-cols { grid-template-columns: 1fr; }
+    .ledger-row { grid-template-columns: 32px 1fr; gap: 0 10px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="progress"><div class="progress-fill" id="progressFill"></div></div>
+
+<div class="mob-bar">
+  <button type="button" id="mobMenu">Contents</button>
+  <span style="font-family:var(--f-mono);font-size:11.5px;color:var(--ink);font-weight:600;">Making Cowrie · v1.2</span>
+  <a href="https://github.com/Neumenon/cowrie" style="font-family:var(--f-mono);font-size:11px;color:var(--blue);text-decoration:none;">GitHub</a>
+</div>
+
+<nav class="toc-rail" id="tocRail" aria-label="Contents">
+  <div class="toc-title">Making Cowrie</div>
+  <ul class="toc-list" id="tocList">
+    <li><a href="#s00" class="active"><span class="toc-n">00</span><span>Intro &amp; Motivation</span></a></li>
+    <li><a href="#s01"><span class="toc-n">01</span><span>Format Divergence</span></a></li>
+    <li><a href="#s02"><span class="toc-n">02</span><span>Architecture &amp; Wins</span></a></li>
+    <li class="sub"><a href="#plane-a"><span>Plane A · Canonical Wire</span></a></li>
+    <li class="sub"><a href="#plane-b"><span>Plane B · Attention Lenses</span></a></li>
+    <li class="sub"><a href="#plane-c"><span>Plane C · 16 KB &amp; NVMe</span></a></li>
+    <li class="sub"><a href="#plane-d"><span>Plane D · Merkle &amp; Trust</span></a></li>
+    <li><a href="#s03"><span class="toc-n">03</span><span>15 Major Wins</span></a></li>
+    <li><a href="#s04"><span class="toc-n">04</span><span>11 Troubles &amp; Formal Proof</span></a></li>
+    <li><a href="#s05"><span class="toc-n">05</span><span>Local LLMs vs. Cloud</span></a></li>
+    <li><a href="#s06"><span class="toc-n">06</span><span>Future Work</span></a></li>
+    <li><a href="#summary"><span class="toc-n">07</span><span>Summary</span></a></li>
+  </ul>
+  <div class="toc-foot">
+    <a href="ai-data-format.html">Systems Brief</a>
+    <a href="GAINS-AND-USES.md">Engineering Guide</a>
+    <a href="https://github.com/Neumenon/cowrie" target="_blank" rel="noopener">Neumenon/cowrie</a>
+  </div>
+</nav>
+
+<main>
+
+  <!-- 00 · INTRO & MOTIVATION -->
+  <section id="s00" class="chapter first-sec">
+    <header class="doc-head">
+      <div class="doc-kicker">Cowrie Specification v1.2 · Systems Architecture Monograph</div>
+      <h1 class="doc-title">Making Cowrie</h1>
+      <p class="doc-deck">Why five decades of data formats fractured across the AI stack, how one 799 KB canonical container (with an 81.1 KiB gzipped WebAssembly build and a Lean-kernel-verified Bend 2.0.35 formal proof suite) unifies them, fifteen measured wins across four symmetric live runtimes and an MCP wire firewall, eleven engineering postmortems and formal audit catches, and what it changes for local and cloud inference.</p>
+      <div class="doc-meta">
+        <span>Workstation: RTX 3090 · Ryzen 7 7700X (SHA-NI + AVX2) · NVMe</span>
+        <span>Core: <code>libcowrie_core.so</code> (799 KB) · <code>cowrie_core.wasm</code> (80.7 KiB gzip) · <code>PROOF.bend</code> (26/26 laws)</span>
+        <a href="https://github.com/Neumenon/cowrie" target="_blank" rel="noopener">github.com/Neumenon/cowrie</a>
+      </div>
+    </header>
+
+    <div class="prose">
+      <p>A single AI request today crosses six incompatible serialization formats before it finishes. An agent fetches HTML as UTF-8, wraps the result in JSON, prints a 1,536-float embedding as ASCII digits, stores a visual workflow in a key-order-sensitive graph, discards gigabytes of prefilled GPU state whenever a process restarts or swaps models, and glues system policy and untrusted external text together with string delimiters. Every hop copies memory, drops cryptographic identity, busts caches, and leaves privilege boundaries unenforced.</p>
+
+      <p><strong>Cowrie</strong> (<code>v1.2.0</code>) is a single canonical binary container and live runtime substrate designed for all three hardware readers that touch modern AI data: language models, GPU tensor cores, and CPU security verifiers. Its core compiles offline in under four seconds from zero-dependency Rust into one 799 KB native library (<code>libcowrie_core.so</code>), an 80.4 KiB gzipped WebAssembly module (<code>cowrie_core.wasm</code>), and a standalone MCP wire proxy running with full feature symmetry across four distinct engines: <strong>Eureka LLM</strong>, <strong>Eureka Creative Engine v7</strong>, <strong>llama.cpp</strong>, and <strong>vLLM 0.15.0</strong>. Every metric in this document comes from receipted runs on one physical workstation; every failure and security audit catch we hit along the way, and every boundary where JSON or columnar OLAP still wins, is reported directly.</p>
+    </div>
+  </section>
+
+  <!-- 01 · FORMAT DIVERGENCE HISTORY -->
+  <section id="s01" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>01</span>History &amp; Motivation</div>
+      <h2>How Fifty Years of Data Formats Diverged</h2>
+
+      <p>Every major serialization format of the last half-century solved the physical bottleneck of its own era. The problem facing AI stacks in 2026 is not that JSON, Protocol Buffers, CBOR, Parquet, or Safetensors failed — it is that each optimized for one hardware reader and diverged irreversibly from the others.</p>
+
+      <h3>Era 1 (1970s–2005): Human text and web RPC</h3>
+      <p>CSV, XML, YAML, and JSON won software engineering because humans could inspect them in any terminal and browsers could parse them in one call. For HTTP REST APIs, encoding freedoms such as arbitrary key ordering (<code>{"a":1,"b":2}</code> vs. <code>{"b":2,"a":1}</code>), signed zero (<code>-0.0</code>), and equivalent number spellings (<code>1</code>, <code>1.0</code>, <code>1e0</code>) carried zero cost. Once cryptographic content addressing and LLM KV prefix caching arrived, those freedoms turned into silent cache misses across Python, Rust, C++, and JavaScript clients.</p>
+
+      <h3>Era 2 (2008–2016): The split between fast RPC and content hashing</h3>
+      <p>Microservices outgrew text parsing and fractured into two camps. <strong>Protocol Buffers</strong> and <strong>FlatBuffers</strong> delivered fast typed RPC while explicitly disclaiming deterministic canonical bytes: unknown fields, map iteration order, and omitted defaults allow two valid encoders to emit different hashes for the same logical record. On the other branch, <strong>CBOR</strong> and <strong>DAG-CBOR</strong> (IPLD) solved deterministic hashing, yet remained unaligned sequential byte streams incapable of zero-copy 16 KB GPU mapping or hardware DMA.</p>
+
+      <h3>Era 3 (2016–2024): The split between analytics and static model weights</h3>
+      <p>Data warehouses adopted <strong>Apache Arrow</strong> and <strong>Parquet</strong> for contiguous SIMD scans, while machine learning replaced Python <code>pickle</code> (capable of arbitrary code execution on load) with <strong>Safetensors</strong> and <strong>GGUF</strong> so static model weights could map cleanly off disk into GPU memory via <code>mmap</code>. Both solved <em>static weights</em>, leaving everything produced at runtime (live KV caches, recurrent SSM state, agent transcripts, multimodal embeddings, ComfyUI node graphs, and filtered vector indexes) stranded across six disconnected tools.</p>
+
+      <h3>Era 4 (2026): Three incompatible readers collide on one record</h3>
+      <p>When a neural network enters the read-write loop, three hardware subsystems operate on the same artifact simultaneously: the <strong>LLM attention engine</strong> pays in tokens and quadratic attention work; the <strong>GPU tensor core</strong> requires contiguous little-endian buffers aligned to hardware memory pages; and the <strong>CPU verifier</strong> requires zero-allocation bijective hashing and out-of-band privilege boundaries. Compact text dialects address only the first reader while leaving GPU buffers, cross-language identity, and security boundaries unsolved.</p>
+    </div>
+
+    <figure class="viz">
+      <div class="viz-canvas plain">
+        <svg viewBox="0 0 820 148" role="img" aria-label="Fifty-year format divergence timeline from JSON to Cowrie v1.1">
+          <line x1="20" y1="34" x2="800" y2="34" stroke="#D1D5DB" stroke-width="1.2"/>
+          <circle cx="95" cy="34" r="4.5" fill="#FCFCFA" stroke="#5E6673" stroke-width="1.6"/>
+          <text x="95" y="18" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">1970s–2005</text>
+          <text x="95" y="58" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#111318">Human Text &amp; RPC</text>
+          <text x="95" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">CSV · XML · JSON · YAML</text>
+          <text x="95" y="98" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Key order &amp; float drift</text>
+          <text x="95" y="114" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">break deterministic hashes.</text>
+
+          <circle cx="305" cy="34" r="4.5" fill="#FCFCFA" stroke="#5E6673" stroke-width="1.6"/>
+          <text x="305" y="18" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">2008–2016</text>
+          <text x="305" y="58" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#111318">RPC vs. CID Split</text>
+          <text x="305" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">Protobuf · FlatBuf · CBOR</text>
+          <text x="305" y="98" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Fast wire lacks CIDs; CID</text>
+          <text x="305" y="114" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">streams cannot DMA to GPU.</text>
+
+          <circle cx="515" cy="34" r="4.5" fill="#FCFCFA" stroke="#5E6673" stroke-width="1.6"/>
+          <text x="515" y="18" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">2016–2024</text>
+          <text x="515" y="58" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="600" fill="#111318">OLAP vs. Static Weights</text>
+          <text x="515" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">Arrow · Parquet · GGUF</text>
+          <text x="515" y="98" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Static tables &amp; weights only;</text>
+          <text x="515" y="114" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">no live KV, lenses, or taint.</text>
+
+          <line x1="519.5" y1="34" x2="725" y2="34" stroke="#1D4ED8" stroke-width="1.6"/>
+          <circle cx="725" cy="34" r="5.5" fill="#1D4ED8"/>
+          <text x="725" y="18" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">2026</text>
+          <text x="725" y="58" text-anchor="middle" font-family="Inter, sans-serif" font-size="13" font-weight="700" fill="#1D4ED8">Re-Convergence</text>
+          <text x="725" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">Cowrie v1.2 (799 KB)</text>
+          <text x="725" y="98" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">170 ns verify + CWZM + WAL</text>
+          <text x="725" y="114" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">+ KVConnector + Ed25519 MCP.</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 01</span>Fifty years of format specialization and the structural gap left when AI workloads arrived.</span>
+      </figcaption>
+    </figure>
+
+    <div class="tbl-wrap">
+      <table class="booktabs">
+        <thead>
+          <tr>
+            <th>Format / Stack</th>
+            <th>Bijective CID</th>
+            <th>16 KB GPU DMA</th>
+            <th>Token Lenses</th>
+            <th>KV + SSM State</th>
+            <th>Causal <code>0x80</code></th>
+            <th>10M NVMe IVF</th>
+            <th>Cold Point / Prose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="row-head">JSON / JSONL<small>1999 · Web text</small></td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-win">Wins (zstd)</td>
+          </tr>
+          <tr>
+            <td class="row-head">Protobuf / FlatBuf<small>2008 · Typed RPC</small></td>
+            <td class="dot-note">Non-canonical*</td>
+            <td class="dot-note">FlatBuf partial</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-note">Partial</td>
+          </tr>
+          <tr>
+            <td class="row-head">CBOR / DAG-CBOR<small>2013 · IPLD</small></td>
+            <td class="dot-note">Optional / DAG</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+          </tr>
+          <tr>
+            <td class="row-head">Arrow / Parquet<small>2016 · Columnar</small></td>
+            <td class="dot-no">—</td>
+            <td class="dot-note">SIMD / IPC</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-note">Full scan</td>
+            <td class="dot-win">Wins (OLAP)</td>
+          </tr>
+          <tr>
+            <td class="row-head">Safetensors / GGUF<small>2022 · Weights</small></td>
+            <td class="dot-note">File hash</td>
+            <td class="dot-note">Static weights</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+          </tr>
+          <tr>
+            <td class="row-head">SQLite + Vector DB<small>Multi-daemon stack</small></td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-no">—</td>
+            <td class="dot-note">App-level</td>
+            <td class="dot-note">Separate daemon</td>
+            <td class="dot-note">1.03 ms cold</td>
+          </tr>
+          <tr class="highlight">
+            <td class="row-head">Cowrie v1.2<small>2026 · Complete AI</small></td>
+            <td class="dot-yes">● 170 ns</td>
+            <td class="dot-yes">● O_DIRECT</td>
+            <td class="dot-yes">● R0–R3</td>
+            <td class="dot-yes">● vLLM + Q4</td>
+            <td class="dot-yes">● Ed25519</td>
+            <td class="dot-yes">● 7.07 ms</td>
+            <td class="dot-yes">● 0.51 ms CWZM</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="tbl-cap">
+        <span><strong>Table 1.</strong> Capability comparison across prior formats and Cowrie v1.2. At 0.001%–10% cold NVMe selectivity, 16 KB <code>CWZM</code> zone-maps beat SQLite3 (0.51 ms vs. 1.03 ms); flat prose compression still defers to <code>zstd + JSONL</code>. *Protobuf disclaims canonical bytes.</span>
+      </div>
+    </div>
+
+    <figure class="viz">
+      <div class="viz-canvas">
+        <svg viewBox="0 0 820 310" role="img" aria-label="Zero-crossing orthographic diagram routing one four-plane Cowrie container to CPU verifier, LLM attention, and GPU 16 KB DMA">
+          <defs>
+            <marker id="arr-b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1D4ED8"/>
+            </marker>
+            <marker id="arr-k" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#262A32"/>
+            </marker>
+          </defs>
+
+          <text x="20" y="20" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">ONE SEALED .CWRF CONTAINER ON NVMe</text>
+          <rect x="20" y="34" width="234" height="252" fill="#FCFCFA" stroke="#111318" stroke-width="1.3"/>
+
+          <rect x="28" y="42" width="218" height="52" fill="#FCFCFA" stroke="#C2352A" stroke-width="1.1"/>
+          <text x="38" y="61" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#C2352A">PLANE D · TRUST &amp; MERKLE</text>
+          <text x="38" y="79" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Byte 0x05 taint · Dual-tree 0x04 root</text>
+
+          <rect x="28" y="102" width="218" height="52" fill="#FCFCFA" stroke="#262A32" stroke-width="1.1"/>
+          <text x="38" y="121" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#111318">PLANE A · CANONICAL CORE</text>
+          <text x="38" y="139" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Sorted dict · 0x0A TensorRef (−47.4%)</text>
+
+          <rect x="28" y="162" width="218" height="52" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="1.1"/>
+          <text x="38" y="181" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">PLANE B · ATTENTION LENSES</text>
+          <text x="38" y="199" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">47-bit @handles · Fence-escaped R2</text>
+
+          <rect x="28" y="222" width="218" height="56" fill="rgba(29,78,216,0.09)" stroke="#1D4ED8" stroke-width="1.2"/>
+          <text x="38" y="241" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">PLANE C · 16 KB ARENA</text>
+          <text x="38" y="259" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">HMAC CWSP · AVX2/NEON CWIV</text>
+
+          <path d="M 254 64 L 486 64" fill="none" stroke="#262A32" stroke-width="1.2" marker-end="url(#arr-k)"/>
+          <path d="M 254 128 L 310 128 L 310 82 L 486 82" fill="none" stroke="#8B929E" stroke-width="1.1" stroke-dasharray="3 3" marker-end="url(#arr-k)"/>
+          <text x="396" y="57" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5E6673">170 ns 0-alloc + SHA-NI / SHA2</text>
+
+          <path d="M 254 188 L 346 188 L 346 161 L 486 161" fill="none" stroke="#1D4ED8" stroke-width="1.3" marker-end="url(#arr-b)"/>
+          <text x="416" y="153" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#1D4ED8">zero-inference R0–R2 text</text>
+
+          <path d="M 254 250 L 486 250" fill="none" stroke="#1D4ED8" stroke-width="1.4" marker-end="url(#arr-b)"/>
+          <text x="374" y="242" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#1D4ED8">zero-copy mmap / PCIe DMA</text>
+
+          <text x="494" y="20" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">THREE HARDWARE CONSUMERS</text>
+
+          <rect x="494" y="34" width="306" height="74" fill="#FCFCFA" stroke="#111318" stroke-width="1.2"/>
+          <text x="508" y="56" font-family="Inter, sans-serif" font-size="13.5" font-weight="600" fill="#111318">CPU Security &amp; Cache Verifier</text>
+          <text x="508" y="75" font-family="Inter, sans-serif" font-size="12" fill="#5E6673">Verifies frames in 169.8 ns (0 heap allocs)</text>
+          <text x="508" y="92" font-family="Inter, sans-serif" font-size="12" fill="#5E6673">and blocks tainted or unknown tool lineages.</text>
+
+          <rect x="494" y="124" width="306" height="74" fill="#FCFCFA" stroke="#1D4ED8" stroke-width="1.2"/>
+          <text x="508" y="146" font-family="Inter, sans-serif" font-size="13.5" font-weight="600" fill="#111318">LLM Attention Engine</text>
+          <text x="508" y="165" font-family="Inter, sans-serif" font-size="12" fill="#5E6673">Reads compact token mipmaps; never</text>
+          <text x="508" y="182" font-family="Inter, sans-serif" font-size="12" fill="#5E6673">pages in binary tensors or raw float arrays.</text>
+
+          <rect x="494" y="214" width="306" height="74" fill="#FCFCFA" stroke="#1D4ED8" stroke-width="1.2"/>
+          <text x="508" y="236" font-family="Inter, sans-serif" font-size="13.5" font-weight="600" fill="#111318">GPU Tensor Core &amp; NVMe DMA</text>
+          <text x="508" y="255" font-family="Inter, sans-serif" font-size="12" fill="#5E6673">Maps 16 KB-aligned StatePages &amp; IVF blocks</text>
+          <text x="508" y="272" font-family="Inter, sans-serif" font-size="12" fill="#5E6673">straight off disk without parsing Plane A.</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 02</span>Four orthogonal planes let each hardware reader jump directly to its own layout without paying for the other two.</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- 02 · ARCHITECTURE LAYERED WITH WINS -->
+  <section id="s02" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>02</span>Architecture Layered With Wins</div>
+      <h2>Four Planes, Each Tied Directly to a Physical Payoff</h2>
+
+      <p>Cowrie is structured so that every byte-level decision exists to produce a concrete runtime win. Walking Plane A through Plane D shows how each architectural invariant creates its measured payoff directly at the hardware boundary.</p>
+
+      <!-- PLANE A -->
+      <h3 class="plane-head" id="plane-a"><span class="pl-tag">Plane A · Bijective Canonical Wire</span>Zero-Allocation Verification, Native <code>0x0A</code> TensorRefs &amp; Satellite Isolation</h3>
+      <p>Every Plane A frame begins with an 8-byte header: magic <code>"COWR"</code> (<code>43 4F 57 52</code>), version <code>0x01</code>, out-of-band <code>authority</code> (byte <code>0x05</code>), <code>epistemic</code> tag, and <code>flags = 0x00</code> (compression belongs to transport, never identity). A key dictionary sorted strictly in <strong>UTF-8 byte order</strong> follows, then a minimal value tree: <code>0x40..0xBF</code> inline <code>FIXINT</code>, <code>0x04</code> canonical <code>f64</code> with <code>-0.0 → +0.0</code>, <code>0x03</code> zigzag <code>Int</code>, and native <strong><code>TAG_TENSOR_REF (0x0A)</code></strong> Coordinate Contracts (cutting tensor reference wire size by <strong>−47.4%</strong> from 78 B to 41 B while validating overflow-safe shapes against Plane C). Hardened in <code>v1.1</code>, <code>verify_frame_zero_alloc</code> checks every canonical rule using a stack-inline <code>[u64; 4]</code> key bitset with <strong>zero heap allocations</strong>, while the strict RFC 8259 JSON bridge rejects UTF-16 surrogate traps and round-trips whole floats (<code>1.0</code>) and <code>{"$bytes":"..."}</code> losslessly.</p>
+
+      <div class="win-strip">
+        <span class="ws-k">Direct Architectural Win · Plane A</span>
+        <strong>169.8 ns/frame zero-allocation canonical verification</strong> (<strong>278.7 ns</strong> including hardware SHA-NI 34-byte CID, <strong>7.43× faster</strong> than full decode), 100% cross-language CID identity across 150 frozen test vectors, live <strong>vLLM V1 prefix-cache hits when JSON keys arrive reversed</strong>, and permanent document CIDs across model upgrades.
+      </div>
+    </div>
+
+    <figure class="viz" id="lab1">
+      <div class="viz-canvas">
+        <div class="ctrl-row">
+          <div class="seg-group">
+            <button class="seg-btn active" data-l1="canon" type="button">Canon {z:5, a:+0.0}</button>
+            <button class="seg-btn" data-l1="shuffle" type="button">Shuffled {a:-0.0}</button>
+            <button class="seg-btn" data-l1="tensorref" type="button">0x0A TensorRef</button>
+            <button class="seg-btn fault" data-l1="badint" type="button">Bad Int(5)</button>
+            <button class="seg-btn fault" data-l1="negzero" type="button">Raw -0.0</button>
+            <button class="seg-btn fault" data-l1="bomb" type="button">Depth-65 Bomb</button>
+          </div>
+          <span style="font-family:var(--f-mono);font-size:11px;color:var(--subtle);">ZERO-ALLOC VERIFIER · SHA-256</span>
+        </div>
+        <div id="l1Desc" style="font-family:var(--f-mono);font-size:11.5px;color:var(--muted);"></div>
+        <div class="byte-strip" id="l1Tape"></div>
+        <div class="readout-line">
+          <div id="l1Verdict"></div>
+          <div id="l1Hash"></div>
+        </div>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 03A</span>Live <code>COWR</code> wire ribbon (<code>SPEC.md</code> §2.3 tags: <code>0x0A = TensorRef</code>, <code>0x04 = Float64</code>, <code>0x03 = Int</code>, <code>0x45 = FIXINT 5</code>) and 169.8 ns zero-alloc verifier.</span>
+        <span class="fsrc">receipt_v1_1_hardening.json</span>
+      </figcaption>
+    </figure>
+
+    <figure class="viz">
+      <div class="viz-canvas plain">
+        <svg viewBox="0 0 820 132" role="img" aria-label="Outside-CoreHash satellite boundary with forked contract arrows entering CWSP and CWIV">
+          <defs>
+            <marker id="arr-sat" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto">
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#262A32"/>
+            </marker>
+          </defs>
+          <rect x="4" y="18" width="256" height="96" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="1.3"/>
+          <text x="18" y="40" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">IMMUTABLE CORE · PLANE A</text>
+          <text x="18" y="61" font-family="Inter, sans-serif" font-size="12.5" font-weight="600" fill="#111318">Document · Memory · ComfyUI Graph</text>
+          <text x="18" y="80" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#5E6673">CoreHash = 0x12 0x20 || SHA-256</text>
+          <text x="18" y="99" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Permanent across model upgrades.</text>
+
+          <line x1="360" y1="6" x2="360" y2="126" stroke="#8B929E" stroke-width="1.2" stroke-dasharray="4 4"/>
+          <line x1="260" y1="66" x2="274" y2="66" stroke="#262A32" stroke-width="1.2"/>
+          <rect x="274" y="38" width="172" height="56" fill="#FCFCFA" stroke="#262A32" stroke-width="1.1"/>
+          <text x="360" y="57" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.6" font-weight="600" fill="#111318">SATELLITE CONTRACT</text>
+          <text x="360" y="72" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.9" fill="#5E6673">(model_sha, runtime_id,</text>
+          <text x="360" y="85" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.9" fill="#5E6673">kv_quant, ssm_dtype, hmac)</text>
+          <path d="M 446 66 L 455 66 M 455 34 L 455 98" fill="none" stroke="#262A32" stroke-width="1.2"/>
+          <path d="M 455 34 L 463 34" fill="none" stroke="#262A32" stroke-width="1.2" marker-end="url(#arr-sat)"/>
+          <path d="M 455 98 L 463 98" fill="none" stroke="#262A32" stroke-width="1.2" marker-end="url(#arr-sat)"/>
+
+          <rect x="466" y="10" width="350" height="48" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+          <text x="480" y="29" font-family="JetBrains Mono, monospace" font-size="10.2" font-weight="600" fill="#111318">CWSP STATEPAGE (OUTSIDE COREHASH)</text>
+          <text x="480" y="46" font-family="Inter, sans-serif" font-size="11.2" fill="#5E6673">Q4_0 KV + F32 SSM · 64-stride model_sha · HMAC</text>
+
+          <rect x="466" y="74" width="350" height="48" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+          <text x="480" y="93" font-family="JetBrains Mono, monospace" font-size="10.2" font-weight="600" fill="#111318">CWIV INDEX (OUTSIDE COREHASH)</text>
+          <text x="480" y="110" font-family="Inter, sans-serif" font-size="11.2" fill="#5E6673">16 KB INT8 IVF blocks · AVX2 / NEON C-ABI</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 03B</span>Keeping disposable model caches outside <code>CoreHash</code> lets workspaces upgrade from Qwen3 to Qwen3.5 without invalidating any document link.</span>
+      </figcaption>
+    </figure>
+
+    <!-- PLANE B -->
+    <div class="prose">
+      <h3 class="plane-head" id="plane-b"><span class="pl-tag">Plane B · Progressive Attention Lenses</span>Zero-Inference Mipmaps, 47-Bit Alpha Handles &amp; Fence Breakout Protection</h3>
+      <p>Graphics engines never sample a 4K texture for a twelve-pixel surface; they store mipmaps and read only the resolution the camera needs. Cowrie's Plane B applies the same principle to LLM context windows with zero summarizer inference: <code>R0</code> emits a 10-letter lowercase Alpha32 handle (<code>@kmpqvwrxzt</code>, 47.0 bits of collision entropy across ~12M records while avoiding Qwen3.5's <code>\p{N}</code> single-digit BPE fragmentation), <code>R1</code> emits a typed structural outline, <code>R2</code> hoists uniform table headers (<code>len &gt;= 3</code>, density <code>&gt;= 0.70</code>) while keeping raw tensors behind <code>&lt;T:i8[512]@space&gt;</code> pointers, and <code>R3</code> returns the lossless record on demand. To stop untrusted strings from forging boundary markers inside prompts, <code>R2</code> escapes interior <code>&lt;&lt;&lt;</code> and <code>&gt;&gt;&gt;</code> sequences automatically.</p>
+
+      <div class="win-strip">
+        <span class="ws-k">Direct Architectural Win · Plane B</span>
+        <strong>−98.7% W2 multimodal tokens</strong> (17,899 → 241), <strong>−73.8% R0 handle token cost</strong>, <strong>−99.8% R0 / −97.5% R1 Creative Studio Vault wire bytes</strong> (12,525 B → 28 B / 313 B), <strong>zero fence-breakout escapes</strong>, and <strong>1.93×–4.43× faster live paired QA</strong> at <strong>24/24 (100%) accuracy parity</strong>.
+      </div>
+    </div>
+
+    <figure class="viz" id="lab3">
+      <div class="viz-canvas">
+        <div class="ctrl-row">
+          <div class="seg-group" id="l3Datasets">
+            <button class="seg-btn active" data-ds="w2" type="button">W2 Multimodal (Tokens)</button>
+            <button class="seg-btn" data-ds="vault" type="button">Studio Vault (Bytes)</button>
+            <button class="seg-btn" data-ds="ast" type="button">Polymorphic AST (Honest Edge)</button>
+          </div>
+          <div class="seg-group" id="l3Tiers">
+            <button class="seg-btn" data-t="r0" type="button">R0</button>
+            <button class="seg-btn" data-t="r1" type="button">R1</button>
+            <button class="seg-btn active" data-t="r2" type="button">R2</button>
+            <button class="seg-btn" data-t="json" type="button">JSON</button>
+          </div>
+        </div>
+        <svg id="l3BarSvg" viewBox="0 0 820 56" role="img" aria-label="Proportional lens size comparison bar"></svg>
+        <div class="code-view" id="l3Code"></div>
+        <div class="bpe-line" id="l3Bpe"></div>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 04</span>Measured 248K BPE tokens (W2 &amp; AST) and wire bytes (Studio Vault), including 10-letter 47-bit handles and the honest +2.2% AST hoisting crossover.</span>
+        <span class="fsrc">receipt_h2.json · receipt_e2.json · c0-v7-cowrie-receipt.txt</span>
+      </figcaption>
+    </figure>
+
+    <!-- PLANE C -->
+    <div class="prose">
+      <h3 class="plane-head" id="plane-c"><span class="pl-tag">Plane C · 16 KB Hardware Arena</span>Universal Page Alignment, <code>O_DIRECT</code> Pinned DMA, <code>vLLM</code> Offloading &amp; Live <code>CWIV</code> Compaction</h3>
+      <p>Hardware page sizes diverge across silicon: x86 Linux defaults to 4,096 bytes, Apple Silicon unified memory uses 16,384 bytes, Android ARM64 mandates 16,384 bytes, and CPU SIMD cache lines are 64 bytes. Aligning Plane C to their exact least common multiple, <strong>16,384 bytes (<code>align_log2 = 14</code>)</strong> with strict <code>0x00</code> padding, lets one file map zero-copy across Linux GPUs, Apple Silicon Macs, and mobile devices while satisfying kernel <code>O_DIRECT</code> alignment on NVMe.</p>
+
+      <p>Three Plane C modules turn that page floor into order-of-magnitude latency gains. First, <strong><code>CWSP</code> StatePages</strong> checkpoint live GPU state via <code>O_CREAT | O_EXCL</code> <code>0600</code> temp files + parent-dir <code>fsync</code> using split precision (exact <code>F32</code> DeltaNet SSM + <code>Q4_0</code> GQA KV in <code>llama.cpp</code>, and native multi-layer paged KV blocks in <code>vLLM 0.15.0</code> via <code>CowrieKVConnectorV1</code>), bound to a 64-stride <code>cowrie_model_fingerprint</code> (1.86 ms on 5.59 GiB), <code>runtime_id</code>, optional RFC 2104 <code>HMAC-SHA256</code>, and 4 MiB parallel <code>SHA-NI</code> / <code>ARMv8 SHA2</code> verification. Double-buffered 16 KB <code>O_DIRECT</code> into <code>cudaHostAlloc</code> pinned memory across two CUDA streams lifts cold NVMe-to-VRAM bandwidth <strong>1.31×</strong> (3.38 GB/s cold; 26.79 GB/s warm PCIe Gen4). Second, <strong><code>CWIV</code> IVF blocks</strong> co-locate embeddings and 16-byte authority metadata for concurrent <code>O_DIRECT</code> search. Third, <strong><code>LiveIvfStore</code> (<code>.cwwal</code>)</strong> appends new frames or INT8 vectors to a SHA-256 hash-chained WAL in <strong>4.45 µs</strong> and compacts 50,500 vectors into a sealed 16 KB <code>CWIV</code> shard in <strong>12.91 ms</strong>.</p>
+
+      <div class="win-strip">
+        <span class="ws-k">Direct Architectural Win · Plane C</span>
+        <strong>49.7× cold NVMe / 123.2× warm Q4_0 resume</strong> in <code>llama.cpp</code>, <strong>5.64× cross-restart KV restore (80.5 ms vs. 453.9 ms)</strong> in <code>vLLM 0.15.0</code>, <strong>3.38 GB/s cold <code>O_DIRECT</code> / 26.79 GB/s warm CUDA DMA</strong>, <strong>7.07 ms 10M-vector NVMe search</strong>, and <strong>87.5 µs live WAL-delta hybrid search</strong>.
+      </div>
+    </div>
+
+    <figure class="viz">
+      <div class="viz-canvas">
+        <svg viewBox="0 0 820 218" role="img" aria-label="16384-byte alignment ruler across Apple Silicon, Android ARM64, Linux 4 KB pages, and SIMD cache lines above CWRF container layout">
+          <text x="12" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">HARDWARE PAGE ALIGNMENT · 16,384 BYTES (ALIGN_LOG2 = 14)</text>
+          <text x="12" y="46" font-family="Inter, sans-serif" font-size="11.5" fill="#111318" font-weight="600">Apple Silicon / ARM64</text>
+          <rect x="176" y="32" width="628" height="20" fill="rgba(29,78,216,0.09)" stroke="#1D4ED8" stroke-width="1.2"/>
+          <text x="490" y="46" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">1 × 16,384 B VM PAGE</text>
+
+          <text x="12" y="76" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">Linux x86 / NVMe</text>
+          <g stroke="#262A32" stroke-width="1" fill="#FCFCFA">
+            <rect x="176" y="62" width="157" height="20"/><rect x="333" y="62" width="157" height="20"/>
+            <rect x="490" y="62" width="157" height="20"/><rect x="647" y="62" width="157" height="20"/>
+          </g>
+          <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#5E6673" text-anchor="middle">
+            <text x="254" y="76">4 KB</text><text x="411" y="76">4 KB</text><text x="568" y="76">4 KB</text><text x="725" y="76">4 KB</text>
+          </g>
+
+          <text x="12" y="106" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">CPU SIMD Cache Lines</text>
+          <rect x="176" y="92" width="628" height="18" fill="#FCFCFA" stroke="#8B929E" stroke-width="1"/>
+          <g stroke="#D1D5DB" stroke-width="0.9">
+            <line x1="200" y1="92" x2="200" y2="110"/><line x1="224" y1="92" x2="224" y2="110"/><line x1="248" y1="92" x2="248" y2="110"/>
+            <line x1="272" y1="92" x2="272" y2="110"/><line x1="296" y1="92" x2="296" y2="110"/><line x1="320" y1="92" x2="320" y2="110"/>
+            <line x1="660" y1="92" x2="660" y2="110"/><line x1="684" y1="92" x2="684" y2="110"/><line x1="708" y1="92" x2="708" y2="110"/>
+            <line x1="732" y1="92" x2="732" y2="110"/><line x1="756" y1="92" x2="756" y2="110"/><line x1="780" y1="92" x2="780" y2="110"/>
+          </g>
+          <text x="490" y="105" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#5E6673">256 × 64 B CACHE LINES</text>
+
+          <line x1="12" y1="128" x2="804" y2="128" stroke="#E3E5E8" stroke-width="1"/>
+          <text x="12" y="148" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">SEALED .CWRF v1.2 LAYOUT · DUAL-TREE MERKLE + O(1) TRAILER</text>
+
+          <rect x="12" y="158" width="76" height="44" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+          <text x="50" y="177" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#111318">HEADER</text>
+          <text x="50" y="193" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5E6673">CWRF 64 B</text>
+
+          <rect x="88" y="158" width="160" height="44" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+          <text x="168" y="177" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#111318">PLANE A FRAMES</text>
+          <text x="168" y="193" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5E6673">COWR + 0x0A refs</text>
+
+          <rect x="248" y="158" width="66" height="44" fill="#F5F5F1" stroke="#8B929E" stroke-width="1" stroke-dasharray="3 2"/>
+          <text x="281" y="177" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#5E6673">0x00 PAD</text>
+          <text x="281" y="193" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8B929E">→ 16 KB</text>
+
+          <rect x="314" y="158" width="268" height="44" fill="rgba(29,78,216,0.08)" stroke="#1D4ED8" stroke-width="1.3"/>
+          <text x="448" y="177" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#1D4ED8">PLANE C · 16 KB-ALIGNED ARENA</text>
+          <text x="448" y="193" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#262A32">Merkle Tensors · HMAC CWSP · CWIV</text>
+
+          <rect x="582" y="158" width="140" height="44" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+          <text x="652" y="177" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#111318">PLANE D FOOTER</text>
+          <text x="652" y="193" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#5E6673">44B F + 48B T + 0x04</text>
+
+          <rect x="722" y="158" width="82" height="44" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="1.1"/>
+          <text x="763" y="177" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="#1D4ED8">EOF − 12 B</text>
+          <text x="763" y="193" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#5E6673">off || CWRF</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 05</span>16 KB page geometry, 48-byte Merkle-committed tensor entries, and O(1) seek-from-end trailer.</span>
+      </figcaption>
+    </figure>
+
+    <figure class="viz">
+      <div class="viz-canvas">
+        <svg viewBox="0 0 820 206" role="img" aria-label="Split-precision Qwen3.5 StatePage pipeline through bounded WorkerPool SHA-NI and ARMv8 SHA2 lanes onto 0600 HMAC NVMe pages">
+          <defs>
+            <marker id="arr-s" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1D4ED8"/>
+            </marker>
+          </defs>
+
+          <text x="16" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">1 · GPU VRAM (QWEN3.5-9B)</text>
+          <rect x="16" y="30" width="218" height="156" fill="#FCFCFA" stroke="#111318" stroke-width="1.2"/>
+          <rect x="28" y="42" width="194" height="58" fill="rgba(29,78,216,0.12)" stroke="#1D4ED8" stroke-width="1.2"/>
+          <text x="40" y="64" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">24 × DELTANET SSM</text>
+          <text x="40" y="83" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">Exact F32 · ssm_dtype gated</text>
+          <rect x="28" y="112" width="194" height="62" fill="#FCFCFA" stroke="#1D4ED8" stroke-width="1.2" stroke-dasharray="4 2"/>
+          <text x="40" y="134" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#111318">8 × GQA KV CACHE</text>
+          <text x="40" y="153" font-family="Inter, sans-serif" font-size="11.5" fill="#5E6673">Quantized Q4_0 · 2.80× smaller</text>
+
+          <path d="M 234 71 L 296 71" fill="none" stroke="#1D4ED8" stroke-width="1.2" marker-end="url(#arr-s)"/>
+          <path d="M 234 143 L 296 143" fill="none" stroke="#1D4ED8" stroke-width="1.2" marker-end="url(#arr-s)"/>
+
+          <text x="304" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">2 · BOUNDED WORKER POOL</text>
+          <rect x="304" y="30" width="214" height="156" fill="#FCFCFA" stroke="#111318" stroke-width="1.2"/>
+          <g font-family="JetBrains Mono, monospace" font-size="9.8" fill="#111318">
+            <rect x="318" y="44" width="186" height="22" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="0.9"/><text x="328" y="59">w0 · 4 MiB SHA-NI / SHA2</text>
+            <rect x="318" y="72" width="186" height="22" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="0.9"/><text x="328" y="87">w1 · 4 MiB SHA-NI / SHA2</text>
+            <rect x="318" y="100" width="186" height="22" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="0.9"/><text x="328" y="115">w2 · 4 MiB SHA-NI / SHA2</text>
+            <rect x="318" y="128" width="186" height="22" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="0.9"/><text x="328" y="143">w3 · 4 MiB SHA-NI / SHA2</text>
+          </g>
+          <text x="411" y="174" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.8" font-weight="600" fill="#1D4ED8">0 OS spawns · &lt;0.6 ms warm</text>
+
+          <path d="M 518 108 L 578 108" fill="none" stroke="#1D4ED8" stroke-width="1.4" marker-end="url(#arr-s)"/>
+
+          <text x="586" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">3 · 0600 HMAC STATEPAGE</text>
+          <rect x="586" y="30" width="218" height="156" fill="#FCFCFA" stroke="#111318" stroke-width="1.2"/>
+          <rect x="598" y="42" width="194" height="36" fill="#F5F5F1" stroke="#262A32" stroke-width="1"/>
+          <text x="610" y="58" font-family="JetBrains Mono, monospace" font-size="9.6" font-weight="600" fill="#111318">PAGE 0 · CWSP + HMAC</text>
+          <text x="610" y="72" font-family="JetBrains Mono, monospace" font-size="8.6" fill="#5E6673">model_sha · runtime_id · mac</text>
+          <g fill="rgba(29,78,216,0.08)" stroke="#1D4ED8" stroke-width="0.9">
+            <rect x="598" y="88" width="44" height="22"/><rect x="648" y="88" width="44" height="22"/><rect x="698" y="88" width="44" height="22"/><rect x="748" y="88" width="44" height="22"/>
+            <rect x="598" y="116" width="44" height="22"/><rect x="648" y="116" width="44" height="22"/><rect x="698" y="116" width="44" height="22"/><rect x="748" y="116" width="44" height="22"/>
+          </g>
+          <text x="695" y="160" text-anchor="middle" font-family="Inter, sans-serif" font-size="11.5" font-weight="600" fill="#111318">180.2 MB · 68.2 ms cold</text>
+          <text x="695" y="176" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.2" fill="#5E6673">O_EXCL 0600 → fsync → rename</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 06</span>Split-precision checkpointing paired with bounded-pool hardware SHA-256 and RFC 2104 HMAC verification before VRAM load.</span>
+      </figcaption>
+    </figure>
+
+    <div class="tbl-wrap" id="lab5">
+      <table class="booktabs">
+        <thead>
+          <tr>
+            <th>StatePage Tier (13.8K tok)</th>
+            <th class="num">Size</th>
+            <th class="num">Cold NVMe</th>
+            <th class="num">Warm RAM</th>
+            <th class="num">Speedup</th>
+            <th class="num">KL Div</th>
+            <th class="num">Tokens</th>
+          </tr>
+        </thead>
+        <tbody id="l5Rows">
+          <tr class="clickable" data-m="prefill">
+            <td class="row-head">Cold GPU Prefill (Baseline)</td>
+            <td class="num">—</td>
+            <td class="num">3,391.5 ms</td>
+            <td class="num">3,391.5 ms</td>
+            <td class="num">1.0×</td>
+            <td class="num">0.00</td>
+            <td class="num">33 / 33</td>
+          </tr>
+          <tr class="clickable" data-m="fp16">
+            <td class="row-head">FP16 KV + Exact SSM</td>
+            <td class="num">505.2 MB</td>
+            <td class="num">177.7 ms</td>
+            <td class="num">70.9 ms</td>
+            <td class="num">18.9× / 45.5×</td>
+            <td class="num">0.00</td>
+            <td class="num">33 / 33</td>
+          </tr>
+          <tr class="clickable" data-m="q8">
+            <td class="row-head">Q8_0 KV + Exact SSM</td>
+            <td class="num">293.2 MB</td>
+            <td class="num">103.9 ms</td>
+            <td class="num">42.3 ms</td>
+            <td class="num">32.7× / 78.4×</td>
+            <td class="num">4.54e-4</td>
+            <td class="num">33 / 33</td>
+          </tr>
+          <tr class="clickable selected" data-m="q4">
+            <td class="row-head">Q4_0 KV + Exact SSM (Recommended)</td>
+            <td class="num">180.2 MB</td>
+            <td class="num">68.2 ms</td>
+            <td class="num">27.2 ms</td>
+            <td class="num">49.7× / 123.2×</td>
+            <td class="num">3.99e-4</td>
+            <td class="num">33 / 33</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="viz-canvas" style="margin-top:16px;padding:16px 20px;">
+        <div class="ctrl-row" style="margin-bottom:10px;padding-bottom:8px;">
+          <span style="font-family:var(--f-mono);font-size:11px;color:var(--muted);">CONTRACT, HMAC &amp; SHA-NI FAULT INJECTION</span>
+          <div class="seg-group" id="l5Faults">
+            <button class="seg-btn active" data-flt="ok" type="button">Clean Verify</button>
+            <button class="seg-btn fault" data-flt="model" type="button">Mid-Layer LoRA Edit</button>
+            <button class="seg-btn fault" data-flt="kvq" type="button">Wrong kv_quant / SSM</button>
+            <button class="seg-btn fault" data-flt="hmac" type="button">Forged Header / Runtime</button>
+            <button class="seg-btn fault" data-flt="bit" type="button">Flip 1 Bit (Chunk 11)</button>
+          </div>
+        </div>
+        <svg id="l5ChunkSvg" viewBox="0 0 820 40" role="img" aria-label="16-chunk SHA-NI Merkle verification strip"></svg>
+        <div class="readout-line" style="margin-top:10px;" id="l5Gate"></div>
+      </div>
+      <div class="tbl-cap">
+        <span><strong>Table 2.</strong> Live RTX 3090 + real NVMe (<code>/dev/nvme1n1p3</code>, post-<code>POSIX_FADV_DONTNEED</code>) checkpoint benchmarks plus v1.1 contract &amp; HMAC guards.</span>
+        <span class="fsrc">receipt_shani_kvquant.json · receipt_v1_1_hardening.json</span>
+      </div>
+    </div>
+
+    <figure class="viz" id="nvmeLab">
+      <div class="viz-canvas">
+        <div class="ctrl-row">
+          <span style="font-family:var(--f-mono);font-size:11.5px;color:var(--muted);">10M × 512d COLD NVMe LAYOUT · 5.30 GB FILE · 0.390% READ</span>
+          <button class="action-link" id="runRaceBtn" type="button">Animate I/O race</button>
+        </div>
+        <svg id="nvmeRaceSvg" viewBox="0 0 820 228" role="img" aria-label="Animated comparison of serial QD=1 split-seek NVMe I/O at 64.81 ms versus parallel QD=16 co-located 16 KB CWIV reads at 7.07 ms">
+          <text x="12" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#C2352A">BEFORE · SPLIT REGIONS (SERIAL QD=1 · 32 SEEKS)</text>
+          <text x="808" y="18" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#C2352A" id="raceSplitClock">64.81 ms</text>
+          <rect x="12" y="28" width="520" height="28" fill="#FCFCFA" stroke="#8B929E" stroke-width="1.1"/>
+          <text x="272" y="46" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5E6673">ALL EMBEDDINGS (5.12 GB)</text>
+          <rect x="548" y="28" width="260" height="28" fill="#FCFCFA" stroke="#8B929E" stroke-width="1.1"/>
+          <text x="678" y="46" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10" fill="#5E6673">ALL METADATA (160 MB)</text>
+          <g fill="none" stroke="#C2352A" stroke-width="1" opacity="0.55">
+            <path d="M 80 56 Q 340 82 590 56"/><path d="M 190 56 Q 410 86 640 56"/>
+            <path d="M 320 56 Q 500 84 695 56"/><path d="M 430 56 Q 590 80 748 56"/>
+          </g>
+          <rect x="12" y="88" width="796" height="8" fill="#E8EAED"/>
+          <rect id="raceSplitBar" x="12" y="88" width="796" height="8" fill="#C2352A"/>
+
+          <line x1="12" y1="116" x2="808" y2="116" stroke="#E3E5E8" stroke-width="1"/>
+          <text x="12" y="138" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">COWRIE CWIV · CO-LOCATED 16 KB CLUSTERS (PARALLEL QD=16 + AVX2/NEON)</text>
+          <text x="808" y="138" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#1D4ED8" id="raceCwivClock">7.07 ms (9.17×)</text>
+          <g>
+            <rect x="12" y="148" width="186" height="28" fill="#FCFCFA" stroke="#D1D5DB" stroke-width="1"/>
+            <rect x="148" y="148" width="50" height="28" fill="#ECEEF0" stroke="#D1D5DB" stroke-width="1"/>
+            <text x="80" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8B929E">C0 embs</text>
+            <text x="173" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8B929E">meta</text>
+
+            <rect x="212" y="148" width="186" height="28" fill="rgba(29,78,216,0.10)" stroke="#1D4ED8" stroke-width="1.3"/>
+            <rect x="348" y="148" width="50" height="28" fill="rgba(29,78,216,0.22)" stroke="#1D4ED8" stroke-width="1.3"/>
+            <text x="280" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="#1D4ED8">HIT #1 embs</text>
+            <text x="373" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" font-weight="600" fill="#1D4ED8">meta</text>
+
+            <rect x="412" y="148" width="186" height="28" fill="#FCFCFA" stroke="#D1D5DB" stroke-width="1"/>
+            <rect x="548" y="148" width="50" height="28" fill="#ECEEF0" stroke="#D1D5DB" stroke-width="1"/>
+            <text x="480" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8B929E">C2048 embs</text>
+            <text x="573" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#8B929E">meta</text>
+
+            <rect x="612" y="148" width="196" height="28" fill="rgba(29,78,216,0.10)" stroke="#1D4ED8" stroke-width="1.3"/>
+            <rect x="758" y="148" width="50" height="28" fill="rgba(29,78,216,0.22)" stroke="#1D4ED8" stroke-width="1.3"/>
+            <text x="685" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="#1D4ED8">HIT #16 embs</text>
+            <text x="783" y="166" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" font-weight="600" fill="#1D4ED8">meta</text>
+          </g>
+          <rect x="12" y="190" width="796" height="8" fill="#E8EAED"/>
+          <rect id="raceCwivBar" x="12" y="190" width="87" height="8" fill="#1D4ED8"/>
+          <text x="12" y="216" font-family="JetBrains Mono, monospace" font-size="10" fill="#1D4ED8">16 concurrent O_DIRECT lanes · 5.50 ms pure I/O @ 3.77 GB/s · C-ABI cowrie_ivf_*</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 07</span>Co-locating cluster embeddings and authority metadata cut 10M-vector cold NVMe search 9.17× on identical hardware.</span>
+        <span class="fsrc">receipt_u3.json → receipt_u3_v03.json</span>
+      </figcaption>
+    </figure>
+
+    <figure class="viz">
+      <div class="viz-canvas plain">
+        <svg viewBox="0 0 820 226" role="img" aria-label="Log-scale latency ladder from SQLite3 135.2 ms down to warm VRAM 0.036 ms">
+          <text x="0" y="16" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#5E6673">END-TO-END FILTERED VECTOR SEARCH LATENCY (LOG SCALE · RTX 3090 + NVMe)</text>
+          <g id="ladderBars"></g>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 08</span>Log-scale retrieval latency across disk and VRAM tiers. Neutral bars mark baselines; crimson marks the initial split-seek miss; blue marks Cowrie results.</span>
+        <span class="fsrc">receipt_h3.json · receipt_u3_v03.json</span>
+      </figcaption>
+    </figure>
+
+    <!-- PLANE D -->
+    <div class="prose">
+      <h3 class="plane-head" id="plane-d"><span class="pl-tag">Plane D · Merkle Seals, 16 KB Zone-Maps, <code>Ed25519</code> &amp; MCP Wire Firewall</span>Count-Bound Dual Roots, Sub-Millisecond Cold Point Filters, and Cryptographic Taint Gates</h3>
+      <p>Plane D unites integrity, sparse indexing, and privilege enforcement. First, every shard closes with a domain-separated, promote-odd, count-bound <strong>RFC 6962 dual-tree Merkle root</strong> (<code>0x04</code> root over Plane A frames + Plane C tensors), while <strong><code>CWZM</code> Zone-Map shards</strong> pack sorted frames into self-verifying 16 KB pages indexed by 64-byte cache-line <code>(min_key, max_key, min_sec, max_sec, leaf_sha256)</code> entries — beating cold <code>SQLite3</code> B-trees <strong>1.58×–2.88×</strong> down to single-row lookups (0.514 ms vs. 1.031 ms on 100K rows). Second, header byte <code>0x05</code> enforces sticky causal taint (<code>BIT_TAINTED = 0x80</code>) all the way to the wire via <strong><code>cowrie mcp-proxy</code></strong> (blocking tainted JSON-RPC tool calls in 13.15 µs) paired with pure-Rust RFC 8032 <strong><code>Ed25519</code> owner-declassification tokens</strong> (<code>COWRIE_DECLASSIFY_V1</code>) scoped strictly to <code>(target_cid_34, action, expiry)</code>.</p>
+
+      <div class="win-strip">
+        <span class="ws-k">Direct Architectural Win · Plane D</span>
+        <strong>1.58×–2.88× faster cold NVMe point &amp; range queries than SQLite3</strong> (0.51 ms vs. 1.03 ms, −15.0% smaller file), <strong>41,661× smaller Merkle corpus sync</strong>, <strong>13.15 µs wire-level MCP taint blocking</strong>, and <strong>scoped RFC 8032 <code>Ed25519</code> human-in-the-loop approvals</strong> with zero shared symmetric secrets.
+      </div>
+    </div>
+
+    <figure class="viz" id="lab2">
+      <div class="viz-canvas">
+        <div class="ctrl-row">
+          <span style="font-family:var(--f-mono);font-size:11.5px;color:var(--muted);">CLICK ANY FRAME LEAF (F0–F6) OR TENSOR SLAB (T0) TO FLIP ONE BIT</span>
+          <div>
+            <button class="action-link" id="l2Rand" type="button">Flip random leaf</button>
+            <button class="action-link" id="l2Reset" type="button" style="color:var(--muted);">Reset all</button>
+          </div>
+        </div>
+        <svg id="l2Svg" viewBox="0 0 820 228" role="img" aria-label="Interactive dual-tree RFC 6962 Merkle diagram covering frames F0-F6 and Plane C tensor T0"></svg>
+        <div class="readout-line">
+          <div id="l2Status"></div>
+          <div id="l2Sync"></div>
+        </div>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 09</span>Interactive dual-tree RFC 6962 Merkle verifier computing live SHA-256 hashes over Plane A frames (<code>F0–F6</code>) and Plane C tensor arena (<code>T0</code>).</span>
+      </figcaption>
+    </figure>
+
+    <figure class="viz" id="lab4">
+      <div class="viz-canvas">
+        <div class="ctrl-row">
+          <div class="seg-group" id="l4Btns">
+            <button class="seg-btn active" data-s="cowrie" type="button">Cowrie Sticky 0x80</button>
+            <button class="seg-btn fault" data-s="naive" type="button">Naive Single-Hop Check</button>
+            <button class="seg-btn" data-s="override" type="button">Ed25519 Declassify (v1.2)</button>
+          </div>
+          <span style="font-family:var(--f-mono);font-size:11px;color:var(--subtle);">FAIL-CLOSED CAUSAL TAINT &amp; MCP WIRE GATE</span>
+        </div>
+        <svg id="l4Svg" viewBox="0 0 820 212" role="img" aria-label="Interactive SVG causal DAG comparing clean branch and 2-hop laundered taint branch"></svg>
+        <div class="readout-line">
+          <div id="l4Attack"></div>
+          <div id="l4Clean"></div>
+        </div>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 10</span>2-hop summarization laundering blocked by sticky <code>BIT_TAINTED = 0x80</code> and <code>cowrie mcp-proxy</code> (13.2 µs), with scoped RFC 8032 <code>Ed25519</code> owner declassification.</span>
+        <span class="fsrc">receipt_h4.json · receipt_v1_2_complete.json</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- 03 · FIFTEEN MAJOR WINS ACROSS THE STACK -->
+  <section id="s03" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>03</span>Measured Impact</div>
+      <h2>Fifteen Major Wins Across Four Live Runtimes, MCP &amp; WebAssembly</h2>
+
+      <p>Security is only one slice of what a shared canonical container changes. Wiring the same zero-dependency Rust core (<code>libcowrie_core.so</code>, <code>cowrie_core.wasm</code>, and the <code>cowrie</code> CLI) symmetrically into <strong>Eureka LLM</strong>, <strong>Eureka Creative Engine v7</strong>, <strong>llama.cpp</strong>, <strong>vLLM 0.15.0</strong>, stdio <strong>MCP servers</strong>, and <strong>Chrome / V8 WebAssembly</strong> produced fifteen distinct, receipted improvements spanning workspace swapping, longest-prefix KV offloading, <code>O_DIRECT</code> CUDA DMA, 16 KB Zone-Map point lookups, crash-safe WAL compaction, multimodal pipelines, visual node graphs, token latency, and cryptographic wire gates.</p>
+    </div>
+
+    <figure class="viz">
+      <div class="viz-canvas">
+        <svg viewBox="0 0 820 218" role="img" aria-label="C-ABI and WebAssembly hub architecture connecting cowrie-core symmetrically to Eureka LLM, Eureka Creative v7, llama.cpp, vLLM 0.15.0, and Browser wasm32">
+          <defs>
+            <marker id="arr-h" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1D4ED8"/>
+            </marker>
+          </defs>
+          <rect x="16" y="40" width="214" height="138" fill="rgba(29,78,216,0.07)" stroke="#1D4ED8" stroke-width="1.4"/>
+          <text x="30" y="64" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#1D4ED8">cowrie-core v1.2</text>
+          <text x="30" y="81" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#5E6673">799 KB .so · 80.4 KiB .wasm</text>
+          <line x1="30" y1="92" x2="216" y2="92" stroke="#D1D5DB" stroke-width="1"/>
+          <text x="30" y="109" font-family="Inter, sans-serif" font-size="11.2" fill="#262A32">· 170 ns COWR + CWZM + CWAL</text>
+          <text x="30" y="126" font-family="Inter, sans-serif" font-size="11.2" fill="#262A32">· SHA-NI / SHA2 + HMAC + Ed25519</text>
+          <text x="30" y="143" font-family="Inter, sans-serif" font-size="11.2" fill="#262A32">· AVX2/NEON CWIV + mcp-proxy</text>
+          <text x="30" y="163" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#1D4ED8">C ABI + wasm32 (0 imports)</text>
+
+          <line x1="230" y1="109" x2="296" y2="109" stroke="#1D4ED8" stroke-width="1.4"/>
+          <line x1="296" y1="30" x2="296" y2="188" stroke="#1D4ED8" stroke-width="1.4"/>
+          <path d="M 296 30 L 424 30" fill="none" stroke="#1D4ED8" stroke-width="1.2" marker-end="url(#arr-h)"/>
+          <path d="M 296 82 L 424 82" fill="none" stroke="#1D4ED8" stroke-width="1.2" marker-end="url(#arr-h)"/>
+          <path d="M 296 135 L 424 135" fill="none" stroke="#1D4ED8" stroke-width="1.2" marker-end="url(#arr-h)"/>
+          <path d="M 296 188 L 424 188" fill="none" stroke="#1D4ED8" stroke-width="1.2" marker-end="url(#arr-h)"/>
+
+          <g font-family="JetBrains Mono, monospace" font-size="9.5" fill="#5E6673">
+            <text x="306" y="24">dlopen (Bend/CUDA)</text>
+            <text x="306" y="76">dlopen (C11/CUDA)</text>
+            <text x="306" y="129">C++17 + O_DIRECT</text>
+            <text x="306" y="182">vLLM + Browser WASM</text>
+          </g>
+
+          <g font-family="Inter, sans-serif">
+            <rect x="432" y="10" width="372" height="40" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+            <text x="446" y="27" font-size="12.5" font-weight="600" fill="#111318">Eureka LLM (engine_gpu + llb-serve)</text>
+            <text x="446" y="43" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#5E6673">llb_cowrie.h + cowrie_route.h · HMAC CWSP + .cwwal + Ed25519</text>
+
+            <rect x="432" y="62" width="372" height="40" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+            <text x="446" y="79" font-size="12.5" font-weight="600" fill="#111318">Eureka Creative Engine v7 (Studio + ComfyUI)</text>
+            <text x="446" y="95" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#5E6673">ec_cowrie.c v1.2 · prefix CWSP + .cwwal + Ed25519 · 4 modalities</text>
+
+            <rect x="432" y="115" width="372" height="40" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+            <text x="446" y="132" font-size="12.5" font-weight="600" fill="#111318">llama.cpp + Prefix Cache + CUDA DMA</text>
+            <text x="446" y="148" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#5E6673">cowrie_llama_statepage.hpp · 13.7× suffix · 3.38 GB/s O_DIRECT</text>
+
+            <rect x="432" y="168" width="372" height="40" fill="#FCFCFA" stroke="#111318" stroke-width="1.1"/>
+            <text x="446" y="185" font-size="12.5" font-weight="600" fill="#111318">vLLM 0.15.0 + MCP Proxy + Browser wasm32</text>
+            <text x="446" y="201" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#5E6673">KVConnectorV1 (5.64×) · mcp-proxy (13.2 µs) · wasm (1.74 µs)</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 11</span>One zero-dependency Rust core powering Bend/CUDA, pure C11, C++17, Python vLLM V1, stdio MCP proxies, and Browser/Node WebAssembly with full v1.2 feature parity.</span>
+      </figcaption>
+    </figure>
+
+    <div class="ledger">
+      <article class="ledger-row">
+        <div class="ledger-num">01</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Near-instant workspace swapping and crash-proof LLM restarts</h4>
+            <span class="ledger-metric">49.7× cold NVMe · 123.2× warm</span>
+          </div>
+          <p class="ledger-p">Switching active codebases, restarting a server, or evicting an idle model from a single 24 GB RTX 3090 normally discards GPU KV/SSM state and pays full prefill again (3,391.5 ms for 13,800 tokens in <code>llama.cpp</code>; 1,541.6 ms for 2,800 tokens in Eureka LLM). Freezing sessions into 16 KB <code>CWSP</code> StatePages restores verified state in <strong>68.2 ms cold NVMe / 27.2 ms warm</strong> in <code>llama.cpp</code> and <strong>96.3 ms cold NVMe (5.00× E2E HTTP)</strong> across a full process kill in Eureka LLM.</p>
+          <div class="ledger-meta">Receipts: receipt_shani_kvquant.json · receipt_live_all.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">02</div>
+        <div>
+          <div class="ledger-head">
+            <h4>2.80× smaller hybrid KV + SSM snapshots without temporal drift</h4>
+            <span class="ledger-metric">505.2 MB → 180.2 MB · KL 3.99e-4</span>
+          </div>
+          <p class="ledger-p">Splitting precision inside StatePages (quantizing Transformer GQA KV slabs to <code>Q4_0</code> while keeping all 24 recurrent DeltaNet SSM layers in exact <code>F32</code>, enforced by <code>ERR_KV_QUANT_MISMATCH</code> and <code>ERR_SSM_DTYPE_MISMATCH</code>) shrinks a 13,800-token Qwen3.5-9B checkpoint from 505.2 MB to 180.2 MB while matching <strong>33/33 exact continuation tokens</strong> and recovering <strong>5/5 buried needles</strong>.</p>
+          <div class="ledger-meta">Receipts: receipt_shani_kvquant.json · receipt_v1_1_hardening.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">03</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Cross-restart multimodal text-encoder caching when swapping creative models</h4>
+            <span class="ledger-metric">151.7× Wan · 200×–2,970× FLUX</span>
+          </div>
+          <p class="ledger-p">A local studio running FLUX.2, Wan 2.2 video, TRELLIS.2 3D, and ACE-Step audio on one GPU must constantly swap multi-gigabyte text encoders out of VRAM. Saving encoded prompt conditioning as Cowrie StatePages in Eureka Creative v7 cuts <strong>Wan 2.2 UMT5-XXL FP8</strong> across full server restarts from <strong>3,230.8 ms → 21.3 ms (151.7×)</strong> and <strong>FLUX.2-klein-4B Qwen3-4B</strong> from <strong>91,771 ms cold HDD / ~1.2 s warm → 5.9–30.9 ms (200×–2,970×)</strong>.</p>
+          <div class="ledger-meta">Receipt: c0-v7-cowrie-receipt.txt (90/90 QA gates PASS)</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">04</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Persistent canonical ComfyUI node-graph caching across kills and downstream tweaks</h4>
+            <span class="ledger-metric">98.7 s → 1.0–9.6 ms (8/8 hits)</span>
+          </div>
+          <p class="ledger-p">Visual node graphs normally lose their in-RAM cache when a server restarts or miss cache when JSON keys serialize in a new order. Addressing each node by canonical Plane A <code>CoreHash</code> lets Eureka Creative v7 replay a full 8-node FLUX.2 + ColorGrade ComfyUI DAG after a process kill in <strong>1.0–9.6 ms (8/8 hits, 0 GPU execution)</strong>. Editing a downstream color-grade parameter with reversed JSON key order still hits <strong>6/8 upstream nodes in 9.0–11.3 ms</strong>.</p>
+          <div class="ledger-meta">Receipt: c0-v7-cowrie-receipt.txt</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">05</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Live LLM latency speedups from structured prompt compression at 100% QA parity</h4>
+            <span class="ledger-metric">1.93×–4.43× faster · 24/24 parity</span>
+          </div>
+          <p class="ledger-p">Projecting structured agent state through Plane B's <code>R2</code> lens cuts real 248K-vocabulary prompt tokens by <strong>−65.2%</strong> in <code>llama.cpp</code> (accelerating live Qwen3.5-9B GPU request latency <strong>1.93×–4.43×</strong> while scoring <strong>24/24 paired QA parity</strong> against minified JSON) and by <strong>−69.7%</strong> (3,176 → 961 tokens) on telemetry + embedding payloads in <code>vLLM 0.15.0</code>.</p>
+          <div class="ledger-meta">Receipts: receipt_h2.json · receipt_vllm_cowrie.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">06</div>
+        <div>
+          <div class="ledger-head">
+            <h4>100× wider browsing horizon on multimodal records + −47.4% native <code>0x0A</code> refs</h4>
+            <span class="ledger-metric">−98.7% W2 · −99.8% Vault R0</span>
+          </div>
+          <p class="ledger-p">Keeping raw tensors in Plane C behind native <code>TAG_TENSOR_REF (0x0A)</code> Coordinate Contracts cuts descriptor wire overhead by <strong>−47.4%</strong> (78 B → 41 B) and cuts W2 multimodal prompts from <strong>17,899 → 241 tokens (−98.7%)</strong>. Lowercase 10-letter Alpha32 handles cut <code>R0</code> directory index cost by <strong>−73.8%</strong> while expanding Creative Studio Vault views from <strong>12,525 B → 28 B at R0 (−99.8%)</strong> and <strong>313 B at R1 (−97.5%)</strong>.</p>
+          <div class="ledger-meta">Receipts: receipt_h2.json · receipt_v1_1_hardening.json · c0-v7-cowrie-receipt.txt</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">07</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Zero-allocation 169.8 ns verification &amp; cross-language prefix-cache preservation</h4>
+            <span class="ledger-metric">169.8 ns verify · 7.43× vs decode</span>
+          </div>
+          <p class="ledger-p">Validating canonical wire invariants without heap allocations takes <strong>169.8 ns/frame</strong> (<strong>278.7 ns</strong> including hardware SHA-NI CID, <strong>7.43× faster</strong> than full JSON decode). Strict UTF-8 key sorting and lossless float/bytes normalization guarantee identical 34-byte CIDs across Python, Go, Rust, and JS, verified live on vLLM V1 with a 5,091-token prefix hit (30.16 → 26.31 ms) after reversing JSON keys.</p>
+          <div class="ledger-meta">Receipts: receipt_v1_1_hardening.json · receipt_vllm_cowrie.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">08</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Daemonless 10-million-vector filtered NVMe search in 7.07 ms</h4>
+            <span class="ledger-metric">9.17× NVMe · 3,767× warm VRAM</span>
+          </div>
+          <p class="ledger-p">Packing IVF clusters contiguously into 16 KB <code>CWIV</code> blocks and reading 16 clusters via concurrent <code>O_DIRECT</code> (<code>QD=16</code>, 3.77 GB/s, touching 0.390% of a 5.30 GB cold file) with <code>AVX2</code>/<code>NEON</code> INT8 SIMD kernels answers trust-filtered queries in <strong>7.07 ms median</strong> at <strong>100.0% Recall@20</strong> with zero leaked <code>0x04</code> rows and no external vector daemon. Warm VRAM scales to <strong>0.155 ms</strong> (10M) and <strong>0.036 ms</strong> (100K).</p>
+          <div class="ledger-meta">Receipts: receipt_u3_v03.json · receipt_h3.json · cowrie.h (cowrie_ivf_*)</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">09</div>
+        <div>
+          <div class="ledger-head">
+            <h4>41,661× smaller incremental corpus sync via dual-tree RFC 6962 Merkle diffing</h4>
+            <span class="ledger-metric">68 MB → 1,632 B delta</span>
+          </div>
+          <p class="ledger-p">Sealing shards with a domain-separated, promote-odd, count-bound RFC 6962 Merkle root covering both Plane A frames and Plane C 48-byte tensor entries lets nodes reconcile a 10,000-frame (68 MB) archive after three edits by exchanging just <strong>1,632 bytes</strong> while catching 10/10 frame bitflips and 4/4 Plane C tensor bitflips.</p>
+          <div class="ledger-meta">Receipts: receipt_h1.json · receipt_v1_1_hardening.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">10</div>
+        <div>
+          <div class="ledger-head">
+            <h4>1.86 ms 64-stride model fingerprinting + SHA-NI / ARMv8 SHA2 + HMAC StatePages</h4>
+            <span class="ledger-metric">1.92 GiB/s · 1.86 ms on 5.59 GiB</span>
+          </div>
+          <p class="ledger-p">Hardware <code>SHA-NI</code> and <code>ARMv8 SHA2</code> over a persistent bounded <code>WorkerPool</code> verify 4 MiB StatePage chunks at &lt; 0.6 ms warm overhead while <code>cowrie_model_fingerprint</code> hashes 64 strided 64 KiB windows across a 5.59 GiB GGUF in <strong>1.86 ms</strong>, catching mid-layer LoRA edits, wrong runtimes (<code>rc=31</code>), wrong KV/SSM dtypes (<code>rc=29/30</code>), bad HMACs (<code>rc=32</code>), and world-writable <code>/tmp</code> traps before VRAM load.</p>
+          <div class="ledger-meta">Receipts: receipt_shani_kvquant.json · receipt_v1_1_hardening.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">11</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Fail-closed immunity to direct, 2-hop laundered, fence-spoofed &amp; unknown-ID attacks</h4>
+            <span class="ledger-metric">100% HTTP 403 · 0/12 false blocks</span>
+          </div>
+          <p class="ledger-p">Sticky byte-<code>0x05</code> causal propagation (<code>BIT_TAINTED = 0x80</code>) blocks <strong>24/24 direct attacks</strong>, <strong>12/12 multi-hop laundered LLM summaries</strong>, external ComfyUI URL imports (<code>0x84</code>), inner <code>&lt;&lt;&lt;END:COWRIE</code> fence breakouts, and all <strong>6/6 C gate edge cases</strong> (unknown IDs, empty args, 8-hex prefix guesses, 40-parent chains, and 500-record cache floods), while allowing <strong>12/12 clean tool chains</strong> at HTTP 200.</p>
+          <div class="ledger-meta">Receipts: receipt_h4.json · receipt_e4.json · receipt_v1_1_hardening.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">12</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Panic-safe zero-dependency portability across Bend, C11, C++, Python &amp; 80.4 KiB Browser WebAssembly</h4>
+            <span class="ledger-metric">799 KB .so · 80.4 KiB .wasm</span>
+          </div>
+          <p class="ledger-p">Compiling zero external Rust crates into one audited <code>libcowrie_core.so</code> with <code>catch_unwind</code> FFI guards and a zero-import <code>wasm32-unknown-unknown</code> module (<code>193,456 B</code> raw / <code>82,331 B</code> gzipped) eliminated build friction across native engines and browsers alike. In Headless Chrome 135 and Node.js v22, <code>cowrie_core.wasm</code> instantiates in <strong>0.59 ms</strong>, verifies canonical frames + SHA-256 CIDs in <strong>1.74 µs</strong>, and passes all 150 golden vectors, dual-tree <code>0x04</code> Merkle checks, and RFC 8032 <code>Ed25519</code> signatures.</p>
+          <div class="ledger-meta">Receipts: receipt_v1_2_wasm_and_parity.json · wasm/cowrie.mjs</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">13</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Symmetric cross-restart longest-prefix KV offloading across vLLM, llama.cpp &amp; Eureka + <code>O_DIRECT</code> DMA</h4>
+            <span class="ledger-metric">5.64× vLLM · 13.72× llama suffix</span>
+          </div>
+          <p class="ledger-p"><code>CowrieKVConnectorV1</code> packs all 12 layers' paged KV blocks for an 11,755-token vLLM 0.15.0 request into one 144.1 MB <code>0600</code> HMAC <code>.state.cowrie</code> shard and restores across an engine kill in <strong>80.53 ms vs. 453.88 ms (5.64×)</strong>, while <code>LlamaPrefixStateCache</code> in <code>llama.cpp</code> reuses a 1,488-token saved prefix on a brand-new suffix question in <strong>9.01 ms vs. 123.63 ms cold prefill (13.72×, 100% greedy parity)</strong> alongside symmetric prefix scanning in Eureka LLM and Creative v7. Double-buffered 16 KB <code>O_DIRECT</code> + dual-stream <code>cudaHostAlloc</code> reaches <strong>3.38 GB/s cold NVMe (1.31×)</strong> and <strong>26.79 GB/s warm PCIe Gen4</strong>.</p>
+          <div class="ledger-meta">Receipts: receipt_v1_2_complete.json · receipt_v1_2_wasm_and_parity.json</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">14</div>
+        <div>
+          <div class="ledger-head">
+            <h4>16 KB Zone-Map shards (<code>CWZM</code>) beating cold <code>SQLite3</code> B-trees down to 0.001%</h4>
+            <span class="ledger-metric">0.51 ms vs. 1.03 ms · 1.58×–2.88×</span>
+          </div>
+          <p class="ledger-p">Packing sorted canonical frames into self-verifying 16 KB leaf pages with a 64-byte cache-line <code>(min_key, max_key, min_sec, max_sec, leaf_sha256)</code> directory in Plane D closed Cowrie's cold-disk selectivity gap against SQLite. Across 100,000 records on physical NVMe after <code>POSIX_FADV_DONTNEED</code>, <code>CWZM</code> beats indexed <code>SQLite3</code> at <strong>0.001% point lookup (0.514 vs. 1.031 ms, 2.01×)</strong>, <strong>0.1%–10% primary ranges (1.58×–2.13×)</strong>, and <strong>0.1% secondary timestamp ranges (0.542 vs. 1.562 ms, 2.88×)</strong> while using <strong>15.0% less disk space</strong> and verifying every touched page's SHA-NI Merkle leaf.</p>
+          <div class="ledger-meta">Receipt: receipt_v1_2_complete.json · zonemap.rs (CWZM)</div>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">15</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Crash-safe <code>.cwwal</code> + live vector compaction &amp; <code>cowrie mcp-proxy</code> wire firewall</h4>
+            <span class="ledger-metric">4.45 µs WAL · 13.2 µs MCP block</span>
+          </div>
+          <p class="ledger-p">Hash-chained <code>.cwwal</code> logs append canonical frames in <strong>4.45 µs</strong> (1.88 ms NVMe <code>fsync</code>), recover 5,000 entries from power-loss torn tails in <strong>3.14 ms</strong>, and power <code>LiveIvfStore</code> (<strong>87.5 µs</strong> hybrid search over 50,500 vectors; <strong>12.91 ms</strong> LSM compaction). Wrapping unmodified stdio MCP servers with <code>cowrie mcp-proxy</code> auto-seals external web/search outputs as <code>0x04</code>, blocks tainted <code>shell_exec</code> calls at the wire in <strong>13.15 µs</strong> (<code>-32025</code>), and verifies pure-Rust RFC 8032 <code>Ed25519</code> owner-declassification signatures (<code>808 µs</code>) without sharing symmetric keys.</p>
+          <div class="ledger-meta">Receipt: receipt_v1_2_complete.json · wal.rs · ed25519.rs · cowrie mcp-proxy</div>
+        </div>
+      </article>
+    </div>
+
+    <div class="tbl-wrap">
+      <table class="booktabs">
+        <thead>
+          <tr>
+            <th>Runtime &amp; Receipt</th>
+            <th>Primary Workload</th>
+            <th class="num">Measured Result</th>
+            <th>Integrity &amp; Hardened v1.2 Proof</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="row-head">Eureka LLM<small>Qwen3.5-9B · feat/cowrie v1.2</small></td>
+            <td>Cold process-kill hybrid StatePages + HTTP <code>.cwwal</code> &amp; <code>Ed25519</code> API</td>
+            <td class="num"><span class="dot-yes">5.00× E2E</span><br><span class="dot-note">96.3 ms cold NVMe</span></td>
+            <td><code>0700/0600</code> HMAC <code>CWSP</code>, 47-bit handles, <code>.cwwal</code> WAL &amp; <code>Ed25519</code> HTTP 403/200</td>
+          </tr>
+          <tr>
+            <td class="row-head">Eureka Creative v7<small>FLUX · Wan · ec_cowrie.c v1.2</small></td>
+            <td>Prefix-cached UMT5 / Qwen3 StatePages + 8-node ComfyUI DAG + Studio Vault</td>
+            <td class="num"><span class="dot-yes">151.7×–2,970×</span><br><span class="dot-note">1.0–9.6 ms DAG · −99.8% R0</span></td>
+            <td>Longest-prefix <code>CWSP</code>, <code>creative_audit.cwwal</code>, 6/6 fail-closed + <code>Ed25519</code> gate</td>
+          </tr>
+          <tr>
+            <td class="row-head">llama.cpp + CUDA DMA<small>Qwen3.5 · cowrie_llama_statepage.hpp</small></td>
+            <td>13.8K-tok <code>Q4_0</code> StatePages + <code>LlamaPrefixStateCache</code> + <code>O_DIRECT</code> DMA</td>
+            <td class="num"><span class="dot-yes">49.7× / 123.2×</span><br><span class="dot-note">13.7× suffix · 3.38 GB/s</span></td>
+            <td>9.01 ms suffix reuse, <code>LlamaCowrieMemory</code> (<code>.cwwal</code> + <code>Ed25519</code>), <code>CWZM</code></td>
+          </tr>
+          <tr>
+            <td class="row-head">vLLM 0.15.0 + MCP<small>CowrieKVConnectorV1 · v1.2</small></td>
+            <td>11,755-tok V1 cross-restart KV offload + R2 lenses + <code>cowrie mcp-proxy</code></td>
+            <td class="num"><span class="dot-yes">5.64× KV thaw</span><br><span class="dot-note">80.5 ms · −69.7% tok · 13.2 µs</span></td>
+            <td>100% greedy parity, single 144 MB HMAC shard, <code>.cwwal</code> + <code>Ed25519</code> wire gate</td>
+          </tr>
+          <tr>
+            <td class="row-head">Browser &amp; Node wasm32<small>cowrie_core.wasm · Chrome 135</small></td>
+            <td>Zero-import client-side canonical verify, R0–R2 lenses, Merkle &amp; <code>Ed25519</code></td>
+            <td class="num"><span class="dot-yes">80.4 KiB gzip</span><br><span class="dot-note">0.59 ms load · 1.74 µs verify</span></td>
+            <td>150/150 golden vectors + 20 DoS + 14 dual-Merkle bitflips + <code>Ed25519</code> in Chrome</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="tbl-cap">
+        <span><strong>Table 3.</strong> Symmetric <code>v1.2.0</code> integration scorecard across all four live engines, <code>cowrie mcp-proxy</code>, and Browser/Node <code>wasm32</code>. *vLLM 0.15.0 tested on 12-layer local <code>Qwen3ForCausalLM</code> pending upstream <code>Qwen3_5ForConditionalGeneration</code>.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 · TROUBLES WE RAN INTO & SECURITY AUDIT CATCHES -->
+  <section id="s04" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>04</span>Engineering Postmortem, Security Audit &amp; Formal Verification</div>
+      <h2>Eleven Troubles We Hit, Audit Catches, and Non-Bolt-On Bend Proofs</h2>
+
+      <p>Every sharp invariant in Cowrie v1.2 exists because a simpler design broke under adversarial fuzzing, physical NVMe benchmarking, live hybrid-model testing, security auditing, or formal proof obligations in Bend 2.0.35. Recording all eleven catches explains why the specification looks the way it does and defines the exact boundaries where formal methods and Cowrie itself stop.</p>
+    </div>
+
+    <div class="ledger">
+      <article class="ledger-row">
+        <div class="ledger-num trouble">01</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Adversarial OOM &amp; stack-overflow bombs broke our first Rust decoder</h4>
+            <span class="ledger-metric trouble">Crash → ≤ 23 µs, 0 allocs</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Our first decoder passed 150 clean round-trips, then panicked on a forged array claiming 1B elements (<code>Vec::with_capacity</code> OOM) and blew the call stack on 500 nested arrays.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Froze hard <code>MAX_DEPTH = 64</code> and strict byte-bounded pre-allocation (<code>count &lt;= remaining_bytes</code>) into the wire spec, rejecting 8/8 DoS bombs and 99/99 truncations in ≤ 23 µs.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">02</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Software SHA-256 erased the StatePage restore speedup</h4>
+            <span class="ledger-metric trouble">2,800 ms → &lt; 0.6 ms warm</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Restoring a 505 MB FP16 StatePage from RAM took 60 ms, yet hashing it with single-threaded scalar SHA-256 (~180 MB/s) took 2.8 seconds, erasing the GPU prefill savings.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Adopted 4 MiB Merkle leaves hashed in parallel via runtime-detected <code>x86_64 SHA-NI</code> and <code>ARMv8 SHA2</code> instructions (1.92 GiB/s per core), keeping verification under 0.6 ms warm.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">03</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Linux <code>/tmp</code> (tmpfs) masked real cold NVMe latency</h4>
+            <span class="ledger-metric trouble">RAM illusion → /dev/nvme1n1p3</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Early cold-restore runs placed StatePages in <code>/tmp</code>, which on Linux is RAM-backed <code>tmpfs</code> rather than NVMe flash, hiding real PCIe storage latency.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Relocated every cold StatePage and 10M-vector benchmark onto physical NVMe (<code>/dev/nvme1n1p3</code>) with explicit <code>POSIX_FADV_DONTNEED</code> page-cache eviction between runs.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">04</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Split embedding/metadata file layout missed the 10M-vector target at 64.81 ms</h4>
+            <span class="ledger-metric trouble">64.81 ms miss → 7.07 ms PASS</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Placing 5.12 GB of embeddings in one file region and 160 MB of metadata in a second forced 32 serial <code>QD=1 pread()</code> seeks, leaving 15 of 16 NVMe queues idle.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Co-located <code>[embs_c || meta_c || 0x00 → 16 KB]</code> inside contiguous <code>CWIV</code> blocks with 16 concurrent <code>O_DIRECT</code> reads and <code>AVX2</code>/<code>NEON</code> INT8 SIMD kernels (7.07 ms).</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">05</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Uniform quantization drifts recurrent SSM state in hybrid architectures</h4>
+            <span class="ledger-metric trouble">Temporal drift → Split Q4_0 + F32</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>In hybrid Qwen3.5 models (24 DeltaNet SSM + 8 GQA layers), quantizing recurrent SSM matrices compounds error multiplicatively step over step across long contexts.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Enforced split-precision StatePages (<code>Q4_0</code> KV + exact <code>F32</code> SSM) with distinct wire error gates (<code>ERR_KV_QUANT_MISMATCH</code>, <code>ERR_SSM_DTYPE_MISMATCH</code>).</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">06</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Tokenizer digit splitting &amp; polymorphic AST hoisting regression</h4>
+            <span class="ledger-metric trouble">+2.2% AST bloat → Alpha32 + adaptive R2</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Qwen3.5's <code>\p{N}</code> pre-tokenizer split every digit of hex hashes into separate tokens, while table hoisting added +2.2% tokens (137 → 140) on polymorphic AST trees.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Adopted digit-free lowercase Alpha32 pointers and gated <code>R2</code> header hoisting on <code>len &gt;= 3</code> and key density <code>&gt;= 0.70</code>, falling back to compact JSON automatically.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">07</div>
+        <div>
+          <div class="ledger-head">
+            <h4>2-hop taint laundering &amp; model-upgrade CID churn</h4>
+            <span class="ledger-metric trouble">12/12 bypass → sticky 0x80 &amp; satellites</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Checking only immediate frame authority (<code>0x04</code>) missed 12/12 multi-hop LLM summarization attacks, while hashing KV caches inside document CIDs broke links on weight upgrades.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Enforced sticky causal <code>BIT_TAINTED = 0x80</code> across all parent CIDs and kept all model-dependent <code>CWSP</code>/<code>CWIV</code> caches strictly outside Plane A <code>CoreHash</code>.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">08</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Audit catch: unhashed Plane C shard tensors &amp; <code>/tmp</code> StatePage poisoning</h4>
+            <span class="ledger-metric trouble">v1.0 gap → 0x04 dual Merkle + HMAC</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Our v1.0 <code>CWRF</code> Merkle root hashed Plane A frames while leaving raw Plane C tensors unauthenticated, and head-only model hashes plus predictable <code>.cowrie.tmp</code> paths risked mid-layer LoRA misses or <code>/tmp</code> symlink swaps.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Bound 48-byte 4 MiB tensor Merkle digests into a dual-tree <code>0x04</code> root, hardened saves with <code>O_CREAT|O_EXCL 0600</code> + <code>fstat</code> UID/mode checks + <code>runtime_id</code> + optional <code>HMAC-SHA256</code>, and unified 64-stride model fingerprinting (1.86 ms).</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">09</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Audit catch: fail-open unknown IDs, 28-bit handle collisions &amp; R2 fence spoofing</h4>
+            <span class="ledger-metric trouble">Fail-open → 6/6 fail-closed HTTP 403</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>In <code>ec_cowrie.c</code>, unknown or empty argument IDs and parents past index 32 were skipped rather than tainted; 6-letter handles had a ~17K birthday bound; and raw strings could embed fake <code>&lt;&lt;&lt;END:COWRIE&gt;&gt;&gt;</code> fences.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Made unknown, empty, 8-hex prefix, and colliding IDs fail closed (HTTP 403), removed the 32-parent cap, expanded trust storage to 4,096 untainted-first slots, widened handles to 10 letters (47 bits, ~12M birthday bound), and escaped inner <code>&lt;&lt;&lt;</code> markers.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">10</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Audit catch: allocating verifier, UTF-16 surrogate underflow &amp; thread spawn storms</h4>
+            <span class="ledger-metric trouble">1,261 ns → 169.8 ns + WorkerPool</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd><code>cowrie_frame_verify</code> allocated full <code>Value</code> trees and a <code>HashSet</code> just to check wire validity; <code>\uD800\u0041</code> underflowed <code>cp2 - 0xDC00</code> in JSON parsing; and <code>thread::scope</code> spawned OS threads per call.</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Built zero-allocation <code>verify_frame_zero_alloc</code> (169.8 ns, 7.43× faster than full decode), added native <code>TAG_TENSOR_REF = 0x0A</code> (−47.4% bytes), fixed RFC 8259 surrogate/float/bytes round-trips, wrapped FFI in <code>catch_unwind</code>, and added a persistent 16-thread <code>WorkerPool</code>.</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num trouble">11</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Formal verification &amp; spec-tightening catch (<code>Bend 2.0.35 --verdict</code>): underspecified laws plus 8 real wire &amp; fence bugs (<code>F1</code>–<code>F8</code>)</h4>
+            <span class="ledger-metric trouble">8 bugs caught → 26/26 laws + 13/13 mutants</span>
+          </div>
+          <dl class="ledger-cols">
+            <div>
+              <dt class="red">Trouble Hit</dt>
+              <dd>Our first 15-law pass caught <code>&lt;&lt;&lt;&lt;END:COWRIE&gt;&gt;&gt;&gt;</code> fence reformation (<code>F1</code>), unauthenticated <code>CWZM</code> bounds (<code>F2</code>), and <code>CWRF</code> slack bytes (<code>F3</code>), yet an adversarial recheck showed one-sided safety laws still passed trivial deny-all gates, taint-all ledgers, and wipe-string sanitizers while omitting structured paths: raw hoisted <code>R2</code> table column headers (<code>F4</code>), global-<code>HashSet</code> zombie <code>.cwwal</code> tombstones blocking re-insertion (<code>F5</code>), partial <code>$tensor</code>/<code>$bytes</code> map fallback (<code>F6</code>), empty <code>StatePage</code> <code>runtime_id</code> bypasses (<code>F7</code>), and <code>TensorRef</code> <code>space = "embed&gt;&gt;"</code> + closing <code>&gt;</code> forming <code>&gt;&gt;&gt;</code> (<code>F8</code>).</dd>
+            </div>
+            <div>
+              <dt class="blue">Design Choice Forced</dt>
+              <dd>Tightened <code>formal/PROOF.bend</code> to 26 biconditional and liveness-preserving laws checked by Bend 2.0.35's Lean-proven BendTT kernel in 218.3 ms (0 <code>@unsafe</code>, 13/13 fail-open and anti-underspecification mutants rejected), closed all eight Rust bugs, and locked compiled <code>CowrieKernel.bend</code> (<code>.mjs</code>) across 2,000 differential vectors against <code>cowrie_core.wasm</code> and <code>libcowrie_core.so</code> (keeping 255-bit Curve25519 arithmetic and SIMD intrinsics on RFC/differential tests).</dd>
+            </div>
+          </dl>
+        </div>
+      </article>
+    </div>
+
+    <div class="prose" style="margin-top:34px;">
+      <h3>Physical boundaries where Cowrie defers (and two v1.1 limits closed in v1.2)</h3>
+      <p>Hardware physics still sets clear crossovers where specialized formats win, alongside two former v1.1 gaps now closed by <code>CWZM</code> and <code>.cwwal</code>:</p>
+    </div>
+
+    <div class="tbl-wrap">
+      <table class="booktabs">
+        <thead>
+          <tr>
+            <th>Workload</th>
+            <th>Winner / Choice</th>
+            <th class="num">Measured Result</th>
+            <th>Physical Cause</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="row-head">Streaming decode speed (after token 1)</td>
+            <td class="nowrap">Kernel / quant tuning</td>
+            <td class="num">0% change</td>
+            <td>Decode tok/s is bound by GPU weight memory bandwidth and matrix kernels, never by container format.</td>
+          </tr>
+          <tr>
+            <td class="row-head">Cold archival compression of flat prose logs</td>
+            <td class="nowrap">zstd + JSONL</td>
+            <td class="num">1,323 B vs 2,257 B</td>
+            <td>Binary varints and dictionary indexes raise local entropy, giving LZ77 fewer repeated ASCII patterns to match (W3).</td>
+          </tr>
+          <tr>
+            <td class="row-head">Ad-hoc multi-table SQL joins &amp; OLAP scans</td>
+            <td class="nowrap">SQLite / Parquet</td>
+            <td class="num">Columnar / SQL</td>
+            <td>Cowrie indexes primary/secondary keys and vectors per shard, intentionally omitting a relational join planner.</td>
+          </tr>
+          <tr class="highlight">
+            <td class="row-head">Cold pinpoint filters (0.001%–10% on 100K)</td>
+            <td class="dot-yes">CWZM v1.2 (closed)</td>
+            <td class="num dot-yes">0.51 vs 1.03 ms</td>
+            <td>64 B Plane D zone-maps jump straight to one 16 KB SHA-NI Merkle page, beating cold SQLite B-trees 1.58×–2.88×.</td>
+          </tr>
+          <tr class="highlight">
+            <td class="row-head">Live streaming appends &amp; full AI stack</td>
+            <td class="dot-yes">CWAL + Cowrie v1.2</td>
+            <td class="num dot-yes">4.45 µs · 5×–2,970×</td>
+            <td>Hash-chained <code>.cwwal</code> ingests live updates before 16 KB compaction alongside authenticated StatePages &amp; MCP gates.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="tbl-cap">
+        <span><strong>Table 4.</strong> Verified engineering crossover boundaries under Verdict Gates v2 and Tolerance Doctrine.</span>
+        <span class="fsrc">receipt_e3.json · receipt_v1_2_complete.json</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 · WHAT THIS MEANS FOR LOCAL LLMs VS. CLOUD -->
+  <section id="s05" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>05</span>Systems Implications</div>
+      <h2>What This Means for Local LLMs vs. Cloud Fleets</h2>
+
+      <p>Local workstations and multi-tenant cloud clusters suffer from opposite scarcities (VRAM capacity and daemon overhead on a desktop versus prefill FLOP cost, spot preemption, and cross-tenant provenance in a datacenter), yet the same container primitives reshape the economics of both.</p>
+
+      <h3>For local LLMs, creative studios, and edge devices</h3>
+      <p>A single 24 GB RTX 3090 or unified-memory MacBook cannot keep ten coding sessions, FLUX.2, Wan 2.2, TRELLIS.2, and ACE-Step resident in GPU memory simultaneously. Cowrie turns local NVMe into a <strong>21–96 ms warm virtual-memory swap tier</strong> for neural state and ComfyUI DAGs: users switch repositories, close their laptop, or bounce between chat and video generation without paying multi-second prefill penalties. Meanwhile, 16 KB <code>CWIV</code> search puts 10 million filtered vectors on one local SSD with zero external daemon, ARMv8 <code>SHA2</code> + 16 KB alignment run natively on Apple Silicon and Android, and fail-closed <code>0x80</code>/<code>0x84</code> taint makes local shell tools and community workflows mechanically safe.</p>
+
+      <h3>For cloud serving clusters and enterprise agent fleets</h3>
+      <p>In production cloud serving, prefill tokens and idle HBM residency dominate GPU bills. Cutting structured RAG and tool payloads by 65%–98.7% via <code>R2</code> directly lowers quadratic prefill FLOPs and TTFT, while 169.8 ns zero-alloc verification and canonical key sorting eliminate ingress CPU spikes and silent prefix-cache misses across polyglot SDKs. Even larger is <strong>authenticated stateless pod elasticity</strong>: because a 13.8K-token session compresses to 180.2 MB inside an <code>HMAC-SHA256</code> authenticated <code>CWSP</code> satellite bound to <code>(model_sha, runtime_id, kv_quant, ssm_dtype)</code>, clusters can offload idle tenant KV/SSM state from HBM GPUs to NVMe or object storage and thaw it safely on any replacement pod during autoscaling or spot preemption.</p>
+    </div>
+
+    <figure class="viz">
+      <div class="viz-canvas">
+        <svg viewBox="0 0 820 222" role="img" aria-label="Architectural comparison of Cowrie on a single local workstation versus a multi-tenant cloud inference fleet">
+          <text x="16" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">LOCAL WORKSTATION / EDGE (1× 24 GB GPU + NVMe)</text>
+          <rect x="16" y="30" width="380" height="176" fill="#FCFCFA" stroke="#1D4ED8" stroke-width="1.2"/>
+
+          <rect x="30" y="44" width="164" height="58" fill="rgba(29,78,216,0.08)" stroke="#1D4ED8" stroke-width="1"/>
+          <text x="40" y="64" font-family="JetBrains Mono, monospace" font-size="9.8" font-weight="600" fill="#1D4ED8">ACTIVE VRAM (24 GB)</text>
+          <text x="40" y="81" font-family="Inter, sans-serif" font-size="11" fill="#262A32">1 active model at a time</text>
+          <text x="40" y="95" font-family="Inter, sans-serif" font-size="10.5" fill="#5E6673">Chat · FLUX · Wan · 3D</text>
+
+          <line x1="194" y1="73" x2="220" y2="73" stroke="#1D4ED8" stroke-width="1.3"/>
+          <text x="207" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1D4ED8">⇄</text>
+
+          <rect x="220" y="44" width="162" height="58" fill="#F5F5F1" stroke="#262A32" stroke-width="1"/>
+          <text x="230" y="64" font-family="JetBrains Mono, monospace" font-size="9.8" font-weight="600" fill="#111318">0600 NVMe SWAP TIER</text>
+          <text x="230" y="81" font-family="Inter, sans-serif" font-size="11" fill="#262A32">21–96 ms verified thaw</text>
+          <text x="230" y="95" font-family="Inter, sans-serif" font-size="10.5" fill="#5E6673">10M vectors · 0 daemons</text>
+
+          <line x1="30" y1="118" x2="382" y2="118" stroke="#E3E5E8" stroke-width="1"/>
+          <text x="30" y="138" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">· Swap models &amp; coding repos without re-prefill</text>
+          <text x="30" y="157" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">· Local shell &amp; ComfyUI safe under fail-closed 0x80 gate</text>
+          <text x="30" y="176" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">· x86 SHA-NI + ARMv8 SHA2 across Linux, Mac &amp; mobile</text>
+          <text x="30" y="195" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#1D4ED8">Outcome: workstation behaves like 10× its VRAM</text>
+
+          <text x="424" y="18" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#111318">CLOUD FLEET / MULTI-TENANT SERVING</text>
+          <rect x="424" y="30" width="380" height="176" fill="#FCFCFA" stroke="#111318" stroke-width="1.2"/>
+
+          <rect x="438" y="44" width="164" height="58" fill="#F5F5F1" stroke="#262A32" stroke-width="1"/>
+          <text x="448" y="64" font-family="JetBrains Mono, monospace" font-size="9.8" font-weight="600" fill="#111318">STATELESS GPU PODS</text>
+          <text x="448" y="81" font-family="Inter, sans-serif" font-size="11" fill="#262A32">−65% to −98.7% prefill</text>
+          <text x="448" y="95" font-family="Inter, sans-serif" font-size="10.5" fill="#5E6673">170 ns ingress · 0 spawns</text>
+
+          <line x1="602" y1="73" x2="628" y2="73" stroke="#1D4ED8" stroke-width="1.3"/>
+          <text x="615" y="67" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="#1D4ED8">⇄</text>
+
+          <rect x="628" y="44" width="162" height="58" fill="rgba(29,78,216,0.08)" stroke="#1D4ED8" stroke-width="1"/>
+          <text x="638" y="64" font-family="JetBrains Mono, monospace" font-size="9.8" font-weight="600" fill="#1D4ED8">HMAC OBJECT / NVMe</text>
+          <text x="638" y="81" font-family="Inter, sans-serif" font-size="11" fill="#262A32">180 MB CWSP offload</text>
+          <text x="638" y="95" font-family="Inter, sans-serif" font-size="10.5" fill="#5E6673">HTTP Range + 0x04 Merkle</text>
+
+          <line x1="438" y1="118" x2="790" y2="118" stroke="#E3E5E8" stroke-width="1"/>
+          <text x="438" y="138" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">· Migrate HMAC-authenticated sessions across spot pods</text>
+          <text x="438" y="157" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">· 41,661× smaller cross-region Merkle corpus sync</text>
+          <text x="438" y="176" font-family="Inter, sans-serif" font-size="11.5" fill="#262A32">· Cryptographic audit trail for zero-trust MCP fleets</text>
+          <text x="438" y="195" font-family="JetBrains Mono, monospace" font-size="9.8" fill="#111318">Outcome: decouple session memory from HBM residency</text>
+        </svg>
+      </div>
+      <figcaption>
+        <span><span class="fnum">FIG 12</span>How identical Cowrie v1.2 primitives solve VRAM scarcity locally and prefill/elasticity costs in cloud fleets.</span>
+      </figcaption>
+    </figure>
+
+    <div class="tbl-wrap">
+      <table class="booktabs">
+        <thead>
+          <tr>
+            <th>Dimension</th>
+            <th>Local LLMs &amp; Creative Workstations</th>
+            <th>Cloud Clusters &amp; Multi-Tenant Fleets</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="row-head">Model &amp; Session Swapping</td>
+            <td>Freeze/thaw 13.8K-tok chat or Wan/FLUX encoders in 21–96 ms across model switches &amp; reboots.</td>
+            <td>Offload vLLM V1 KV blocks via <code>CowrieKVConnectorV1</code> (5.64× thaw) as single HMAC <code>CWSP</code> shards.</td>
+          </tr>
+          <tr>
+            <td class="row-head">Prefill &amp; Ingress CPU</td>
+            <td>1.93×–4.43× lower local GPU latency via <code>R2</code> lenses; instant ComfyUI DAG replay (1–9.6 ms).</td>
+            <td>65%–98.7% fewer tokens, 169.8 ns zero-alloc verification, and bounded 16-worker concurrency.</td>
+          </tr>
+          <tr>
+            <td class="row-head">Retrieval, Point Index &amp; WAL</td>
+            <td>10M vectors in 7.07 ms + 0.51 ms cold <code>CWZM</code> point queries + 4.45 µs <code>.cwwal</code> appends with zero daemons.</td>
+            <td>O(1) HTTP Range fetches + 41,661× smaller dual-tree Merkle deltas + 12.9 ms LSM shard compaction.</td>
+          </tr>
+          <tr>
+            <td class="row-head">Security &amp; Provenance</td>
+            <td><code>0600</code> file isolation + <code>cowrie mcp-proxy</code> (13.2 µs) protect personal shell &amp; studio tools.</td>
+            <td>Asymmetric RFC 8032 <code>Ed25519</code> declassification tokens audit approvals across zero-trust pods.</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="tbl-cap">
+        <span><strong>Table 5.</strong> Operational impact of Cowrie v1.2 primitives across local edge hardware and cloud inference fleets.</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 · FUTURE WORK -->
+  <section id="s06" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>06</span>Roadmap</div>
+      <h2>Future Work</h2>
+
+      <p>With 16 KB <code>CWZM</code> zone-maps, crash-safe <code>.cwwal</code> + <code>LiveIvfStore</code> compaction, symmetric 4-runtime KV/StatePage + WAL + <code>Ed25519</code> parity (<code>vLLM</code>, <code>llama.cpp</code>, <code>Eureka LLM</code>, <code>Eureka Creative v7</code>), <code>cowrie mcp-proxy</code>, <code>O_DIRECT</code> dual-stream CUDA DMA, and zero-import <code>wasm32</code> (<code>80.4 KiB</code> gzipped) shipped and verified in <code>v1.2.0</code>, four frontier milestones remain across datacenter silicon, browser GPUs, and upstream model ecosystems:</p>
+    </div>
+
+    <div class="ledger">
+      <article class="ledger-row">
+        <div class="ledger-num">01</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Datacenter GPUDirect Storage (<code>nvidia-fs</code> BAR1 P2P) &amp; Apple Metal <code>MTLBuffer</code></h4>
+            <span class="ledger-metric">Datacenter &amp; Apple Silicon</span>
+          </div>
+          <p class="ledger-p">Consumer GeForce GPUs (including our RTX 3090) disable PCIe BAR1 P2P DMA in driver firmware, making <code>v1.2</code>'s double-buffered 16 KB <code>O_DIRECT</code> + dual-stream <code>cudaHostAlloc</code> pipeline (3.38 GB/s cold) the hardware ceiling on desktop Linux. On A100/H100/B200 nodes with <code>nvidia-fs.ko</code> loaded and on Apple Silicon unified memory (<code>makeBuffer(bytesNoCopy:)</code>), the exact same 16 KB Plane C offsets map straight into GPU virtual memory with zero host copy.</p>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">02</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Upstream Qwen3.5 hybrid SSM+KV parity in vLLM &amp; SGLang HiCache</h4>
+            <span class="ledger-metric">Waiting on upstream model support</span>
+          </div>
+          <p class="ledger-p">Extend <code>CowrieKVConnectorV1</code> from pure-attention <code>Qwen3ForCausalLM</code> to split-precision recurrent DeltaNet SSM + GQA KV blocks inside vLLM V1 and SGLang HiCache once upstream releases native <code>Qwen3_5ForConditionalGeneration</code> support.</p>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">03</div>
+        <div>
+          <div class="ledger-head">
+            <h4>Attention-sink mixed KV precision for 128K–1M token horizons</h4>
+            <span class="ledger-metric">FP16 sinks + Q4_0 / FP8 body</span>
+          </div>
+          <p class="ledger-p">Extend <code>CWSP</code> <code>layout_ver = 2</code> descriptors to keep initial attention-sink tokens and the recent rolling window in exact <code>FP16</code>/<code>BF16</code> while quantizing the interior context body to <code>Q4_0</code> or <code>FP8</code> for ultra-long horizon stability.</p>
+        </div>
+      </article>
+
+      <article class="ledger-row">
+        <div class="ledger-num">04</div>
+        <div>
+          <div class="ledger-head">
+            <h4>WebGPU zero-copy views over shipped <code>wasm32</code> &amp; hardware <code>FIDO2</code> security-key signing</h4>
+            <span class="ledger-metric">WebGPU GPUBuffer &amp; YubiKey UX</span>
+          </div>
+          <p class="ledger-p">With <code>cowrie_core.wasm</code> (<code>188.9 KiB</code> raw / <code>80.4 KiB</code> gzipped, 0.59 ms load) now shipped and verified in Chrome 135, the remaining client-side step is mapping 16 KB Plane C byte slices directly into WebGPU <code>GPUBuffer</code> views and binding <code>COWRIE_DECLASSIFY_V1</code> <code>Ed25519</code> signatures to hardware YubiKey / TouchID touch confirmation.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- 07 · SUMMARY -->
+  <section id="summary" class="chapter">
+    <div class="prose">
+      <div class="ch-kicker"><span>07</span>Summary</div>
+      <h2>Summary</h2>
+      <ul class="clean-list">
+        <li><strong>Why Cowrie exists:</strong> Five decades of format specialization split human text (JSON), fast RPC (Protobuf), content hashing (DAG-CBOR), columnar scans (Parquet), and static weights (Safetensors/GGUF), leaving AI requests to cross six incompatible layers with broken caches and no hardware-enforced privilege wall.</li>
+        <li><strong>Complete v1.2 architecture:</strong> One zero-dependency Rust core (<code>799 KB</code> <code>libcowrie_core.so</code> + <code>80.4 KiB</code> gzipped <code>cowrie_core.wasm</code>) unites <code>169.8 ns</code> zero-alloc canonical verification + native <code>TAG_TENSOR_REF (0x0A)</code> (−47.4% bytes) in <code>Plane A</code>, 47-bit 10-letter handles + fence-escaped <code>R0–R3</code> lenses in <code>Plane B</code>, 16 KB <code>0600</code> HMAC <code>CWSP</code> StatePages + 4-runtime longest-prefix KV offloading + <code>O_DIRECT</code> dual-stream CUDA DMA + <code>LiveIvfStore</code> (<code>.cwwal</code> + <code>CWIV</code>) in <code>Plane C</code>, and dual-tree <code>0x04</code> Merkle roots + 16 KB <code>CWZM</code> zone-maps + RFC 8032 <code>Ed25519</code> declassification + <code>cowrie mcp-proxy</code> in <code>Plane D</code>.</li>
+        <li><strong>Fifteen receipted wins across four symmetric engines, MCP &amp; WebAssembly:</strong> 49.7× cold / 123.2× warm Q4_0 resume and 13.72× suffix reuse (9.01 ms) in <code>llama.cpp</code>, 5.64× cross-restart KV restore (80.5 ms) &amp; −69.7% R2 tokens in <code>vLLM 0.15.0</code>, 3.38 GB/s cold <code>O_DIRECT</code> / 26.79 GB/s warm CUDA DMA, 1.58×–2.88× faster cold NVMe point/range filters than <code>SQLite3</code> (0.51 ms vs. 1.03 ms), 4.45 µs <code>.cwwal</code> appends + 87.5 µs hybrid vector search, 13.15 µs wire-level MCP taint blocking with <code>Ed25519</code> owner approvals across all four runtimes, 0.59 ms load / 1.74 µs verify in Chrome <code>wasm32</code>, 151.7×–2,970× Creative v7 restarts, 1.0–9.6 ms ComfyUI DAG hits, 7.07 ms 10M-vector NVMe search, and 41,661× Merkle delta sync.</li>
+        <li><strong>Honest limits, formal proofs &amp; next frontier:</strong> In <code>formal/PROOF.bend</code>, Bend 2.0.35's Lean-proven kernel checks 26/26 biconditional security, liveness, and wire laws in 218.3 ms (rejecting 13/13 fail-open and anti-underspecification mutants, catching 8 real bugs <code>F1</code>–<code>F8</code>, and locking 2,000 differential vectors against <code>cowrie_core.wasm</code> and <code>libcowrie_core.so</code>) while intentionally leaving 255-bit <code>Ed25519</code> field arithmetic and <code>SHA-NI</code>/<code>AVX2</code> SIMD to RFC/differential parity. Cowrie does not alter streaming decode tok/s (0% change) and defers flat prose compression to <code>zstd + JSONL</code> and multi-table relational joins to SQL/Parquet, leaving four hardware/ecosystem frontiers: datacenter <code>nvidia-fs</code> BAR1 P2P &amp; Apple Metal zero-copy, upstream Qwen3.5 hybrid parity in vLLM/SGLang, 128K+ attention-sink mixed precision, and WebGPU zero-copy views + hardware <code>FIDO2</code> signing (<a class="ref" href="https://github.com/Neumenon/cowrie" target="_blank" rel="noopener">github.com/Neumenon/cowrie</a>, <code>v1.2.0</code>).</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer class="colophon">
+    <span>Making Cowrie · Spec v1.2.0 · 2026-11-23</span>
+    <span><a href="ai-data-format.html">Systems Brief</a> · <a href="GAINS-AND-USES.md">Engineering Guide</a> · <a href="https://github.com/Neumenon/cowrie" target="_blank" rel="noopener">Neumenon/cowrie</a></span>
+  </footer>
+</main>
+
+<script>
+(function() {
+  const K = new Uint32Array([
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ]);
+  function sha256(bytes) {
+    const len = bytes.length, bitLen = len * 8, padLen = ((len + 9 + 63) & ~63);
+    const buf = new Uint8Array(padLen);
+    buf.set(bytes);
+    buf[len] = 0x80;
+    const dv = new DataView(buf.buffer);
+    dv.setUint32(padLen - 8, Math.floor(bitLen / 0x100000000), false);
+    dv.setUint32(padLen - 4, bitLen >>> 0, false);
+    let h0=0x6a09e667,h1=0xbb67ae85,h2=0x3c6ef372,h3=0xa54ff53a,h4=0x510e527f,h5=0x9b05688c,h6=0x1f83d9ab,h7=0x5be0cd19;
+    const w = new Uint32Array(64);
+    for (let o = 0; o < padLen; o += 64) {
+      for (let i = 0; i < 16; i++) w[i] = dv.getUint32(o + i * 4, false);
+      for (let i = 16; i < 64; i++) {
+        const s0 = ((w[i-15]>>>7)|(w[i-15]<<25)) ^ ((w[i-15]>>>18)|(w[i-15]<<14)) ^ (w[i-15]>>>3);
+        const s1 = ((w[i-2]>>>17)|(w[i-2]<<15)) ^ ((w[i-2]>>>19)|(w[i-2]<<13)) ^ (w[i-2]>>>10);
+        w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+      }
+      let a=h0,b=h1,c=h2,d=h3,e=h4,f=h5,g=h6,h=h7;
+      for (let i = 0; i < 64; i++) {
+        const S1 = ((e>>>6)|(e<<26)) ^ ((e>>>11)|(e<<21)) ^ ((e>>>25)|(e<<7));
+        const ch = (e & f) ^ ((~e) & g);
+        const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+        const S0 = ((a>>>2)|(a<<30)) ^ ((a>>>13)|(a<<19)) ^ ((a>>>22)|(a<<10));
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) >>> 0;
+        h=g; g=f; f=e; e=(d+t1)>>>0; d=c; c=b; b=a; a=(t1+t2)>>>0;
+      }
+      h0=(h0+a)>>>0; h1=(h1+b)>>>0; h2=(h2+c)>>>0; h3=(h3+d)>>>0;
+      h4=(h4+e)>>>0; h5=(h5+f)>>>0; h6=(h6+g)>>>0; h7=(h7+h)>>>0;
+    }
+    const out = new Uint8Array(32), odv = new DataView(out.buffer);
+    [h0,h1,h2,h3,h4,h5,h6,h7].forEach((v, i) => odv.setUint32(i*4, v, false));
+    return out;
+  }
+  const toHex = u8 => Array.from(u8).map(b => b.toString(16).padStart(2,'0')).join('');
+
+  const pFill = document.getElementById("progressFill");
+  window.addEventListener("scroll", () => {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    pFill.style.width = (max > 0 ? (window.scrollY / max) * 100 : 0) + "%";
+  }, { passive: true });
+
+  const tocRail = document.getElementById("tocRail");
+  document.getElementById("mobMenu").addEventListener("click", () => tocRail.classList.toggle("open"));
+  const tocLinks = document.querySelectorAll(".toc-list a");
+  tocLinks.forEach(a => a.addEventListener("click", () => tocRail.classList.remove("open")));
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      if (en.isIntersecting) {
+        const id = en.target.id;
+        tocLinks.forEach(l => l.classList.toggle("active", l.getAttribute("href") === "#" + id));
+      }
+    });
+  }, { rootMargin: "-18% 0px -66% 0px" });
+  document.querySelectorAll("section.chapter, h3.plane-head").forEach(s => obs.observe(s));
+
+  // FIG 03A · LIVE BYTE RIBBON (SPEC.md §2.3 incl. v1.1 TAG_TENSOR_REF = 0x0A)
+  const CANON_BYTES = [
+    [0x43,'C','k-blue'],[0x4F,'O','k-blue'],[0x57,'W','k-blue'],[0x52,'R','k-blue'],[0x01,'v1',''],
+    [0x02,'auth','k-red'],[0x01,'epi',''],[0x00,'flg',''],
+    [0x02,'n=2','k-blue'],[0x01,'len',''],[0x61,'"a"','k-blue'],[0x01,'len',''],[0x7A,'"z"','k-blue'],
+    [0x08,'MAP',''],[0x02,'n=2',''],[0x00,'k[0]',''],[0x04,'F64',''],
+    [0x00,'+0',''],[0x00,'00',''],[0x00,'00',''],[0x00,'00',''],[0x00,'00',''],[0x00,'00',''],[0x00,'00',''],[0x00,'00',''],
+    [0x01,'k[1]',''],[0x45,'FX 5','k-blue']
+  ];
+  const TENSOR_REF_BYTES = [
+    [0x43,'C','k-blue'],[0x4F,'O','k-blue'],[0x57,'W','k-blue'],[0x52,'R','k-blue'],[0x01,'v1',''],
+    [0x02,'auth','k-red'],[0x01,'epi',''],[0x00,'flg',''],
+    [0x01,'n=1','k-blue'],[0x03,'len',''],[0x65,'e',''],[0x6D,'m',''],[0x62,'b',''],
+    [0x08,'MAP',''],[0x01,'n=1',''],[0x00,'k[0]',''],
+    [0x0A,'TREF','k-blue'],[0x00,'idx0',''],[0x03,'i8','k-blue'],[0x01,'1D',''],[0x80,'512',''],[0x04,'le',''],
+    [0x03,'len',''],[0x63,'c',''],[0x6F,'o',''],[0x73,'s','']
+  ];
+  const L1 = {
+    canon: {
+      desc: 'Input {"z": 5, "a": +0.0} → dictionary sorted ["a", "z"], +0.0 LE f64 (tag 0x04), integer 5 as 1-byte FIXINT (0x45).',
+      bytes: CANON_BYTES, ok: true, msg: 'PASS · Zero-alloc verified (27 B · 169.8 ns)'
+    },
+    shuffle: {
+      desc: 'Input {"a": -0.0, "z": 5} → keys reordered to ["a", "z"], -0.0 normalized to +0.0 → identical byte stream.',
+      bytes: CANON_BYTES, ok: true, msg: 'PASS · Bit-identical CID to canonical case'
+    },
+    tensorref: {
+      desc: 'Native v1.1 TAG_TENSOR_REF (0x0A): arena_idx=0, dtype=i8(3), shape=[512], space="cos" (−47.4% bytes vs map sentinel; checked against Plane C).',
+      bytes: TENSOR_REF_BYTES, ok: true, msg: 'PASS · Native 0x0A Coordinate Contract verified'
+    },
+    badint: {
+      desc: 'Hostile encoder writes integer 5 using a 2-byte Int tag (0x03 0x0A) instead of inline FIXINT 0x45.',
+      bytes: [...CANON_BYTES.slice(0, 26), [0x03,'INT','k-red'], [0x0A,'zz=5','k-red']],
+      ok: false, msg: 'REJECTED · ERR_NON_CANONICAL_INT (value 5 must use 0x45)'
+    },
+    negzero: {
+      desc: 'Hostile encoder emits raw IEEE-754 negative zero (sign bit 0x80 in byte 24).',
+      bytes: [...CANON_BYTES.slice(0, 24), [0x80,'-0.0','k-red'], ...CANON_BYTES.slice(25)],
+      ok: false, msg: 'REJECTED · ERR_NON_CANONICAL_FLOAT (-0.0 forbidden on wire)'
+    },
+    bomb: {
+      desc: 'Adversarial depth-65 nested array bomb targeting recursive stack exhaustion.',
+      bytes: [
+        [0x43,'C','k-blue'],[0x4F,'O','k-blue'],[0x57,'W','k-blue'],[0x52,'R','k-blue'],[0x01,'v1',''],
+        [0x04,'ext','k-red'],[0x01,'epi',''],[0x00,'flg',''],[0x00,'n=0',''],
+        [0x07,'ARR',''],[0x01,'1',''],[0x07,'ARR',''],[0x01,'1',''],[0x07,'…×63','k-red'],[0x07,'d=65','k-red']
+      ],
+      ok: false, msg: 'REJECTED · ERR_MAX_DEPTH (hard limit 64 · 0 allocations · ≤ 23 µs)'
+    }
+  };
+  function renderL1(key) {
+    const d = L1[key];
+    document.getElementById("l1Desc").textContent = d.desc;
+    document.getElementById("l1Tape").innerHTML = d.bytes.map(([b, lb, cls]) =>
+      `<div class="bcell ${cls}"><span class="hx">${b.toString(16).toUpperCase().padStart(2,'0')}</span><span class="lb">${lb}</span></div>`
+    ).join("");
+    const raw = new Uint8Array(d.bytes.map(x => x[0]));
+    const cid = "1220" + toHex(sha256(raw));
+    document.getElementById("l1Verdict").innerHTML = d.ok
+      ? `<span class="blue">${d.msg}</span>`
+      : `<span class="err">${d.msg}</span>`;
+    document.getElementById("l1Hash").innerHTML = d.ok
+      ? `<span class="sub">CID </span><span class="ok">${cid.slice(0, 36)}…</span>`
+      : `<span class="sub">CID </span><span class="err">not admitted to store</span>`;
+    document.querySelectorAll("#lab1 .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.l1 === key));
+  }
+  document.querySelectorAll("#lab1 .seg-btn").forEach(b => b.addEventListener("click", () => renderL1(b.dataset.l1)));
+  renderL1("canon");
+
+  // FIG 04 · PROGRESSIVE LENSES (10-LETTER 47-BIT HANDLES + ESCAPED FENCES)
+  const L3 = {
+    w2: {
+      base: 17899, unit: 'tokens', unitShort: 'tok',
+      tiers: {
+        r0: { val: 10, text: '@kmpqvwrxzt [VERIFIED|md|T=1] RTX 3090 KV benchmark' },
+        r1: { val: 133, text: 'R1 @kmpqvwrxzt cid=7b336e1e3c38 auth=VERIFIED_TOOL bytes=284\n  title: str[21B] "RTX 3090 KV benchmark"\n  embedding: <T:f32[1536]@nomic-v2:cos>\n  metrics: Table[3](cold_ms,exact,kl,warm_ms)' },
+        r2: { val: 241, text: '<<<COWRIE:R2 @kmpqvwrxzt AUTH=0x02(VERIFIED_TOOL) CID=7b336e1e3c38>>>\ntitle: RTX 3090 KV benchmark\nembedding: <T:f32[1536]@nomic-v2:cos>\nmetrics[3]{cold_ms,exact,kl,warm_ms}:\n  68.2|33/33|0.000399|27.2\n<<<END:COWRIE 7b336e1e3c38>>>' },
+        json: { val: 17899, text: '{\n  "title": "RTX 3090 KV benchmark",\n  "embedding": [0.031942, -0.018411, 0.044209, -0.009182, 0.027310, ... 1,531 more floats printed as ASCII digits ...],\n  "metrics": { "cold_ms": 68.2, "warm_ms": 27.2, "kl": 0.000399 }\n}' }
+      },
+      bpe: [['0','split'],['.','split'],['0','split'],['3','split'],['1','split'],['9','split'],['4','split'],['2','split'],['  (Qwen3.5 \\p{N} 1-digit split)  →  ',''],['@kmpqvwrxzt','clean'],[' (47-bit Alpha32 R0; W2 R2: −98.7% vs JSON)','']]
+    },
+    vault: {
+      base: 12525, unit: 'bytes', unitShort: 'B',
+      tiers: {
+        r0: { val: 28, text: '@vltqxkmnpr · studio_vault · 28 B' },
+        r1: { val: 313, text: '@vltqxkmnpr · Studio Vault Outline (313 B · −97.5% vs 12,525 B raw JSON)\nFLUX.2-klein-4B | Wan 2.2 TI2V-5B | TRELLIS.2 1.3B | ACE-Step 1.5 Turbo\nExternal ComfyUI URL imports isolated under authority 0x84.' },
+        r2: { val: 9147, text: '@vltqxkmnpr · Studio Vault R2 Structured View (9,147 B · −27.0% vs 12,525 B)\nid          | engine      | seed    | diT_ms | auth | cid\n@bmxpqrlnvz | flux2-4b    | 42019   | 787    | 0x02 | 1220f8a1…\n@wnkvtzyqpm | wan2.2-5b   | 1084    | 13600  | 0x02 | 12209c3d…\n@exturlkpwz | comfy-web   | 9912    | —      | 0x84 | 1220e712… [TAINTED]' },
+        json: { val: 12525, text: '[\n  { "id": "render_001", "engine": "flux2-klein-4b", "graph_nodes": [... full 12,525 B Studio Vault JSON ...] }\n]' }
+      },
+      bpe: [['Studio Vault wire bytes (c0-v7-cowrie-receipt.txt): ',''],['28 B R0 (−99.8%)','clean'],[' · ',''],['313 B R1 (−97.5%)','clean'],[' · 9,147 B R2 (−27.0%) vs 12,525 B JSON','']]
+    },
+    ast: {
+      base: 137, unit: 'tokens', unitShort: 'tok',
+      tiers: {
+        r0: { val: 10, text: '@astnqpwxyz · rust_ast · depth=9 · polymorphic nodes' },
+        r1: { val: 48, text: '@astnqpwxyz { fn_decl: 1, match_arm: 4, binary_expr: 6 (heterogeneous keys) }' },
+        r2: { val: 140, text: '// Honest edge (receipt_e2.json): polymorphic AST nodes share few identical keys.\n// Hoisting adds 3 tokens (+2.2% vs 137-tok minified JSON), so R2 bypasses hoisting.\nfn verify_frame(buf: &[u8]) -> Result<Cid> { match buf[5] & 0x80 { ... } }' },
+        json: { val: 137, text: '{"kind":"FnDecl","name":"verify_frame","params":[{"id":"buf","ty":"&[u8]"}],"body":{"kind":"Match","expr":{"kind":"BitAnd","lhs":{"kind":"Index","obj":"buf","i":5},"rhs":128}}}' }
+      },
+      bpe: [['Honest regression check (receipt_e2.json): ',''],['137 → 140 tok (+2.2%)','split'],[' → R2 checks key density (>= 0.70) before hoisting.','']]
+    }
+  };
+  let curDs = 'w2', curTier = 'r2';
+  function renderL3() {
+    const ds = L3[curDs], t = ds.tiers[curTier];
+    const pct = Math.min(100, (t.val / ds.base) * 100);
+    const delta = ((t.val - ds.base) / ds.base) * 100;
+    const isWorse = delta > 0;
+    const col = curTier === 'json' ? '#5E6673' : (isWorse ? '#C2352A' : '#1D4ED8');
+    const barW = Math.max(6, (pct / 100) * 820);
+    const deltaTxt = curTier === 'json' ? 'Baseline (100%)' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)}% vs JSON`;
+
+    document.getElementById("l3BarSvg").innerHTML = `
+      <text x="0" y="15" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="#111318">${curTier.toUpperCase()} VIEW · ${t.val.toLocaleString()} ${ds.unit.toUpperCase()}</text>
+      <text x="820" y="15" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="${col}">${deltaTxt}</text>
+      <rect x="0" y="26" width="820" height="14" fill="#E8EAED"/>
+      <rect x="0" y="26" width="${barW.toFixed(1)}" height="14" fill="${col}"/>
+      <text x="0" y="53" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8B929E">0 ${ds.unitShort}</text>
+      <text x="820" y="53" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#8B929E">${ds.base.toLocaleString()} ${ds.unitShort} (minified JSON)</text>
+    `;
+    document.getElementById("l3Code").textContent = t.text;
+    document.getElementById("l3Bpe").innerHTML =
+      `<span style="color:var(--subtle);margin-right:8px;">BPE BOUNDARIES:</span>` +
+      ds.bpe.map(([txt, cls]) => `<span class="bpe-tok ${cls}">${txt}</span>`).join('');
+    document.querySelectorAll("#l3Datasets .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.ds === curDs));
+    document.querySelectorAll("#l3Tiers .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.t === curTier));
+  }
+  document.querySelectorAll("#l3Datasets .seg-btn").forEach(b => b.addEventListener("click", () => { curDs = b.dataset.ds; renderL3(); }));
+  document.querySelectorAll("#l3Tiers .seg-btn").forEach(b => b.addEventListener("click", () => { curTier = b.dataset.t; renderL3(); }));
+  renderL3();
+
+  // TABLE 2 · STATEPAGE TIERS & 16-CHUNK SHA-NI + HMAC FAULT STRIP
+  let l5Tier = 'q4', l5Fault = 'ok';
+  const SSM_CHUNKS = { prefill: 0, fp16: 4, q8: 6, q4: 9 };
+  function renderL5() {
+    const ssmCount = SSM_CHUNKS[l5Tier] || 0;
+    let svg = '';
+    const w = 48, gap = 3.4;
+    for (let i = 0; i < 16; i++) {
+      const x = i * (w + gap);
+      const isSsm = i < ssmCount;
+      const isBad = (l5Fault === 'bit' && i === 11) || ((l5Fault === 'model' || l5Fault === 'hmac') && i === 0) || (l5Fault === 'kvq' && i === 4);
+      const fill = isBad ? 'rgba(194,53,42,0.14)' : (isSsm ? 'rgba(29,78,216,0.14)' : (l5Tier === 'prefill' ? '#ECEEF0' : 'rgba(29,78,216,0.05)'));
+      const stroke = isBad ? '#C2352A' : (l5Tier === 'prefill' ? '#B4B9C2' : '#1D4ED8');
+      const txtCol = isBad ? '#C2352A' : (l5Tier === 'prefill' ? '#8B929E' : '#1D4ED8');
+      const lbl = isBad ? 'ERR' : (l5Tier === 'prefill' ? '—' : (isSsm ? 'F32' : l5Tier.toUpperCase()));
+      svg += `<rect x="${x}" y="4" width="${w}" height="28" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="${isBad ? 1.5 : 1}"/>`;
+      svg += `<text x="${x + w/2}" y="22" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="${txtCol}">${lbl}</text>`;
+    }
+    document.getElementById("l5ChunkSvg").innerHTML = svg;
+
+    const g = document.getElementById("l5Gate");
+    if (l5Fault === 'model') {
+      g.innerHTML = `<span class="err">REJECTED · ERR_MODEL_MISMATCH (rc=23)</span><span class="sub">64-stride SHA-NI model_fingerprint (1.86 ms) caught mid-layer weight/LoRA mismatch.</span>`;
+    } else if (l5Fault === 'kvq') {
+      g.innerHTML = `<span class="err">REJECTED · ERR_KV_QUANT / SSM_DTYPE_MISMATCH (rc=29/30)</span><span class="sub">Incompatible KV quantization or recurrent SSM dtype blocked before VRAM restore.</span>`;
+    } else if (l5Fault === 'hmac') {
+      g.innerHTML = `<span class="err">REJECTED · ERR_AUTH_MAC / RUNTIME_MISMATCH (rc=32/31)</span><span class="sub">Constant-time HMAC-SHA256, 0600 UID check, or runtime_id contract failed closed.</span>`;
+    } else if (l5Fault === 'bit') {
+      g.innerHTML = `<span class="err">REJECTED · ERR_STATEPAGE_HASH_MISMATCH (rc=24)</span><span class="sub">Bounded WorkerPool 4 MiB SHA-NI caught 1-bit corruption in chunk 11 before touching VRAM.</span>`;
+    } else {
+      g.innerHTML = `<span class="blue">VERIFIED PASS · 0600 UID, model_sha, runtime_id, kv/ssm, HMAC &amp; SHA-NI Merkle match</span><span class="sub">Warm verify &lt; 0.6 ms</span>`;
+    }
+    document.querySelectorAll("#l5Rows tr").forEach(r => r.classList.toggle("selected", r.dataset.m === l5Tier));
+    document.querySelectorAll("#l5Faults .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.flt === l5Fault));
+  }
+  document.querySelectorAll("#l5Rows tr").forEach(r => r.addEventListener("click", () => { l5Tier = r.dataset.m; renderL5(); }));
+  document.querySelectorAll("#l5Faults .seg-btn").forEach(b => b.addEventListener("click", () => { l5Fault = b.dataset.flt; renderL5(); }));
+  renderL5();
+
+  // FIG 07 · ANIMATED NVMe RACE + FIG 08 LOG-SCALE LADDER
+  let raceAnim = null;
+  document.getElementById("runRaceBtn").addEventListener("click", () => {
+    if (raceAnim) cancelAnimationFrame(raceAnim);
+    const splitBar = document.getElementById("raceSplitBar");
+    const cwivBar  = document.getElementById("raceCwivBar");
+    const splitClk = document.getElementById("raceSplitClock");
+    const cwivClk  = document.getElementById("raceCwivClock");
+    const start = performance.now(), totalMs = 2400;
+    function step(now) {
+      const t = Math.min(1, (now - start) / totalMs);
+      const simMs = t * 64.81;
+      const cwivT = Math.min(1, simMs / 7.07);
+      splitBar.setAttribute("width", (t * 796).toFixed(1));
+      cwivBar.setAttribute("width", (cwivT * 87).toFixed(1));
+      splitClk.textContent = simMs.toFixed(2) + " ms";
+      cwivClk.textContent = Math.min(7.07, simMs).toFixed(2) + " ms" + (cwivT >= 1 ? " (9.17× · DONE)" : "");
+      if (t < 1) raceAnim = requestAnimationFrame(step);
+      else { splitClk.textContent = "64.81 ms"; cwivClk.textContent = "7.07 ms (9.17×)"; }
+    }
+    raceAnim = requestAnimationFrame(step);
+  });
+
+  const ladder = [
+    ["SQLite3 + BLOB + NumPy (100K)",    135.2, "135.2 ms",              "#8B929E"],
+    ["Split-Seek Cold NVMe (10M · 5.28 GB)", 64.81, "64.81 ms (QD=1 miss)", "#C2352A"],
+    ["Cowrie Cold mmap+Pin (100K · 52 MB)",  28.05, "28.05 ms (4.8× vs SQLite)", "#5E6673"],
+    ["Cowrie CWIV Cold NVMe (10M · 5.30 GB)", 7.07, "7.07 ms (0.39% disk · 100%)", "#1D4ED8"],
+    ["10M GPU Brute-Force INT8 (VRAM)",       2.51, "2.51 ms (VRAM baseline)", "#8B929E"],
+    ["Cowrie CWIV Warm VRAM (10M · K=4096)", 0.155, "0.155 ms (16.3× vs 10M BF)", "#1D4ED8"],
+    ["Cowrie SoA Warm VRAM (100K · __dp4a)", 0.036, "0.036 ms (3,767× vs SQLite)", "#1D4ED8"],
+  ];
+  const lMin = Math.log10(0.02), lMax = Math.log10(200);
+  const bx0 = 258, maxW = 374;
+  let lSvg = '';
+  ladder.forEach(([lbl, ms, val, col], idx) => {
+    const y = 34 + idx * 27;
+    const w = Math.max(8, ((Math.log10(ms) - lMin) / (lMax - lMin)) * maxW);
+    const isHi = col === '#1D4ED8' || col === '#C2352A';
+    lSvg += `<text x="${bx0 - 12}" y="${y + 12}" text-anchor="end" font-family="Inter, sans-serif" font-size="12" font-weight="${isHi ? 600 : 400}" fill="${isHi ? '#111318' : '#5E6673'}">${lbl}</text>`;
+    lSvg += `<rect x="${bx0}" y="${y + 2}" width="${maxW}" height="12" fill="#ECEEF0"/>`;
+    lSvg += `<rect x="${bx0}" y="${y + 2}" width="${w.toFixed(1)}" height="12" fill="${col}"/>`;
+    lSvg += `<text x="${bx0 + maxW + 12}" y="${y + 12}" font-family="JetBrains Mono, monospace" font-size="11" font-weight="${isHi ? 600 : 400}" fill="${col}">${val}</text>`;
+  });
+  document.getElementById("ladderBars").innerHTML = lSvg;
+
+  // FIG 09 · CLICKABLE DUAL-TREE 0x04 RFC 6962 MERKLE (F0..F6 + TENSOR T0)
+  const N = 8, tampered = new Array(N).fill(false), enc = new TextEncoder();
+  function leafHash(i, bad) {
+    const isTensor = i === 7;
+    const tag = isTensor ? 0x03 : 0x00;
+    const payload = enc.encode(isTensor ? `cowrie:tensor:0:${bad ? "1bit-corrupt" : "aligned-16kb-ok"}` : `cowrie:frame:${i}:${bad ? "1bit-corrupt" : "canonical-ok"}`);
+    const buf = new Uint8Array(1 + payload.length);
+    buf[0] = tag; buf.set(payload, 1);
+    return sha256(buf);
+  }
+  function nodeHash(l, r) {
+    const buf = new Uint8Array(65);
+    buf[0] = 0x01; buf.set(l, 1); buf.set(r, 33);
+    return sha256(buf);
+  }
+  function rootHash(top) {
+    const buf = new Uint8Array(35);
+    buf[0] = 0x04; buf[1] = 7; buf[2] = 1; buf.set(top, 3);
+    return sha256(buf);
+  }
+  const cleanLeaves = Array.from({length: N}, (_, i) => leafHash(i, false));
+  const cleanRoot = toHex(rootHash(
+    nodeHash(
+      nodeHash(nodeHash(cleanLeaves[0], cleanLeaves[1]), nodeHash(cleanLeaves[2], cleanLeaves[3])),
+      nodeHash(nodeHash(cleanLeaves[4], cleanLeaves[5]), nodeHash(cleanLeaves[6], cleanLeaves[7]))
+    )
+  ));
+  function renderL2() {
+    const l0 = Array.from({length: 8}, (_, i) => ({ h: leafHash(i, tampered[i]), bad: tampered[i] }));
+    const l1 = [0,2,4,6].map(i => ({ h: nodeHash(l0[i].h, l0[i+1].h), bad: l0[i].bad || l0[i+1].bad }));
+    const l2 = [0,2].map(i => ({ h: nodeHash(l1[i].h, l1[i+1].h), bad: l1[i].bad || l1[i+1].bad }));
+    const top = { h: rootHash(nodeHash(l2[0].h, l2[1].h)), bad: l2[0].bad || l2[1].bad };
+    const xs0 = [56, 157, 258, 359, 461, 562, 663, 764], xs1 = [106, 308, 511, 713], xs2 = [207, 612], xr = 410, ys = [194, 134, 78, 24];
+    let s = '';
+    const line = (x1, y1, x2, y2, bad) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${bad ? '#C2352A' : '#D1D5DB'}" stroke-width="${bad ? 1.8 : 1.1}"/>`;
+    for (let i = 0; i < 8; i++) s += line(xs0[i], ys[0] - 15, xs1[i>>1], ys[1] + 13, l0[i].bad);
+    for (let i = 0; i < 4; i++) s += line(xs1[i], ys[1] - 13, xs2[i>>1], ys[2] + 13, l1[i].bad);
+    for (let i = 0; i < 2; i++) s += line(xs2[i], ys[2] - 13, xr, ys[3] + 14, l2[i].bad);
+    const boxNode = (x, y, w, h, title, sub, bad, leafIdx) => {
+      const isTensor = leafIdx === 7;
+      const fill = bad ? 'rgba(194,53,42,0.09)' : (isTensor ? 'rgba(29,78,216,0.08)' : '#FCFCFA');
+      const stroke = bad ? '#C2352A' : (leafIdx === -1 || isTensor ? '#1D4ED8' : '#262A32');
+      const cls = leafIdx !== null && leafIdx >= 0 ? `class="leaf-hit" data-leaf="${leafIdx}"` : '';
+      return `<g ${cls}><rect x="${x - w/2}" y="${y - h/2}" width="${w}" height="${h}" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="${bad || leafIdx === -1 || isTensor ? 1.4 : 1}"/>
+        <text x="${x}" y="${y - 2}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="${bad ? '#C2352A' : (leafIdx === -1 || isTensor ? '#1D4ED8' : '#111318')}">${title}</text>
+        <text x="${x}" y="${y + 10}" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" fill="${bad ? '#C2352A' : '#5E6673'}">${sub}</text></g>`;
+    };
+    s += boxNode(xr, ys[3], 244, 30, 'DUAL ROOT 0x04 · F=7, T=1', toHex(top.h).slice(0, 16) + '…', top.bad, -1);
+    l2.forEach((n, i) => s += boxNode(xs2[i], ys[2], 124, 26, `0x01 · N2.${i}`, toHex(n.h).slice(0, 10), n.bad, null));
+    l1.forEach((n, i) => s += boxNode(xs1[i], ys[1], 108, 26, `0x01 · N1.${i}`, toHex(n.h).slice(0, 8), n.bad, null));
+    l0.forEach((n, i) => {
+      const baseLbl = i === 7 ? 'T0 · PLANE C' : `F${i}`;
+      const lbl = n.bad ? (i === 7 ? 'T0 · FLIP' : `F${i} · FLIP`) : baseLbl;
+      s += boxNode(xs0[i], ys[0], 84, 30, lbl, toHex(n.h).slice(0, 7), n.bad, i);
+    });
+    const svg = document.getElementById("l2Svg");
+    svg.innerHTML = s;
+    svg.querySelectorAll("[data-leaf]").forEach(g => g.addEventListener("click", () => { const idx = Number(g.dataset.leaf); tampered[idx] = !tampered[idx]; renderL2(); }));
+    const badCount = tampered.filter(Boolean).length;
+    const tensorBad = tampered[7];
+    document.getElementById("l2Status").innerHTML = badCount === 0
+      ? `<span class="blue">VERIFIED · Dual root (frames + Plane C tensor) matches ${cleanRoot.slice(0, 16)}…</span>`
+      : `<span class="err">ERR_ROOT_MISMATCH · ${badCount} tampered ${tensorBad ? 'frame/tensor slab' : (badCount === 1 ? 'leaf' : 'leaves')} isolated in O(log N)</span>`;
+    document.getElementById("l2Sync").innerHTML = badCount === 0
+      ? `<span class="sub">Delta sync: 0 B (roots match)</span>`
+      : `<span class="sub">Delta sync: </span><span class="ok">${badCount * 544} B shipped</span><span class="sub"> instead of 68 MB</span>`;
+  }
+  document.getElementById("l2Reset").addEventListener("click", () => { tampered.fill(false); renderL2(); });
+  document.getElementById("l2Rand").addEventListener("click", () => { const i = Math.floor(Math.random() * N); tampered[i] = !tampered[i]; renderL2(); });
+  renderL2();
+
+  // FIG 10 · INTERACTIVE CAUSAL TAINT CIRCUIT
+  function renderL4(mode) {
+    const isCowrie = mode === 'cowrie', isNaive = mode === 'naive';
+    const h1Tag = isNaive ? '0x08 SYNTH' : '0x88 TAINTED';
+    const h2Tag = isNaive ? '0x02 LOCAL' : (isCowrie ? '0x82 TAINTED' : '0x02 ED25519');
+    const gateCol = isCowrie ? '#1D4ED8' : (isNaive ? '#C2352A' : '#262A32');
+    const gateTxt = isCowrie ? 'MCP -32025 / 403' : (isNaive ? 'BREACH · EXECUTED' : 'ED25519 APPROVED');
+    const h1Bad = !isNaive, h2Bad = isCowrie;
+
+    document.getElementById("l4Svg").innerHTML = `
+      <defs>
+        <marker id="ma-b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#1D4ED8"/></marker>
+        <marker id="ma-r" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#C2352A"/></marker>
+        <marker id="ma-k" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 1.5 L 8.5 5 L 0 8.5 z" fill="#5E6673"/></marker>
+      </defs>
+      <text x="12" y="16" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#1D4ED8">PARALLEL CLEAN BRANCH (PARENTS: 0x01 POLICY, 0x02 USER)</text>
+      <rect x="12" y="26" width="190" height="44" fill="rgba(29,78,216,0.06)" stroke="#1D4ED8" stroke-width="1.1"/>
+      <text x="24" y="45" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#1D4ED8">0x02 LOCAL SPEC</text>
+      <text x="24" y="60" font-family="Inter, sans-serif" font-size="11" fill="#5E6673">Clean workspace frame</text>
+      <line x1="202" y1="48" x2="610" y2="48" stroke="#1D4ED8" stroke-width="1.3" marker-end="url(#ma-b)"/>
+      <text x="406" y="42" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#1D4ED8">X-Cowrie-Tainted: false · 0 false blocks</text>
+      <rect x="618" y="26" width="190" height="44" fill="rgba(29,78,216,0.08)" stroke="#1D4ED8" stroke-width="1.2"/>
+      <text x="713" y="46" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" font-weight="600" fill="#1D4ED8">HTTP 200 ALLOWED</text>
+      <text x="713" y="61" text-anchor="middle" font-family="Inter, sans-serif" font-size="11" fill="#262A32">12/12 clean tools pass</text>
+      <line x1="12" y1="88" x2="808" y2="88" stroke="#E3E5E8" stroke-width="1"/>
+      <text x="12" y="110" font-family="JetBrains Mono, monospace" font-size="10" font-weight="600" fill="#C2352A">2-HOP LAUNDERING / UNKNOWN-ID ATTACK (WEB / COMFY URL → SUMMARY → GATE)</text>
+      <rect x="12" y="122" width="174" height="72" fill="rgba(194,53,42,0.08)" stroke="#C2352A" stroke-width="1.2"/>
+      <text x="22" y="140" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="#C2352A">HOP 0 · 0x04 EXT</text>
+      <text x="22" y="158" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#111318">Hostile Web / URL</text>
+      <text x="22" y="176" font-family="Inter, sans-serif" font-size="10.8" fill="#5E6673">Hidden shell command</text>
+      <line x1="186" y1="158" x2="216" y2="158" stroke="#C2352A" stroke-width="1.4" marker-end="url(#ma-r)"/>
+      <rect x="222" y="122" width="174" height="72" fill="${h1Bad ? 'rgba(194,53,42,0.08)' : '#FCFCFA'}" stroke="${h1Bad ? '#C2352A' : '#8B929E'}" stroke-width="1.2"/>
+      <text x="232" y="140" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="${h1Bad ? '#C2352A' : '#5E6673'}">HOP 1 · ${h1Tag}</text>
+      <text x="232" y="158" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#111318">LLM Summary</text>
+      <text x="232" y="176" font-family="Inter, sans-serif" font-size="10.8" fill="#5E6673">${isNaive ? 'Taint bit dropped' : 'Inherits | 0x80 forever'}</text>
+      <line x1="396" y1="158" x2="426" y2="158" stroke="${h2Bad ? '#C2352A' : '#5E6673'}" stroke-width="1.4" marker-end="url(#${h2Bad ? 'ma-r' : 'ma-k'})"/>
+      <rect x="432" y="122" width="174" height="72" fill="${h2Bad ? 'rgba(194,53,42,0.08)' : '#FCFCFA'}" stroke="${h2Bad ? '#C2352A' : '#8B929E'}" stroke-width="1.2"/>
+      <text x="442" y="140" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="${h2Bad ? '#C2352A' : '#5E6673'}">HOP 2 · ${h2Tag}</text>
+      <text x="442" y="158" font-family="Inter, sans-serif" font-size="12" font-weight="600" fill="#111318">Tool Argument</text>
+      <text x="442" y="176" font-family="Inter, sans-serif" font-size="10.8" fill="#5E6673">${isCowrie ? '0x80 or unknown/empty ID' : (isNaive ? 'Looks clean (0x02)' : 'Signed owner token')}</text>
+      <line x1="606" y1="158" x2="625" y2="158" stroke="${isCowrie || isNaive ? '#C2352A' : '#5E6673'}" stroke-width="1.4" marker-end="url(#${isCowrie || isNaive ? 'ma-r' : 'ma-k'})"/>
+      <rect x="630" y="122" width="178" height="72" fill="${isNaive ? 'rgba(194,53,42,0.13)' : (isCowrie ? 'rgba(29,78,216,0.08)' : '#FCFCFA')}" stroke="${gateCol}" stroke-width="1.4"/>
+      <text x="719" y="144" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" fill="${gateCol}">FAIL-CLOSED GATE</text>
+      <text x="719" y="164" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="600" fill="${gateCol}">${gateTxt}</text>
+      <text x="719" y="182" text-anchor="middle" font-family="Inter, sans-serif" font-size="10.5" fill="#5E6673">shell_exec / fs_write</text>
+    `;
+    document.getElementById("l4Attack").innerHTML = isCowrie
+      ? `<span class="blue">BLOCKED · ERR_TAINTED_EXECUTION_BLOCKED (HTTP 403 / MCP -32025 in 13.15 µs)</span>`
+      : (isNaive
+        ? `<span class="err">COMPROMISED · 12/12 multi-hop attacks bypassed naive check (E4)</span>`
+        : `<span class="ok">DECLASSIFIED · Scoped RFC 8032 Ed25519 (target_cid, action, expiry) verified + logged to .cwwal</span>`);
+    document.getElementById("l4Clean").innerHTML = `<span class="sub">Clean lane: </span><span class="blue">HTTP 200 allowed</span>`;
+    document.querySelectorAll("#l4Btns .seg-btn").forEach(b => b.classList.toggle("active", b.dataset.s === mode));
+  }
+  document.querySelectorAll("#l4Btns .seg-btn").forEach(b => b.addEventListener("click", () => renderL4(b.dataset.s)));
+  renderL4("cowrie");
+})();
+</script>
+</body>
+</html>

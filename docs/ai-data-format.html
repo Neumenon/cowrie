@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Making an AI-Native Data Format — Cowrie Field Manual (Vol. I)</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="making-manual.css">
+</head>
+<body>
+<div class="read-progress" id="progressBar"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand-mark" href="making-cowrie.html">
+      <span class="brand-dot"></span>
+      <span>Eureka Manual</span>
+    </a>
+    <div class="vol-switch" role="navigation" aria-label="Manual volumes">
+      <a class="vol-link active" href="ai-data-format.html">Vol. I &middot; Cowrie</a>
+      <a class="vol-link" href="making-cowrie.html">Vol. II &middot; Creative v7</a>
+    </div>
+    <nav class="top-nav" aria-label="Chapters">
+      <a href="#ch1">01 Collision</a>
+      <a href="#ch2">02 Invariants</a>
+      <a href="#ch3">03 Blueprint</a>
+      <a href="#ch4">04 Mipmaps</a>
+      <a href="#ch5">05 Benchmarks</a>
+      <a href="#ch6">06 Silicon</a>
+      <a href="#ch7">07 Runtimes</a>
+    </nav>
+    <button class="mode-btn" id="themeBtn" type="button">Blueprint Mode</button>
+  </div>
+</header>
+
+<main class="manual-wrap">
+  <!-- BOOK COVER -->
+  <section class="book-cover">
+    <div class="cover-kicker">
+      <span>EUREKA SYSTEMS MONOGRAPH &middot; VOLUME I &middot; EDITION 1.1</span>
+      <span>[ RUST CORE v1.0.0 &middot; 665 KB C-ABI &middot; 17 LIVE SUITES ]</span>
+    </div>
+    <h1 class="cover-title">Making an <em>AI-Native</em><br>Data Format</h1>
+    <p class="cover-deck">
+      Have you ever wondered why modern AI stacks glue together six incompatible formats&mdash;JSON, base64,
+      Parquet, SQLite, Safetensors, and triple-backtick markdown&mdash;just to hold a single thought? Every older
+      data format was designed for one scarce machine. Neural systems force three incompatible machines onto the
+      exact same bytes at once: an <strong>attention window</strong>, a <strong>GPU tensor core</strong>, and a
+      <strong>cryptographic verifier</strong>. This field manual builds <strong>Cowrie</strong> from first
+      principles and tests it live across four production runtimes.
+    </p>
+
+    <div class="spec-ribbon">
+      <div class="spec-cell"><span class="sk">Core Crate</span><span class="sv blue">libcowrie_core.so (665 KB)</span></div>
+      <div class="spec-cell"><span class="sk">Live Runtimes</span><span class="sv green">4 / 4 Verified on RTX 3090</span></div>
+      <div class="spec-cell"><span class="sk">LLM StatePage</span><span class="sv">24.1 ms warm (136.7&times;)</span></div>
+      <div class="spec-cell"><span class="sk">Creative StatePage</span><span class="sv">151.7&times;&ndash;2,970&times; Restart</span></div>
+      <div class="spec-cell"><span class="sk">Trust Membrane</span><span class="sv">0x84 &rarr; HTTP 403 Gate</span></div>
+    </div>
+
+    <div class="toc-directory">
+      <div class="toc-head">
+        <span>Table of Contents &mdash; Seven Illustrated Chapters</span>
+        <span>Reference Index</span>
+      </div>
+      <ol class="toc-list">
+        <li><a href="#ch1"><span class="toc-num">01</span><span class="toc-name">The Tri-Consumer Collision</span><span class="toc-dots"></span><span class="toc-fig">FIG_001</span></a></li>
+        <li><a href="#ch2"><span class="toc-num">02</span><span class="toc-name">Six First-Principles Invariants</span><span class="toc-dots"></span><span class="toc-fig">PLANE A&ndash;D</span></a></li>
+        <li><a href="#ch3"><span class="toc-num">03</span><span class="toc-name">Anatomy of a Sealed Frame (Live Lab)</span><span class="toc-dots"></span><span class="toc-fig">FIG_002&ndash;003</span></a></li>
+        <li><a href="#ch4"><span class="toc-num">04</span><span class="toc-name">Semantic Mipmaps &amp; The Trust Membrane</span><span class="toc-dots"></span><span class="toc-fig">FIG_004&ndash;006</span></a></li>
+        <li><a href="#ch5"><span class="toc-num">05</span><span class="toc-name">Measured Workloads &amp; Where It Hurts</span><span class="toc-dots"></span><span class="toc-fig">FIG_007</span></a></li>
+        <li><a href="#ch6"><span class="toc-num">06</span><span class="toc-name">Silicon Proofs: H1&ndash;H5, E1&ndash;E5, U1&ndash;U3</span><span class="toc-dots"></span><span class="toc-fig">FIG_008&ndash;010</span></a></li>
+        <li><a href="#ch7"><span class="toc-num">07</span><span class="toc-name">Four Live Runtimes &amp; Eureka Creative v7</span><span class="toc-dots"></span><span class="toc-fig">FIG_011</span></a></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- FRONTISPIECE -->
+  <figure class="fig-frame" id="fig-000">
+    <div class="fig-bar">
+      <div class="fig-bar-left">
+        <span class="fig-tag">FIG_000</span>
+        <span class="fig-spec">[ TRI-STRATA CONTAINER &middot; AXONOMETRIC OVERVIEW ]</span>
+      </div>
+      <span class="fig-meta">ARCHIVAL PLATE 00 &middot; CLICK TO ZOOM</span>
+    </div>
+    <div class="fig-body flush">
+      <img src="ai-data-format-assets/plate0_hero.png" alt="Frontispiece: Three strata of an AI-native container"
+           onclick="openLightbox(this.src, 'FIG_000 — Multi-resolution symbolic lenses above, ruled canonical ledger + trust membrane in the middle, and 16 KB aligned tensor blocks below.')">
+    </div>
+    <figcaption class="fig-cap">
+      <span><strong>Reading the strata:</strong> Attention lenses sit on top (optics), the bijective trust ledger sits in the middle (physics), and page-aligned tensor buffers sit underneath (hardware).</span>
+      <span>2026-11-23 &middot; /home/omen/cowrie</span>
+    </figcaption>
+  </figure>
+
+  <!-- CHAPTER 01 -->
+  <section class="chapter" id="ch1">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 01 &middot; The Diagnosis</span>
+        <h2 class="ch-title">The Tri-Consumer Collision</h2>
+      </div>
+      <span class="ch-badge">Attention &times; GPU &times; Verifier</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p class="lead-para">
+          Open any modern AI runtime and watch what happens when an agent retrieves a single memory record.
+          It fetches a webpage as UTF-8, serializes a tool call as JSON, prints a 1,536-dimensional embedding as
+          ASCII floats or base64, writes checkpoints into SQLite, loads weights from Safetensors, and pastes the
+          whole mess into a prompt wrapped in triple backticks. Six formats, three parse passes, and zero shared
+          cryptographic identity hold one piece of state together.
+        </p>
+        <p>
+          That tangle is not an accident of early tooling&mdash;it is an older design assumption breaking down.
+          As mapped in <a class="fig-ref" href="#fig-001">FIG_001</a>, every enduring format was shaped by a single
+          scarce machine: CSV and XML for human eyes and Unix pipes; JSON and Protobuf for HTTP microservices;
+          Parquet, Arrow, and Safetensors for columnar SIMD scans and memory-mapped GPU weights.
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>Scope Discipline</strong>
+        Every number in this manual comes from reproducible scripts (<code>bench_format.py</code>,
+        <code>~/tessera-lab/</code>, and live RTX 3090 runs) archived with verbatim receipts&mdash;including the
+        honest misses where JSON or SQLite still wins.
+      </aside>
+    </div>
+
+    <figure class="fig-frame" id="fig-001">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_001</span>
+          <span class="fig-spec">[ FOUR EPOCHS OF SERIALIZATION &middot; 1975&ndash;2026 ]</span>
+        </div>
+        <span class="fig-meta">1200 &times; 650 @ 2&times; &middot; PLATE I</span>
+      </div>
+      <div class="fig-body flush">
+        <img src="ai-data-format-assets/plate1_epochs.png" alt="Four Epochs of Data Formats"
+             onclick="openLightbox(this.src, 'FIG_001 — Evolution from single-consumer bottlenecks to the tri-consumer collision of LLM attention, GPU DMA, and deterministic verification.')">
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Why each legacy family cracks:</strong> Compact text formats (TOON/YAML) shave punctuation yet cannot align binary tensors or isolate prompt injection; Protobuf lacks canonical hashing; Parquet splits structured traces away from tensors.</span>
+        <span>Receipt: ai-data-format-assets/bench_receipt.json</span>
+      </figcaption>
+    </figure>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <div class="principle-box">
+          <span class="ptag">First Principle &middot; Core Rule</span>
+          <p>
+            Stop asking whether an AI format should be &ldquo;text for LLMs&rdquo; or &ldquo;binary for GPUs.&rdquo;
+            <strong>Core is physics, profiles are chemistry, lenses are optics.</strong> Storage and identity belong
+            to one canonical binary core; LLM-lean syntax is a deterministic projection rendered on demand, never
+            the source of truth.
+          </p>
+        </div>
+      </div>
+      <aside class="sidenote">
+        <strong>Why Not Just TOON?</strong>
+        TOON trims ~25%&ndash;50% of tokens on uniform tables, which proves syntax hoisting works as a
+        <em>lens</em>. Using it as storage leaves raw floats in text, hashes undefined, and untrusted payloads
+        mixed in-band with instructions.
+      </aside>
+    </div>
+  </section>
+
+  <!-- CHAPTER 02 -->
+  <section class="chapter" id="ch2">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 02 &middot; The Physics</span>
+        <h2 class="ch-title">Six First-Principles Invariants</h2>
+      </div>
+      <span class="ch-badge">Frozen Wire Contract &middot; SPEC v1.0</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p>
+          Strip away surface syntax and exactly six structural laws must hold simultaneously if one artifact is going
+          to serve an attention engine, a GPU memory bus, and a deterministic verifier without glue code:
+        </p>
+        <div class="grid-2" style="margin: 22px 0;">
+          <div class="card-box">
+            <h4><span>I. Bijective Canonical Core</span><span class="pill blue">COWR</span></h4>
+            <p><code>encode(decode(b)) == b</code> strictly. UTF-8 byte-sorted key dictionary, minimal varints, <code>-0.0 &rarr; +0.0</code>, single quiet NaN, <code>MAX_DEPTH = 64</code>, and strict <code>ERR_*</code> rejection guarantee identical 34-byte multihashes across Rust, C, Python, and JS.</p>
+          </div>
+          <div class="card-box">
+            <h4><span>II. 16 KB Aligned Tensors &amp; Contracts</span><span class="pill blue">CWSP / CWIV</span></h4>
+            <p>Raw buffers (<code>f32</code>, <code>bf16</code>, <code>fp8</code>, <code>i8</code>, packed <code>i4</code>) sit in a <code>16,384 B</code> aligned arena (matching Apple Silicon, Linux NVMe DMA, and ARM64 pages) with mandatory <code>0x00</code> padding and <code>(model_sha, doc_cid, kv_quant)</code> contracts.</p>
+          </div>
+          <div class="card-box">
+            <h4><span>III. Semantic Mipmaps (R0&ndash;R3)</span><span class="pill blue">OPTICS</span></h4>
+            <p>Like 3D texture mipmaps, every artifact zooms cleanly: <code>R0</code> Alpha32 handle (~8&ndash;10 tok), <code>R1</code> deterministic skeleton with child offsets, <code>R2</code> adaptive Attention Lens (hoisting pipe tables when <code>len &ge; 3</code> &amp; density <code>&ge; 0.70</code>), and <code>R3</code> raw binary core.</p>
+          </div>
+          <div class="card-box">
+            <h4><span>IV. Structural Trust Membrane</span><span class="pill block">0x80 TAINT</span></h4>
+            <p>Out-of-band 1-byte Authority header (<code>0x01 SYS_POLICY</code>, <code>0x02 VERIFIED_TOOL</code>, <code>0x04 UNTRUSTED_EXT</code>, <code>0x08 MODEL_SYNTH</code>) plus sticky causal <code>BIT_TAINTED = 0x80</code> over length-prefixed boundaries&mdash;unforgeable by any string inside the payload.</p>
+          </div>
+          <div class="card-box">
+            <h4><span>V. Epistemic Lineage</span><span class="pill">PROFILES</span></h4>
+            <p>Standardized profiles over Core carry calibrated confidence intervals and exact <code>(cid, byte_span)</code> citations so a poisoned or retracted upstream document surgically invalidates every downstream derivation.</p>
+          </div>
+          <div class="card-box">
+            <h4><span>VI. Seek-From-End SHA-NI Seals</span><span class="pill pass">CWRF</span></h4>
+            <p>Compression lives strictly at transport, never inside identity. Sealed shards end with a 12-byte trailer (<code>u64 footer_off || "CWRF"</code>) pointing to an RFC 6962 count-bound Merkle root verified via x86_64 SHA-NI parallel 4 MiB chunks.</p>
+          </div>
+        </div>
+      </div>
+      <aside class="sidenote">
+        <strong>Why Freeze Core Tiny?</strong>
+        Every extra wire tag invites encoder drift across languages. Freezing <code>COWR</code> small and keeping
+        learned summaries outside <code>CoreHash</code> guarantees a file hashed in 2026 hashes identically in 2036.
+      </aside>
+    </div>
+  </section>
+
+  <!-- CHAPTER 03 -->
+  <section class="chapter" id="ch3">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 03 &middot; Byte-Level Architecture</span>
+        <h2 class="ch-title">Anatomy of a Sealed Frame</h2>
+      </div>
+      <span class="ch-badge">Interactive Lab &middot; Click Any Plane</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p>
+          A sealed Cowrie frame is divided into four clean planes behind a fixed 64-byte header&mdash;exactly one
+          CPU cache line wide. Because the header records exact byte offsets for every plane, each of the three
+          consumers enters through its own door and never page-faults the bytes meant for the others
+          (<a class="fig-ref" href="#fig-002">FIG_002</a>).
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>Zero-Pad Security Rule</strong>
+        Every padding byte between Plane A and Plane C must equal <code>0x00</code>. Non-zero padding fails
+        strict verification with <code>ERR_NON_ZERO_PAD</code>, closing steganographic covert channels.
+      </aside>
+    </div>
+
+    <figure class="fig-frame" id="fig-002">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_002</span>
+          <span class="fig-spec">[ SEALED FRAME CUTAWAY &middot; 64B HEADER + PLANES A&ndash;D ]</span>
+        </div>
+        <span class="fig-meta">1200 &times; 740 @ 2&times; &middot; PLATE II</span>
+      </div>
+      <div class="fig-body flush">
+        <img src="ai-data-format-assets/plate2_anatomy.png" alt="Physical wire cutaway of a sealed Cowrie frame"
+             onclick="openLightbox(this.src, 'FIG_002 — Physical byte layout showing the 64-byte cache-line header, sorted Plane A symbolic core, Plane B mipmap index, 0x00 alignment pad, Plane C 16 KB aligned tensor arena, and Plane D Merkle trailer.')">
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Three entry doors, zero glue:</strong> CPU walks Plane A without faulting megabytes of tensors; GPU calls <code>mmap + arena_off</code> with zero copies; LLM reads only Plane B lenses.</span>
+        <span>SPEC.md &sect;2&ndash;&sect;4</span>
+      </figcaption>
+    </figure>
+
+    <!-- INTERACTIVE LAB 1: LIVE FRAME EXPLORER -->
+    <figure class="fig-frame" id="fig-003">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_003</span>
+          <span class="fig-spec">[ INTERACTIVE LAB &middot; RECEIPTED W2 MULTIMODAL FRAME (11,008 B) ]</span>
+        </div>
+        <span class="fig-meta" id="activeReaderBadge">CONSUMER: LLM ATTENTION TRIAGE</span>
+      </div>
+      <div class="fig-body">
+        <div class="lab-controls" role="tablist" aria-label="Resolution views">
+          <button class="lab-btn active" data-view="r0" type="button">R0 Handle (26 tok)</button>
+          <button class="lab-btn" data-view="r1" type="button">R1 Skeleton (164 tok)</button>
+          <button class="lab-btn" data-view="r2" type="button">R2 Attention Lens (255 tok)</button>
+          <button class="lab-btn" data-view="r3" type="button">R3 Binary Core + GPU Arena</button>
+          <button class="lab-btn" data-view="json" type="button">Baseline: Raw JSON (10,024 tok)</button>
+        </div>
+
+        <div class="byte-strip" id="byteStrip">
+          <button class="bseg selected" data-plane="hdr" type="button"><span class="off">0x0000..0x003F</span><span class="nm">Header (64B)</span><span class="sz">Magic &middot; Trust &middot; CID</span></button>
+          <button class="bseg" data-plane="sym" type="button"><span class="off">0x0040..0x02BF</span><span class="nm">Plane A &middot; Core</span><span class="sz">640 B sorted dict</span></button>
+          <button class="bseg" data-plane="mip" type="button"><span class="off">Projected / TOC</span><span class="nm">Plane B &middot; Lens</span><span class="sz">R0 / R1 / R2</span></button>
+          <button class="bseg" data-plane="pad" type="button"><span class="off">0x02C0..0x02FF</span><span class="nm">0x00 Pad</span><span class="sz">Strict Align</span></button>
+          <button class="bseg" data-plane="arena" type="button"><span class="off">0x0300..0x2AFF</span><span class="nm">Plane C &middot; Arena</span><span class="sz">6,144B f32 + 4,096B i8</span></button>
+          <button class="bseg" data-plane="foot" type="button"><span class="off">EOF &minus; 12B</span><span class="nm">Plane D &middot; Seal</span><span class="sz">RFC 6962 + Trust</span></button>
+        </div>
+
+        <div class="lab-grid-2">
+          <div class="lab-pane">
+            <div class="lab-pane-head">
+              <strong id="viewTitle">R0 &middot; Handle &amp; Essence</strong>
+              <span id="viewCost">26 modeled tokens &middot; 385.5&times; smaller</span>
+            </div>
+            <pre><code id="viewCode"></code></pre>
+          </div>
+          <div class="lab-pane">
+            <div class="lab-pane-head">
+              <strong id="planeTitle">Plane Detail &middot; 64-Byte Header</strong>
+              <span id="planeTag">0x0000..0x003F</span>
+            </div>
+            <dl class="kv-dl" id="planeDetails"></dl>
+            <div style="margin-top:12px;padding-top:8px;border-top:1px dashed var(--rule-strong);color:var(--ink);" id="planeMetrics"></div>
+          </div>
+        </div>
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Try clicking between R0, R2, and Raw JSON above:</strong> Notice how raw float arrays vanish from the LLM token stream while staying 100% zero-copy accessible to CUDA/Metal in Plane C.</span>
+        <span>Grounded in bench_receipt.json &middot; W2_multimodal</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 04 -->
+  <section class="chapter" id="ch4">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 04 &middot; Optics &amp; Security</span>
+        <h2 class="ch-title">Semantic Mipmaps &amp; The Trust Membrane</h2>
+      </div>
+      <span class="ch-badge">O(log N) Zoom &middot; Sticky 0x80 Taint</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <h3>Why RAG chunking is a symptom of flat files</h3>
+        <p>
+          Standard retrieval pipelines chop rich documents into arbitrary 512-token slices because flat files have no
+          zoom level between &ldquo;filename&rdquo; and &ldquo;entire blob.&rdquo; Chunking destroys table headers,
+          detaches footnotes from numbers, and strips origin metadata. Semantic Mipmaps
+          (<a class="fig-ref" href="#fig-004">FIG_004</a>) replace blind slicing with deterministic structural zoom:
+          scan thousands of <code>R0</code> handles in one pass, inspect <code>R1</code> skeletons for the few hits,
+          and project <code>R2</code> only on the exact branches needed.
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>The CoreHash Firewall</strong>
+        <code>R1</code> and <code>R2</code> derive mechanically from Plane A (zero GPU cost). Any model-written
+        synopsis lives strictly outside <code>CoreHash</code> as an attested satellite so upgrading models never
+        mutates document CIDs.
+      </aside>
+    </div>
+
+    <figure class="fig-frame" id="fig-004">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_004</span>
+          <span class="fig-spec">[ SEMANTIC MIPMAPS &middot; 10,024 TOK &rarr; 255 TOK (R2) &rarr; 26 TOK (R0) ]</span>
+        </div>
+        <span class="fig-meta">1200 &times; 700 @ 2&times; &middot; PLATE III</span>
+      </div>
+      <div class="fig-body flush">
+        <img src="ai-data-format-assets/plate3_mipmap.png" alt="Semantic Mipmaps token reduction across R0 to R3"
+             onclick="openLightbox(this.src, 'FIG_004 — Progressive attention zoom on W2 multimodal record: flat JSON burns 10,024 tokens; R2 drops to 255 tokens (-97.5%); R0 triage handle takes 26 tokens (385x smaller).')">
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>O(N) scan &rarr; O(log N) descent:</strong> The biggest context savings come from structural tiering, not merely stripping JSON quotes.</span>
+        <span>PLATE III &middot; CoreHash Firewall</span>
+      </figcaption>
+    </figure>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <h3>Prompt injection is a data-format bug</h3>
+        <p>
+          SQL injection died only when parameterized protocols separated the query AST from bound data at the wire
+          layer. Yet AI agents still concatenate system policies, verified tools, and hostile web pages into one
+          flat string. Cowrie moves trust out of the text alphabet into a length-prefixed binary envelope
+          (<a class="fig-ref" href="#fig-005">FIG_005</a>) and propagates a sticky <code>BIT_TAINTED (0x80)</code>
+          flag across every causal derivation&mdash;even when an LLM rewrites an untrusted prompt through two hops.
+          Test the wire rules yourself in <a class="fig-ref" href="#fig-006">FIG_006</a>.
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>Why 0x84, Not 0x04?</strong>
+        In <code>cowrie-core/src/trust.rs</code>, registering any <code>UNTRUSTED_EXT (0x04)</code> frame sets
+        <code>BIT_TAINTED (0x80)</code> immediately: <code>0x04 | 0x80 = 0x84</code>. Any downstream artifact
+        citing it inherits <code>0x80</code> irrevocably.
+      </aside>
+    </div>
+
+    <figure class="fig-frame" id="fig-005">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_005</span>
+          <span class="fig-spec">[ STRUCTURAL TRUST MEMBRANE &middot; 4 OUT-OF-BAND AUTHORITY LANES ]</span>
+        </div>
+        <span class="fig-meta">1200 &times; 690 @ 2&times; &middot; PLATE IV</span>
+      </div>
+      <div class="fig-body flush">
+        <img src="ai-data-format-assets/plate4_trust.png" alt="Structural Trust Membrane 4 authority lanes"
+             onclick="openLightbox(this.src, 'FIG_005 — Out-of-band length-prefixed authority lanes (0x01 policy, 0x02 tool, 0x04 untrusted, 0x08 model synth) prevent any payload string from forging a frame delimiter.')">
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Parameterization for AI agents:</strong> No closing backtick or fake XML tag inside a webpage or ComfyUI JSON can escape a binary length-prefixed frame.</span>
+        <span>PLATE IV &middot; H4 + E5 Verified</span>
+      </figcaption>
+    </figure>
+
+    <!-- INTERACTIVE LAB 2: CAUSAL TRUST MEMBRANE SIMULATOR -->
+    <figure class="fig-frame" id="fig-006">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_006</span>
+          <span class="fig-spec">[ INTERACTIVE LAB &middot; CAUSAL TAINT PROPAGATION &amp; TRUST GATE ]</span>
+        </div>
+        <span class="fig-meta">MIRRORS POST /v1/creative/trust/gate</span>
+      </div>
+      <div class="fig-body">
+        <div class="lab-grid-2">
+          <div class="lab-pane">
+            <div class="lab-pane-head"><strong>1. Select Causal Inputs &amp; Requested Action</strong><span>Bitwise Propagation</span></div>
+            <div style="margin-bottom:10px;color:var(--muted);font-size:0.7rem;">TOGGLE PARENT SPANS FEEDING THE DERIVED TOOL CALL:</div>
+            <div class="lab-controls" id="taintParents">
+              <button class="lab-btn good active" data-auth="0x01" type="button">SYS_POLICY (0x01)</button>
+              <button class="lab-btn good active" data-auth="0x02" type="button">VERIFIED_TOOL (0x02)</button>
+              <button class="lab-btn danger active" data-auth="0x04" type="button">EXTERNAL_COMFY_URL (0x04)</button>
+              <button class="lab-btn" data-auth="0x88" type="button">2-HOP LLM SUMMARY (0x88)</button>
+            </div>
+            <div style="margin-bottom:10px;color:var(--muted);font-size:0.7rem;">SELECT RUNTIME ACTION AT TOOL BOUNDARY:</div>
+            <div class="lab-controls" id="taintActions">
+              <button class="lab-btn active" data-act="shell_exec" type="button">shell_exec</button>
+              <button class="lab-btn" data-act="fs_write" type="button">fs_write</button>
+              <button class="lab-btn" data-act="cred_read" type="button">cred_read</button>
+              <button class="lab-btn" data-act="read_only" type="button">read_only</button>
+              <button class="lab-btn" data-act="override" type="button">shell_exec + owner_override</button>
+            </div>
+          </div>
+          <div class="lab-pane">
+            <div class="lab-pane-head"><strong>2. Live Trust Gate Verdict</strong><span id="gateHttpPill" class="pill block">HTTP 403</span></div>
+            <pre><code id="gateVerdictJson"></code></pre>
+          </div>
+        </div>
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Try toggling off EXTERNAL_COMFY_URL or enabling 2-HOP LLM SUMMARY:</strong> Sticky <code>BIT_TAINTED (0x80)</code> blocks both direct and laundered privileged actions unless read-only or explicitly overridden by the owner.</span>
+        <span>Verified in E2E.18 &amp; H4 (24/24 attacks blocked, 0 false positives)</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 05 -->
+  <section class="chapter" id="ch5">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 05 &middot; Measured Evidence &amp; Tradeoffs</span>
+        <h2 class="ch-title">Four Deterministic Workloads &amp; Where It Hurts</h2>
+      </div>
+      <span class="ch-badge">Benchmarked &middot; Honest Ledger</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p>
+          Architectural claims deserve receipts, not adjectives. Running our reference codec
+          (<a class="ink-link" href="ai-data-format-assets/bench_format.py">bench_format.py</a>) across four
+          canonical AI workloads&mdash;a 12-step mixed-trust agent trace (<code>W1</code>), a multimodal record with
+          a <code>1536d f32</code> embedding plus <code>64&times;64 i8</code> vision grid (<code>W2</code>), a
+          100-row retrieval table (<code>W3</code>), and a 40-claim epistemic DAG (<code>W4</code>)&mdash;exposes
+          both the decisive wins and the exact places where older formats still win
+          (<a class="fig-ref" href="#fig-007">FIG_007</a>).
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>Honest Miss #1: zstd Text</strong>
+        On zstd-3 compressed pure text (<code>W3</code>), minified JSON hits <code>1,323 B</code> vs
+        <code>2,257 B</code> for Cowrie Core. LZ77 loves repeated ASCII punctuation; binary varints raise local
+        entropy. For cold text-log archival, zstd+JSONL wins.
+      </aside>
+    </div>
+
+    <figure class="fig-frame" id="fig-007">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_007</span>
+          <span class="fig-spec">[ WORKLOADS W1&ndash;W4 &amp; SIX-AXIS CAPABILITY ATLAS ]</span>
+        </div>
+        <span class="fig-meta">bench_receipt.json &middot; PLATE V</span>
+      </div>
+      <div class="fig-body flush">
+        <img src="ai-data-format-assets/plate5_benchmarks.png" alt="Workloads W1-W4 benchmarks and capability atlas"
+             onclick="openLightbox(this.src, 'FIG_007 — Token and byte comparisons across W1–W4 alongside the 6-axis architectural capability atlas.')">
+      </div>
+      <div class="fig-body">
+        <div class="tbl-wrap">
+          <table class="manual-tbl">
+            <thead>
+              <tr>
+                <th>Workload</th>
+                <th class="num">JSON-min B</th>
+                <th class="num">Cowrie Core B</th>
+                <th class="num">zstd-3 (J / C)</th>
+                <th class="num">JSON tok</th>
+                <th class="num">R2 Lens tok</th>
+                <th class="num">R1 / R0 tok</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>W1 &middot; Agent Trace (12 steps)</strong></td><td class="num">2,880</td><td class="num"><strong>2,113</strong> (&minus;26.6%)</td><td class="num">749 / 858</td><td class="num">972</td><td class="num"><strong>733</strong> (&minus;24.6%)</td><td class="num">95 / <strong>25</strong></td></tr>
+              <tr><td><strong>W2 &middot; Multimodal (f32 + i8)</strong></td><td class="num">20,509</td><td class="num"><strong>11,008</strong> (&minus;46.3%)</td><td class="num">10,250 / 10,632</td><td class="num">10,024</td><td class="num"><strong>255</strong> (&minus;97.5%)</td><td class="num">164 / <strong>26</strong></td></tr>
+              <tr><td><strong>W3 &middot; Retrieval Table (100 rows)</strong></td><td class="num">19,789</td><td class="num"><strong>14,122</strong> (&minus;28.6%)</td><td class="num"><span class="pill warn">1,323 / 2,257</span></td><td class="num">5,863</td><td class="num"><strong>4,364</strong> (&minus;25.6%)</td><td class="num">51 / <strong>25</strong></td></tr>
+              <tr><td><strong>W4 &middot; Epistemic DAG (40 claims)</strong></td><td class="num">8,281</td><td class="num"><strong>5,155</strong> (&minus;37.7%)</td><td class="num">1,645 / 1,674</td><td class="num">3,221</td><td class="num"><strong>2,012</strong> (&minus;37.5%)</td><td class="num">66 / <strong>24</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Zero-copy decode bonus:</strong> Even pure-Python zero-copy decode on W2 ran in <code>20.1 &micro;s</code> vs <code>83.2 &micro;s</code> for C-compiled <code>json.loads()</code> (4.1&times; faster by skipping ASCII float &amp; base64 parsing).</span>
+        <span>All 4 passed bijective + key-shuffle + 64B alignment gates</span>
+      </figcaption>
+    </figure>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <div class="principle-box honest">
+          <span class="ptag">Hard Tradeoffs We Engineered Around</span>
+          <p>
+            <strong>1. No single-pass 40 GB canonical stream:</strong> sorting keys and hashing bottom-up requires bounded
+            frames streamed into an append-only WAL sealed on checkpoint. &nbsp;
+            <strong>2. Do not replace Parquet/Lance for petabyte columnar analytics:</strong> interoperate via
+            <code>TensorRef</code> manifests. &nbsp;
+            <strong>3. Non-tabular R2 expansion:</strong> on deeply nested heterogeneous DAGs or flat string arrays,
+            <code>R2</code> adds indentation overhead (+1.5%&ndash;6.9%)&mdash;use <code>R1</code> (&minus;82.7% to
+            &minus;98.6%) or <code>R0</code> (&minus;97.8% to &minus;99.8%) for discovery and <code>R2</code> on
+            structured inventories.
+          </p>
+        </div>
+      </div>
+      <aside class="sidenote">
+        <strong>Day-1 Adoption Wedges</strong>
+        Skip universal-standard decrees: Cowrie wins inside a single stack on Day 1 via (A) Agent trace ledgers,
+        (B) 16 KB local <code>StatePages</code>, and (C) Untrusted tool-output envelopes.
+      </aside>
+    </div>
+  </section>
+
+  <!-- CHAPTER 06 -->
+  <section class="chapter" id="ch6">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 06 &middot; Preregistered Silicon Verification</span>
+        <h2 class="ch-title">Live RTX 3090 Proofs: H1&ndash;H5, E1&ndash;E5, U1&ndash;U3</h2>
+      </div>
+      <span class="ch-badge">Frozen Preregistrations &middot; Zero Post-Hoc Moves</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p>
+          We froze three sequential preregistrations on host <code>omen</code> (RTX 3090, Rust 1.99, CUDA 13.1,
+          real <code>Qwen3.5-9B-Q4_K_M</code> 248K BPE + hybrid DeltaNet SSM/GQA, and a real <code>5.30 GB</code>
+          10,000,000-vector NVMe shard). Every round exposed concrete physical cliffs that directly hardened Cowrie v1.0.
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>What Real Qwen3.5 BPE Taught Us</strong>
+        Qwen3.5 splits every digit <code>0&ndash;9</code> individually (<code>\p{N}</code>), making raw JSON floats
+        even worse (<code>17,899</code> tok on W2 &rarr; <strong>&minus;98.7%</strong> R2 savings) and inspiring
+        compact <code>Alpha32</code> R0 handles (&minus;73.8% handle tokens).
+      </aside>
+    </div>
+
+    <div class="grid-2">
+      <figure class="fig-frame" id="fig-008" style="margin:18px 0;">
+        <div class="fig-bar">
+          <div class="fig-bar-left"><span class="fig-tag">FIG_008</span><span class="fig-spec">[ LAB H1&ndash;H5 &middot; SILICON &amp; REAL BPE ]</span></div>
+          <span class="fig-meta">PLATE VI</span>
+        </div>
+        <div class="fig-body flush">
+          <img src="ai-data-format-assets/plate6_lab_results.png" alt="Live lab results H1-H5"
+               onclick="openLightbox(this.src, 'FIG_008 — H1–H5 verification across Rust/Python codec parity, Qwen3.5 BPE, CUDA __dp4a 0.0359 ms warm search (3,767x vs SQLite), 24/24 taint defense, and 23.71 GB/s StatePage DMA.')">
+        </div>
+        <figcaption class="fig-cap">
+          <span><strong>H1&ndash;H5:</strong> Warm VRAM <code>__dp4a</code> 100k search hit <code>0.0359 ms</code> (<code>3,767&times;</code> vs SQLite); 16 MB <code>StatePage</code> DMA hit <code>0.71 ms</code> at <code>23.71 GB/s</code>.</span>
+        </figcaption>
+      </figure>
+
+      <figure class="fig-frame" id="fig-009" style="margin:18px 0;">
+        <div class="fig-bar">
+          <div class="fig-bar-left"><span class="fig-tag">FIG_009</span><span class="fig-spec">[ ADVERSARIAL E1&ndash;E5 &middot; CROSSOVER CURVES ]</span></div>
+          <span class="fig-meta">PLATE VII</span>
+        </div>
+        <div class="fig-body flush">
+          <img src="ai-data-format-assets/plate7_edge_curves.png" alt="Adversarial edge-case curves E1-E5"
+               onclick="openLightbox(this.src, 'FIG_009 — E1–E5 adversarial curves: SQLite B-tree beats cold full-shard GPU scan below 9% selectivity; Alpha32 R0 drops 73.8%; BIT_TAINTED closes multi-hop laundering.')">
+        </div>
+        <figcaption class="fig-cap">
+          <span><strong>Honest Miss #2 (&lt;9% Selectivity):</strong> Below 9% selectivity, SQLite B-trees (<code>0.32&ndash;2.81 ms</code>) beat cold full-shard GPU scans (<code>25.4 ms</code>), while warm VRAM scans 1M rows in <code>0.43 ms</code>.</span>
+        </figcaption>
+      </figure>
+    </div>
+
+    <figure class="fig-frame" id="fig-010">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_010</span>
+          <span class="fig-spec">[ LIVE MODEL &amp; 10M-VECTOR NVME PROOFS &middot; U1, U2, U3-v0.3 ]</span>
+        </div>
+        <span class="fig-meta">Qwen3.5-9B &middot; 13,800 TOK &middot; 5.30 GB NVMe &middot; PLATE VIII</span>
+      </div>
+      <div class="fig-body flush">
+        <img src="ai-data-format-assets/plate8_live_model_proofs.png" alt="Live local model and 10M-vector NVMe proofs U1-U3"
+             onclick="openLightbox(this.src, 'FIG_010 — U1: 24/24 paired Qwen3.5-9B parity at 1.93x–4.43x speedup; U2: 0.00 KL exact StatePage restore (and Q4_0 split-precision 180.2 MB at 24.1 ms warm / 136.7x); U3-v0.3: 7.07 ms cold O_DIRECT QD=16 10M-vector NVMe search.')">
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>U1:</strong> <code>24/24</code> parity vs JSON at <code>&minus;65.2%</code> tokens &amp; <code>1.93&times;&ndash;4.43&times;</code> GPU speedup. <strong>U2+SHA-NI:</strong> <code>13,800</code>-tok <code>Q4_0</code> KV + exact SSM shrinks <code>505.2 &rarr; 180.2 MB</code>, resuming in <code>66.4 ms</code> cold NVMe (<code>49.7&times;</code>) / <code>24.1 ms</code> warm mmap (<code>136.7&times;</code>) at <code>KL = 3.99e-4</code>. <strong>U3-v0.3:</strong> Co-located 16 KB <code>CWIV</code> + <code>O_DIRECT QD=16</code> searches <code>10M&times;512d</code> in <code>0.155 ms</code> VRAM and <code>7.07 ms</code> cold NVMe (<code>0.390%</code> of disk, <code>100%</code> Recall@20, <code>0</code> leaks).</span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 07 -->
+  <section class="chapter" id="ch7">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 07 &middot; Production Cross-Runtime Proof</span>
+        <h2 class="ch-title">Four Live Runtimes &amp; Eureka Creative v7</h2>
+      </div>
+      <span class="ch-badge">One 665 KB Rust Core &middot; 4 Engines Live</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p class="lead-para">
+          A format proves itself only when independent production runtimes link the exact same binary core.
+          Through one zero-dependency Rust C-ABI (<code>libcowrie_core.so</code>, <code>665 KB</code>, x86_64
+          <code>SHA-NI = 1.92 GiB/s</code> + parallel 4 MiB Merkle verification), Cowrie v1.0 now runs live across
+          <strong>four</strong> runtimes on RTX 3090:
+        </p>
+        <ul>
+          <li><strong>1. Eureka LLM Engine (<code>feat/cowrie</code>):</strong> Persisted and restored a <code>100.3 MB</code> (<code>K=2,688</code>) <code>Q8_0</code> hybrid <code>StatePage</code> across a cold process restart off NVMe in <strong><code>98.6 ms</code></strong> (<code>4.50&times;</code> E2E HTTP speedup; <code>68.0 ms</code> warm/tmpfs) while serving <code>/v1/memory/*</code> lenses and <code>403</code> causal taint blocks inside <code>llb-serve</code>.</li>
+          <li><strong>2. llama.cpp (<code>prism-llama.cpp</code>):</strong> Verified live <code>Q4_0</code> <code>StatePages</code> and live <code>llama-server</code> <code>R2</code> projection + causal taint blocking.</li>
+          <li><strong>3. vLLM 0.15.0 (<code>Qwen3ForCausalLM</code>):</strong> Cut prompt tokens <code>&minus;69.9%</code>, preserved prefix-cache hits under JSON key shuffle, and blocked 2-hop laundered <code>shell_exec</code> calls.</li>
+          <li><strong>4. Eureka Creative Engine v7 (<a class="ink-link" href="making-cowrie.html">Vol. II &rarr;</a>, commits <code>55d0cca</code> / <code>9e344166</code>):</strong> Proved Cowrie generalizes beyond LLMs into multimodal image, video, 3D, and ComfyUI node-graph synthesis via an optional zero-build-dep <code>dlopen</code> C11 bridge (<code>creative/ec_cowrie.c</code>, <code>-ldl</code> only). Explore all paired cold-restart gains &amp; live Director lenses in <a class="fig-ref" href="#fig-011">FIG_011</a>.</li>
+        </ul>
+      </div>
+      <aside class="sidenote">
+        <strong>Zero Build-Time Coupling</strong>
+        <code>eureka-creative-serve</code> links only <code>-ldl</code> and dynamically discovers
+        <code>libcowrie_core.so</code> at startup&mdash;keeping standalone C11/CUDA engine purity intact with
+        graceful fallback when the library is absent.
+      </aside>
+    </div>
+
+    <!-- INTERACTIVE LAB 3: CREATIVE V7 COLD-RESTART STATEPAGES + LIVE LENS EXPLORER -->
+    <figure class="fig-frame" id="fig-011">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">FIG_011</span>
+          <span class="fig-spec">[ INTERACTIVE LAB &middot; EUREKA CREATIVE v7 PAIRED COLD-RESTART &amp; LENSES ]</span>
+        </div>
+        <span class="fig-meta">RECEIPTS: c0-v7-cowrie &middot; c0-v7-e2e (18/18) &middot; c0-v7-supervisor</span>
+      </div>
+      <div class="fig-body">
+        <div class="lab-controls" id="v7ModeTabs">
+          <button class="lab-btn active" data-v7="statepages" type="button">A. Cold-Restart SHA-NI StatePages (4 Engines)</button>
+          <button class="lab-btn" data-v7="lenses" type="button">B. Live Director LLM Lenses (5 Targets &times; 3 Tiers)</button>
+          <button class="lab-btn" data-v7="trust" type="button">C. External ComfyUI Trust Membrane (0x84 &rarr; 403)</button>
+        </div>
+
+        <div id="v7PaneStatepages">
+          <div id="spBars"></div>
+          <div class="tbl-wrap" style="margin-top:14px;">
+            <table class="manual-tbl">
+              <thead>
+                <tr>
+                  <th>Runtime &amp; State Artifact</th>
+                  <th class="num">Cold Process 1</th>
+                  <th class="num">Cold-Restart Process 2</th>
+                  <th class="num">Speedup</th>
+                  <th>Contract &amp; Integrity Proof</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><strong>FLUX.2 Qwen3-4B</strong> (<code>7.86 MB</code> BF16)</td><td class="num">91,771 ms HDD<br>(~1,200 ms warm)</td><td class="num"><strong>5.9 ms</strong> (E2E)<br><strong>30.9 ms</strong> cold</td><td class="num"><span class="pill pass">~200&times;&ndash;2,970&times;</span></td><td>Skips streaming 8 GB weights on new seeds; bound to file SHA-256</td></tr>
+                <tr><td><strong>Wan 2.2 UMT5-XXL FP8</strong> (<code>2&times;4.19 MB</code>)</td><td class="num">3,230.8 ms</td><td class="num"><strong>21.3 ms</strong></td><td class="num"><span class="pill pass">151.7&times;</span></td><td>Both positive + negative 24L FP8 embeddings hydrated on seed <code>7010</code></td></tr>
+                <tr><td><strong>8-Node ComfyUI FLUX.2 DAG</strong> (Full Hit)</td><td class="num">98,704 ms (<code>8/8</code>)</td><td class="num"><strong>1.0&ndash;9.6 ms</strong> (<code>8/8</code>)</td><td class="num"><span class="pill pass">10,332&times;</span></td><td>0 RAM cache &rarr; <code>8/8</code> persistent <code>.state.cowrie</code> hits (<code>0</code> exec)</td></tr>
+                <tr><td><strong>Shuffled-Key Grade Tweak</strong> (Cold Restart)</td><td class="num">Full FLUX.2 rerun</td><td class="num"><strong>9.0&ndash;11.3 ms</strong> (<code>6/8</code>)</td><td class="num"><span class="pill blue">6/8 CACHED</span></td><td>Key-sorted SHA-256 <code>CoreHash</code> bypasses FLUX.2 <code>KSampler</code></td></tr>
+                <tr><td><strong>Qwen3.5-9B Hybrid SSM+KV</strong> (<code>13.8k</code> tok)</td><td class="num">3,459.5 ms</td><td class="num"><strong>24.1 ms</strong> warm<br><strong>66.4 ms</strong> cold NVMe</td><td class="num"><span class="pill pass">49.7&times;&ndash;136.7&times;</span></td><td><code>Q4_0</code> KV + exact SSM (<code>180.2 MB</code>), <code>KL=3.99e-4</code>, <code>33/33</code> tokens</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div id="v7PaneLenses" style="display:none;">
+          <div class="lab-controls" id="lensTierBtns">
+            <button class="lab-btn active" data-lt="r2" type="button">R2 Attention Lens</button>
+            <button class="lab-btn" data-lt="r1" type="button">R1 Structural Skeleton</button>
+            <button class="lab-btn" data-lt="r0" type="button">R0 Alpha32 Handle</button>
+            <button class="lab-btn" data-lt="cowr" type="button">Binary COWR Core</button>
+          </div>
+          <div id="lensBars"></div>
+          <p style="font-family:var(--mono);font-size:0.72rem;color:var(--muted);margin:10px 0 0;">
+            <strong>Honest Ledger:</strong> On structured object inventories (<code>vault</code>, <code>recipes</code>, <code>models</code>),
+            <code>R2</code> saves <strong>22.6%&ndash;30.4%</strong> while preserving 100% of prose prompts. On deeply nested heterogeneous
+            DAGs (<code>templates</code>, +1.5%) and flat string lists (<code>prompts</code>, +6.9%), pipe-table hoisting does not apply&mdash;use
+            <strong>R1 (&minus;82.7% to &minus;98.6%)</strong> or <strong>R0 (&minus;97.8% to &minus;99.8%, 28 B)</strong> instead.
+          </p>
+        </div>
+
+        <div id="v7PaneTrust" style="display:none;">
+          <div class="tbl-wrap">
+            <table class="manual-tbl">
+              <thead>
+                <tr><th>Live HTTP Proof (<code>c0-v7-cowrie-receipt.txt</code> &amp; <code>c0-v7-supervisor-receipt.txt</code>)</th><th>Input / Identifier</th><th class="num">HTTP</th><th>Verified Response</th></tr>
+              </thead>
+              <tbody>
+                <tr><td><code>POST /v1/flows/import?source=external_url</code></td><td>External ComfyUI JSON</td><td class="num"><span class="pill blue">200</span></td><td>Framed as <code>COWR 189/245 B</code>, CID <code>1220f03d9799...</code>, handle <code>@upmsud</code>, wire authority <code>0x84</code> (<code>tainted: true</code>)</td></tr>
+                <tr><td>Canonical URL Deduplication (JSON vs HTML)</td><td><code>/workflow.json</code> &amp; <code>/openart-page</code></td><td class="num"><span class="pill pass">1 CID</span></td><td>Identical workflows extracted from raw JSON &amp; HTML <code>__NEXT_DATA__</code> hash to the exact same 68-hex CID</td></tr>
+                <tr><td><code>POST /v1/creative/trust/gate</code> (<code>shell_exec</code>)</td><td><code>arg_ids: ["@upmsud"]</code></td><td class="num"><span class="pill block">403</span></td><td><code>ERR_TAINTED_EXECUTION_BLOCKED</code> (<code>code: 25</code>, <code>allowed: false</code>)</td></tr>
+                <tr><td><code>POST /v1/creative/trust/gate</code> (<code>fs_write</code>)</td><td><code>arg_ids: ["1220f03d..."]</code></td><td class="num"><span class="pill block">403</span></td><td><code>ERR_TAINTED_EXECUTION_BLOCKED</code> (blocked by full 68-hex CID too)</td></tr>
+                <tr><td><code>POST /v1/creative/trust/gate</code> (<code>read_only</code>)</td><td><code>arg_ids: ["@upmsud"]</code></td><td class="num"><span class="pill pass">200</span></td><td><code>allowed: true</code> (safe inspection/preview permitted)</td></tr>
+                <tr><td><code>POST /v1/creative/trust/gate</code> (<code>owner_override</code>)</td><td><code>owner_override: true</code></td><td class="num"><span class="pill pass">200</span></td><td><code>allowed: true</code> (explicit human confirmation unlocks action)</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <figcaption class="fig-cap">
+        <span><strong>Unit contract gate <code>G-C6</code>:</strong> <code>1 MB StatePage</code> saves in <code>0.83 ms</code>, verifies + loads in <code>0.52 ms</code>, and rejects swapped model weights with exact <code>ERR_MODEL_MISMATCH (-23)</code>.</span>
+        <span><a class="ink-link" href="../receipts/c0-v7-cowrie-receipt.txt">c0-v7-cowrie-receipt.txt</a> &middot; <a class="ink-link" href="../receipts/c0-v7-e2e-receipt.txt">c0-v7-e2e (18/18)</a></span>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- SUMMARY -->
+  <section class="summary-panel" id="summary">
+    <span class="ch-kicker">Closing Synthesis &middot; Volume I</span>
+    <h2>Summary</h2>
+    <p>
+      <strong>1. Tri-consumer physics broke single-audience formats.</strong> One AI artifact must simultaneously
+      serve an attention engine (paying per token), a GPU tensor bus (requiring 16 KB aligned contiguous slices),
+      and a cryptographic verifier (requiring bijective hashing and enforceable trust boundaries).
+    </p>
+    <p>
+      <strong>2. Core is physics, profiles are chemistry, lenses are optics.</strong> Cowrie pairs a frozen
+      bijective binary Core (<code>Plane A</code>) with a 16 KB aligned zero-copy Tensor, <code>StatePage</code>,
+      and Co-Located IVF Arena carrying Coordinate Contracts (<code>Plane C</code>), deterministic progressive
+      mipmaps <code>R0&ndash;R3</code> (<code>Plane B</code>), and a binary <code>BIT_TAINTED (0x80)</code> Trust
+      Membrane + RFC 6962 SHA-NI Merkle seal (<code>Plane D</code>).
+    </p>
+    <p>
+      <strong>3. Verified live across four production runtimes with honest bounds.</strong> Across 17 preregistered
+      and live runtime suites on RTX 3090&mdash;<strong>Eureka LLM</strong> (<code>98.6 ms</code> cold-restart
+      <code>Q8_0</code> state), <strong>Eureka Creative Engine v7</strong> (<code>151.7&times;</code> cold-restart
+      Wan 2.2 UMT5-XXL, <code>~200&times;&ndash;2,970&times;</code> FLUX.2 Qwen3-4B, <code>1.0&ndash;9.6 ms</code>
+      <code>8/8</code> cross-restart ComfyUI DAG, <code>403</code> external workflow taint gate, <code>&minus;97.5%</code>
+      R1 / <code>&minus;99.8%</code> R0 lenses), <strong>llama.cpp</strong>, and <strong>vLLM 0.15.0</strong>&mdash;all
+      running on one zero-dependency Rust core (<code>/home/omen/cowrie</code>, <code>libcowrie_core.so</code>),
+      while honestly documenting zstd pure-text, <code>&lt;9%</code> cold-selectivity, and non-tabular <code>R2</code>
+      boundaries.
+    </p>
+  </section>
+
+  <footer class="colophon">
+    <span>EUREKA FIELD MANUAL &middot; VOL. I (COWRIE v1.0) &middot; 2026-11-23</span>
+    <span>
+      <a href="making-cowrie.html">Next: Vol. II Creative Engine v7 &rarr;</a> &middot;
+      <a href="ai-data-format-assets/bench_format.py">bench_format.py</a> &middot;
+      <a href="../receipts/c0-v7-cowrie-receipt.txt">v7 Cowrie Receipt</a> &middot;
+      <a href="ai-data-format.md">Markdown</a>
+    </span>
+  </footer>
+</main>
+
+<div class="lightbox" id="lightbox" onclick="closeLightbox()" role="dialog" aria-modal="true">
+  <img id="lightboxImg" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" alt="">
+  <div class="cap" id="lightboxCap"></div>
+</div>
+
+<script>
+(function() {
+  // Paper / Blueprint Theme Toggle
+  const root = document.documentElement;
+  const themeBtn = document.getElementById("themeBtn");
+  function setTheme(t) {
+    root.setAttribute("data-theme", t);
+    themeBtn.textContent = t === "paper" ? "Blueprint Mode" : "Paper Mode";
+    try { localStorage.setItem("eureka-manual-theme", t); } catch (_) {}
+  }
+  themeBtn.addEventListener("click", () => setTheme(root.getAttribute("data-theme") === "paper" ? "blueprint" : "paper"));
+  try {
+    const saved = new URLSearchParams(location.search).get("theme") || localStorage.getItem("eureka-manual-theme");
+    if (saved === "paper" || saved === "blueprint") setTheme(saved);
+  } catch (_) {}
+
+  // Reading Progress + Inline FIG_XXX Pulse
+  window.addEventListener("scroll", () => {
+    const h = document.documentElement;
+    document.getElementById("progressBar").style.width = ((h.scrollTop / Math.max(1, h.scrollHeight - h.clientHeight)) * 100).toFixed(1) + "%";
+  }, { passive: true });
+  document.querySelectorAll(".fig-ref").forEach(a => {
+    a.addEventListener("click", () => {
+      const target = document.querySelector(a.getAttribute("href"));
+      if (target) {
+        target.classList.remove("pulse");
+        void target.offsetWidth;
+        target.classList.add("pulse");
+        setTimeout(() => target.classList.remove("pulse"), 1400);
+      }
+    });
+  });
+
+  // Lightbox
+  window.openLightbox = (src, cap) => {
+    document.getElementById("lightboxImg").src = src;
+    document.getElementById("lightboxCap").textContent = cap || "";
+    document.getElementById("lightbox").classList.add("open");
+  };
+  window.closeLightbox = () => document.getElementById("lightbox").classList.remove("open");
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
+
+  // =========================================================================
+  // FIG_003: Live Cowrie Frame Explorer
+  // =========================================================================
+  const VIEWS = {
+    r0: {
+      title: "R0 · Alpha32 Handle & Essence",
+      cost: "26 modeled tokens · 385.5× smaller than JSON",
+      reader: "CONSUMER: LLM ATTENTION TRIAGE (O(1) SCAN)",
+      defaultPlane: "mip",
+      code: `[TRUST: 0x02 VERIFIED_CORPUS · CID: 122088786e81ae6423f3]\n@cowr:88786e81ae64 type=multimodal trust=VERIFIED bytes=11008 tensors=2\n  title: "Zero-Copy Attention Storage Across Heterogeneous Memory Tiers"\n  sat_synopsis (attested, outside CoreHash):\n    "Evaluates aligned dual-plane container for CPU/LLM/GPU boundaries."`
+    },
+    r1: {
+      title: "R1 · Deterministic Structural Atlas (0 GPU cost)",
+      cost: "164 modeled tokens · 61.1× smaller than JSON",
+      reader: "CONSUMER: LLM SELECTIVE NAVIGATION (O(log N))",
+      defaultPlane: "sym",
+      code: `schema: cowrie.multimodal.v1\ndoc_id: paper_2026_attention_io\nauthority: VERIFIED_CORPUS (0x02 · observed_exact)\ntitle: str[61B] "Zero-Copy Attention Storage..."   @off:0x0118\nabstract: str[227B] "Modern inference engines..."  @off:0x0158\ncitations: Table[3](id, score, span, year)         @off:0x0240\nembedding: Tensor<f32>[1536] (6,144B)              @arena:0x0300\n  space: nomic-embed-v2@sha256:44e1a0:cos:l2\nvision_latents: Tensor<i8>[64, 64] (4,096B)        @arena:0x1B00\n  space: siglip2-patch14@sha256:88c2f1:q8`
+    },
+    r2: {
+      title: "R2 · Attention Lens (lossless symbols, zero float pollution)",
+      cost: "255 modeled tokens · −97.5% vs minified JSON",
+      reader: "CONSUMER: LLM DEEP REASONING (CID-FENCED)",
+      defaultPlane: "mip",
+      code: `=== COWRIE LENS R2 · AUTH=0x02 VERIFIED · CID=88786e81ae64 ===\ndoc_id: paper_2026_attention_io\ntitle: Zero-Copy Attention Storage Across Heterogeneous Memory Tiers\n\ncitations[3]{id, score, span, year}:\n  ref_01 | 0.94 | 120..448   | 2024\n  ref_02 | 0.89 | 910..1180  | 2025\n  ref_03 | 0.97 | 1420..1890 | 2026\n\nembedding:      <Tensor f32[1536]  @nomic-embed-v2:44e1a0 · 6,144B>\nvision_latents: <Tensor i8[64, 64] @siglip2-patch14:88c2f1 · 4,096B>\n=== END SEALED SPAN 88786e81ae64 =============================`
+    },
+    r3: {
+      title: "R3 · Canonical Binary Core + Aligned GPU Arena",
+      cost: "11,008 B exact · 20.1 µs zero-copy decode (4.1× vs C JSON)",
+      reader: "CONSUMER: GPU DMA + STRICT CPU VERIFIER",
+      defaultPlane: "arena",
+      code: `[0x0000..0x003F] 43 57 52 46 ...  "CWRF" header (64B cache line)\n[0x0040..0x02BF] sorted key dict (12 keys) + canonical value tree\n[0x02C0..0x02FF] 00 × 64          strict zero pad -> aligned arena\n[0x0300..0x1AFF] <f32[1536] LE>   6,144 B -> mmap + 0x0300 (0 copies)\n[0x1B00..0x2AFF] <i8[64,64] raw>  4,096 B -> mmap + 0x1B00 (0 copies)\n[EOF-12..EOF]    u64 footer_off || "CWRF"  (O(1) seek-from-end)`
+    },
+    json: {
+      title: "Baseline · Standard Minified JSON",
+      cost: "20,509 B · 10,024 modeled tokens · 83.2 µs C json.loads()",
+      reader: "LEGACY: SINGLE FLAT TEXT STREAM",
+      defaultPlane: "hdr",
+      code: `{"schema":"cowrie.multimodal.v1","authority":"VERIFIED_CORPUS",\n "embedding":[-0.014821,0.039104,-0.022918,0.004192,...\n   ... 1,531 more ASCII floats burning ~8,400 tokens ...],\n "vision_latents_b64":"r/8DAx8s9Q1+4P/2kL8mN..."}\n\n// 4 STRUCTURAL FAILURES:\n// 1. Key order arbitrary -> two encoders emit two SHA-256 hashes.\n// 2. Raw floats pollute 97.5% of context window.\n// 3. GPU must parse ASCII + base64 + memcpy into aligned buffer.\n// 4. "authority" is just an unverified user string.`
+    }
+  };
+
+  const PLANES = {
+    hdr:   { title: "64-Byte Cache-Line Header", tag: "0x0000..0x003F", metrics: "Size: <b>64 B</b> · Parse: <b>1 struct unpack</b> · Alloc: <b>0</b>",
+             kv: [["Purpose","O(1) magic, authority bitmask, plane offsets, and core multihash."],["Strict Rule","<code>flags</code> &amp; <code>reserved</code> must be <code>0x00</code>; unknown versions reject with <code>ERR_UNSUPPORTED_VER</code>."]] },
+    sym:   { title: "Plane A · Canonical Symbolic Core", tag: "0x0040..0x02BF", metrics: "Size: <b>640 B</b> · Dict: <b>12 sorted keys</b> · Key-shuffle: <b>BIT-IDENTICAL</b>",
+             kv: [["Bijective Rules","UTF-8 sorted dict, minimal varints, <code>-0.0 &rarr; +0.0</code>, single quiet NaN."],["Tensor Links","Stores tiny Coordinate Contract <code>(model_sha:metric:norm)</code>; raw payload sits in Plane C."]] },
+    mip:   { title: "Plane B · Semantic Mipmaps", tag: "R0 / R1 / R2", metrics: "R0: <b>26 tok</b> · R1: <b>164 tok</b> · R2: <b>255 tok</b> (vs 10,024 JSON)",
+             kv: [["Core Firewall","<code>R1</code> &amp; <code>R2</code> are 100% deterministic; learned <code>R0</code> synopses sit outside <code>CoreHash</code>."],["Zoom Strategy","Triage thousands of records at R0 before opening R1/R2."]] },
+    pad:   { title: "Zero-Filled Alignment Barrier", tag: "0x02C0..0x02FF", metrics: "Alignment: <b>64 B / 16,384 B</b> · Value: <b>0x00 strictly</b>",
+             kv: [["Purpose","Aligns Plane C directly onto cache-line / NVMe / Apple Silicon page boundaries."],["Security","Any non-zero pad byte triggers <code>ERR_NON_ZERO_PAD</code>."]] },
+    arena: { title: "Plane C · Zero-Copy Tensor Arena", tag: "0x0300..0x2AFF", metrics: "Arena: <b>10,240 B</b> · Copies: <b>0</b> · mmap pointer aligned",
+             kv: [["Zero-Copy","<code>mmap(fd) + 0x0300</code> hands an aligned pointer directly to CUDA / Metal / SIMD."],["StatePages","Holds hybrid LLM SSM+KV or Creative diffusion conditioning bound to <code>model_sha</code>."]] },
+    foot:  { title: "Plane D · Trust Membrane & Merkle Seal", tag: "EOF − 12B", metrics: "Seek: <b>O(1)</b> · Merkle: <b>RFC 6962 SHA-NI (1.92 GiB/s)</b>",
+             kv: [["Trust Bitfield","Out-of-band 1-byte origin (<code>0x01</code>/<code>0x02</code>/<code>0x04</code>/<code>0x08</code>) + sticky <code>0x80</code> taint."],["Localization","Isolates corrupt 4 MiB chunks without parsing payload."]] }
+  };
+
+  function renderPlane(k) {
+    const p = PLANES[k];
+    document.getElementById("planeTitle").textContent = p.title;
+    document.getElementById("planeTag").textContent = p.tag;
+    document.getElementById("planeDetails").innerHTML = p.kv.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("");
+    document.getElementById("planeMetrics").innerHTML = p.metrics;
+    document.querySelectorAll("#byteStrip .bseg").forEach(b => b.classList.toggle("selected", b.dataset.plane === k));
+  }
+  function renderView(k) {
+    const v = VIEWS[k];
+    document.getElementById("viewTitle").textContent = v.title;
+    document.getElementById("viewCost").textContent = v.cost;
+    document.getElementById("activeReaderBadge").textContent = v.reader;
+    document.getElementById("viewCode").textContent = v.code;
+    document.querySelectorAll("#fig-003 .lab-btn").forEach(b => b.classList.toggle("active", b.dataset.view === k));
+    renderPlane(v.defaultPlane);
+  }
+  document.querySelectorAll("#fig-003 .lab-btn").forEach(b => b.addEventListener("click", () => renderView(b.dataset.view)));
+  document.querySelectorAll("#byteStrip .bseg").forEach(b => b.addEventListener("click", () => renderPlane(b.dataset.plane)));
+  renderView("r0");
+
+  // =========================================================================
+  // FIG_006: Interactive Causal Trust Membrane Simulator
+  // =========================================================================
+  const selectedAuths = new Set(["0x01", "0x02", "0x04"]);
+  let selectedAction = "shell_exec";
+  function updateGateSim() {
+    const vals = [...selectedAuths].map(x => parseInt(x, 16));
+    const anyTainted = vals.some(a => (a & 0x84) !== 0);
+    const eff = 0x02 | (anyTainted ? 0x80 : 0x00) | (vals.includes(0x04) ? 0x04 : 0x00);
+    const isOverride = selectedAction === "override";
+    const actName = isOverride ? "shell_exec" : selectedAction;
+    const isReadOnly = actName === "read_only";
+    const blocked = anyTainted && !isReadOnly && !isOverride;
+
+    const pill = document.getElementById("gateHttpPill");
+    pill.textContent = blocked ? "HTTP 403 BLOCKED" : "HTTP 200 ALLOWED";
+    pill.className = "pill " + (blocked ? "block" : "pass");
+
+    const payload = blocked ? {
+      ok: false, allowed: false, error: "ERR_TAINTED_EXECUTION_BLOCKED", code: 25,
+      action: actName, effective_authority: "0x" + eff.toString(16).padStart(2, "0"),
+      tainted: true, owner_override_required: true,
+      parents_checked: [...selectedAuths]
+    } : {
+      ok: true, allowed: true, action: actName,
+      effective_authority: "0x" + eff.toString(16).padStart(2, "0"),
+      tainted: anyTainted, read_only: isReadOnly, owner_override: isOverride,
+      parents_checked: [...selectedAuths]
+    };
+    document.getElementById("gateVerdictJson").textContent = JSON.stringify(payload, null, 2);
+  }
+  document.querySelectorAll("#taintParents .lab-btn").forEach(b => {
+    b.addEventListener("click", () => {
+      const k = b.dataset.auth;
+      if (selectedAuths.has(k)) { selectedAuths.delete(k); b.classList.remove("active"); }
+      else { selectedAuths.add(k); b.classList.add("active"); }
+      updateGateSim();
+    });
+  });
+  document.querySelectorAll("#taintActions .lab-btn").forEach(b => {
+    b.addEventListener("click", () => {
+      selectedAction = b.dataset.act;
+      document.querySelectorAll("#taintActions .lab-btn").forEach(x => x.classList.toggle("active", x === b));
+      updateGateSim();
+    });
+  });
+  updateGateSim();
+
+  // =========================================================================
+  // FIG_011: Creative v7 Cold-Restart StatePages & Live Director Lenses
+  // =========================================================================
+  const SP_DATA = [
+    { name: "8-Node ComfyUI FLUX.2 + ColorGrade DAG (Cold Restart)", cold: 98704, warm: 9.6, badge: "8/8 HITS · 9.6 ms (1.0 ms warm)" },
+    { name: "FLUX.2-klein-4B Qwen3-4B (7.86 MB BF16, Cold HDD → SP)", cold: 91771, warm: 30.9, badge: "2,970× vs HDD · 5.9 ms E2E" },
+    { name: "Wan 2.2 TI2V-5B UMT5-XXL FP8 (2×4.19 MB pos+neg)", cold: 3230.8, warm: 21.3, badge: "151.7× FASTER ACROSS RESTART" },
+    { name: "Qwen3.5-9B Hybrid SSM+KV (13,800 tok, Q4_0 StatePage)", cold: 3459.5, warm: 24.1, badge: "136.7× WARM / 49.7× COLD NVMe" }
+  ];
+  document.getElementById("spBars").innerHTML = SP_DATA.map(d => {
+    const pct = Math.max(2.2, (d.warm / d.cold) * 100);
+    return `<div class="bar-row">
+      <div class="bar-head"><strong>${d.name}</strong><span class="pill pass">${d.badge}</span></div>
+      <div class="bar-track"><div class="bar-fill base" style="width:100%">Cold Process 1: ${d.cold >= 10000 ? (d.cold/1000).toFixed(1)+" s" : d.cold.toFixed(1)+" ms"}</div></div>
+      <div class="bar-track"><div class="bar-fill win" style="width:${pct.toFixed(2)}%"></div><span class="bar-out" style="left:${pct.toFixed(2)}%">Cold-Restart SHA-NI StatePage: ${d.warm.toFixed(1)} ms</span></div>
+    </div>`;
+  }).join("");
+
+  const LENS_DATA = [
+    { name: "vault (6 drives · 20 ckpts · live JSON)", raw: 12525, cowr: 9216, r2: 9147, r1: 313, r0: 28 },
+    { name: "recipes (12 multi-sentence photoreal recipes)", raw: 6964, cowr: 5531, r2: 5392, r1: 199, r0: 28 },
+    { name: "templates (5 nested ComfyUI DAG templates)", raw: 5658, cowr: 3916, r2: 5742, r1: 80, r0: 28 },
+    { name: "prompts (7 optical camera & lighting lists)", raw: 1269, cowr: 1234, r2: 1357, r1: 219, r0: 28 },
+    { name: "models (5-arch HF safetensors registry)", raw: 888, cowr: 507, r2: 618, r1: 216, r0: 28 }
+  ];
+  function renderLensBars(tier) {
+    document.getElementById("lensBars").innerHTML = LENS_DATA.map(d => {
+      const val = d[tier];
+      const delta = ((val - d.raw) / d.raw) * 100;
+      const pct = Math.min(100, Math.max(2, (val / Math.max(d.raw, val)) * 100));
+      const isWin = val < d.raw;
+      const lbl = (delta <= 0 ? delta.toFixed(1) : "+" + delta.toFixed(1)) + "%";
+      return `<div class="bar-row">
+        <div class="bar-head"><strong>${d.name}</strong><span class="pill ${isWin ? "pass" : "warn"}">${val.toLocaleString()} B (${lbl})</span></div>
+        <div class="bar-track"><div class="bar-fill base" style="width:100%">Raw JSON: ${d.raw.toLocaleString()} B</div></div>
+        <div class="bar-track"><div class="bar-fill ${isWin ? "fast" : "base"}" style="width:${pct.toFixed(1)}%">${pct > 28 ? tier.toUpperCase()+": "+val.toLocaleString()+" B" : ""}</div>${pct <= 28 ? `<span class="bar-out" style="left:${pct.toFixed(1)}%">${tier.toUpperCase()}: ${val.toLocaleString()} B (${lbl})</span>` : ""}</div>
+      </div>`;
+    }).join("");
+  }
+  document.querySelectorAll("#lensTierBtns .lab-btn").forEach(b => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll("#lensTierBtns .lab-btn").forEach(x => x.classList.toggle("active", x === b));
+      renderLensBars(b.dataset.lt);
+    });
+  });
+  renderLensBars("r2");
+
+  document.querySelectorAll("#v7ModeTabs .lab-btn").forEach(b => {
+    b.addEventListener("click", () => {
+      const m = b.dataset.v7;
+      document.querySelectorAll("#v7ModeTabs .lab-btn").forEach(x => x.classList.toggle("active", x === b));
+      document.getElementById("v7PaneStatepages").style.display = m === "statepages" ? "block" : "none";
+      document.getElementById("v7PaneLenses").style.display     = m === "lenses"     ? "block" : "none";
+      document.getElementById("v7PaneTrust").style.display      = m === "trust"      ? "block" : "none";
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+===========================================================================
+Eureka Creative Engine v7 — Paired Cowrie v2 SHA-NI Receipt Benchmark
+===========================================================================
+Process 1 (COLD) ready on :40731 | engine=eureka-creative-native-v7 | cowrie_enabled=True shani=True
+
+[Part 1] Live Director LLM Lenses (/v1/creative/lens)
+  Target          Raw B   COWR B      R2 B (red%)      R1 B (red%)      R0 B (red%)
+  vault           12525     9216   9147 (-27.0%)    313 (-97.5%)     28 (-99.8%)
+  recipes          6964     5531   5392 (-22.6%)    199 (-97.1%)     28 (-99.6%)
+  models            888      507    618 (-30.4%)    216 (-75.7%)     28 (-96.8%)
+  templates        5658     3916   5742 (--1.5%)     80 (-98.6%)     28 (-99.5%)
+  prompts          1269     1234   1357 (--6.9%)    219 (-82.7%)     28 (-97.8%)
+
+[Process 1 Cold Saves] sp_saves=12 sp_hits=0
+[Disk Persistence] 12 .state.cowrie files (23.31 MiB) persisted across process exit
+
+[Part 2] Paired Cold Process 1 vs Cold-Restart Process 2 SHA-NI StatePage Gains
+  FLUX.2 Qwen3-4B (7.86 MB):      cold=91771.0 ms -> restart_SP=30.90 ms  (2969.9x faster!)
+  Wan 2.2 UMT5-XXL FP8 (2x4.19M): cold=3230.8 ms -> restart_SP=21.30 ms  (151.7x faster!)
+  8-Node ComfyUI FLUX.2 DAG:      cold=98704.1 ms (8/8) -> restart_SP=9.6 ms (hits=8/8, exec=0)  (10332x faster!)
+  Shuffled-Key Grade Tweak:       11.3 ms (hits=6/8, exec=2)
+  Process 2 Telemetry:            sp_hits=11 sp_mismatches=0 trust_entries=1
+
+[Part 3] Structural Trust Membrane Proof (UNTRUSTED_EXT=0x04 -> BIT_TAINTED=0x80)
+  External Workflow CID:   1220f03d9799ebcbd83affc3... handle=@upmsud auth=0x84 tainted=True COWR=189/245B
+  shell_exec (by handle):  HTTP 403 error=ERR_TAINTED_EXECUTION_BLOCKED allowed=False
+  fs_write   (by CID):     HTTP 403 error=ERR_TAINTED_EXECUTION_BLOCKED allowed=False
+  read_only  (by handle):  HTTP 200 allowed=True
+  shell_exec (override):   HTTP 200 allowed=True
+===========================================================================
+PAIRED COWRIE v2 CREATIVE v7 BENCHMARK COMPLETE
+===========================================================================

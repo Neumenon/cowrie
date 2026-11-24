@@ -1,0 +1,171 @@
+{
+  "generated_at": "2026-11-23",
+  "method": {
+    "bytes": "exact UTF-8 / binary frame length in Python 3",
+    "compression": "zstandard level 3",
+    "tokens": "deterministic cl100k-style regex pre-tokenizer + subword length proxy (modeled_bpe_tokens, not OpenAI API billing)",
+    "canonical_checks": "bijective re-encode equality, reversed key order bit-identity, 64-byte aligned memoryview zero-copy check"
+  },
+  "workloads": [
+    {
+      "id": "W1_agent_trace",
+      "label": "Agent Execution Trace (12 steps)",
+      "bytes": {
+        "json_pretty": 3792,
+        "json_minified": 2880,
+        "tessera_core": 2113,
+        "json_zstd3": 749,
+        "tessera_zstd3": 858
+      },
+      "modeled_bpe_tokens": {
+        "json_pretty": 1459,
+        "json_minified": 972,
+        "tessera_r2_lens": 733,
+        "tessera_r1_skeleton": 95,
+        "tessera_r0_handle": 25
+      },
+      "python_decode_us": {
+        "json_stdlib_c": 11.2,
+        "tessera_pure_py_ref": 53.4
+      },
+      "verification": {
+        "bijective_roundtrip": true,
+        "key_shuffle_bit_identical": true,
+        "tensor_count": 0,
+        "all_tensors_64b_aligned": true,
+        "core_sha256_prefix": "d3d5d82cac553db4"
+      },
+      "samples": {
+        "r0": "@tsra:d3d5d82cac55 type=trace trust=MIXED bytes=2113 tensors=0",
+        "r1_preview": "model: qwen3.5-9b-q4km@sha256:9a4f1c8e\npolicy_hash: 1220a8b4e91c7d32\nschema: tessera.trace.v1\nsession_id: ses_2026_11_23_alpha\nsteps: Table[12](authority,confidence,hash,latency_ms,status,step,summary,tool)",
+        "r2_preview": "model: qwen3.5-9b-q4km@sha256:9a4f1c8e\npolicy_hash: 1220a8b4e91c7d32\nschema: tessera.trace.v1\nsession_id: ses_2026_11_23_alpha\nsteps[12]{authority,confidence,hash,latency_ms,status,step,summary,tool}:\n  UNTRUSTED_EXT | 0.84 | 4a0b5f63cc74b8b7 | 14 | ok | 1 | Executed web.fetch on shard_00; matched 3 candidate spans with provenance digest. | web.fetch\n  VERIFIED_TOOL | 0.87 | fec07dd14ac0d78f | 33 | ok | 2 | Executed "
+      },
+      "ratios": {
+        "r2_vs_json_pretty_token_reduction_pct": 49.8,
+        "r2_vs_json_mini_token_reduction_pct": 24.6,
+        "r0_vs_json_mini_compression_x": 38.9,
+        "binary_vs_json_mini_byte_reduction_pct": 26.6
+      }
+    },
+    {
+      "id": "W2_multimodal",
+      "label": "Multimodal Record (1536d f32 + 64x64 i8)",
+      "bytes": {
+        "json_pretty": 28354,
+        "json_minified": 20509,
+        "tessera_core": 11008,
+        "json_zstd3": 10250,
+        "tessera_zstd3": 10632
+      },
+      "modeled_bpe_tokens": {
+        "json_pretty": 12382,
+        "json_minified": 10024,
+        "tessera_r2_lens": 255,
+        "tessera_r1_skeleton": 164,
+        "tessera_r0_handle": 26
+      },
+      "python_decode_us": {
+        "json_stdlib_c": 83.2,
+        "tessera_pure_py_ref": 20.1
+      },
+      "verification": {
+        "bijective_roundtrip": true,
+        "key_shuffle_bit_identical": true,
+        "tensor_count": 2,
+        "all_tensors_64b_aligned": true,
+        "core_sha256_prefix": "88786e81ae6423f3"
+      },
+      "samples": {
+        "r0": "@tsra:88786e81ae64 type=multimodal trust=VERIFIED bytes=11008 tensors=2",
+        "r1_preview": "abstract: str[227B] \"Modern inference engines stall on se...\"\nauthority: VERIFIED_CORPUS\ncitations: Table[3](id,score,span,year)\ndoc_id: paper_2026_attention_io\nembedding: Tensor<f32>[1536] @nomic-embed-v2@sha256:44e1a0:cos:l2 (6144B)\nschema: tessera.multimodal.v1\ntitle: str[61B] \"Zero-Copy Attention Storage Across H...\"\nvision_latents: Tensor<i8>[64, 64] @siglip2-patch14@sha256:88c2f1:q8 (4096B)",
+        "r2_preview": "abstract: Modern inference engines stall on serialization boundaries between CPU orchestration, context-window token assembly, and GPU HBM tensor feeds. We evaluate a canonical aligned container with deterministic resolution projections.\nauthority: VERIFIED_CORPUS\ncitations[3]{id,score,span,year}:\n  ref_01 | 0.94 | 120..448 | 2024\n  ref_02 | 0.89 | 910..1180 | 2025\n  ref_03 | 0.97 | 1420..1890 | 2026\ndoc_id: paper_20"
+      },
+      "ratios": {
+        "r2_vs_json_pretty_token_reduction_pct": 97.9,
+        "r2_vs_json_mini_token_reduction_pct": 97.5,
+        "r0_vs_json_mini_compression_x": 385.5,
+        "binary_vs_json_mini_byte_reduction_pct": 46.3
+      }
+    },
+    {
+      "id": "W3_retrieval_100",
+      "label": "Retrieval Result Table (100 rows)",
+      "bytes": {
+        "json_pretty": 26409,
+        "json_minified": 19789,
+        "tessera_core": 14122,
+        "json_zstd3": 1323,
+        "tessera_zstd3": 2257
+      },
+      "modeled_bpe_tokens": {
+        "json_pretty": 9276,
+        "json_minified": 5863,
+        "tessera_r2_lens": 4364,
+        "tessera_r1_skeleton": 51,
+        "tessera_r0_handle": 25
+      },
+      "python_decode_us": {
+        "json_stdlib_c": 61.7,
+        "tessera_pure_py_ref": 330.9
+      },
+      "verification": {
+        "bijective_roundtrip": true,
+        "key_shuffle_bit_identical": true,
+        "tensor_count": 0,
+        "all_tensors_64b_aligned": true,
+        "core_sha256_prefix": "29d7ed481d654b67"
+      },
+      "samples": {
+        "r0": "@tsra:29d7ed481d65 type=retrieval trust=MIXED bytes=14122 tensors=0",
+        "r1_preview": "hits: Table[100](doc_id,domain,excerpt,rank,score,tokens,trust)\nk: 100\nquery: zero-copy tensor serialization benchmarks\nschema: tessera.retrieval.v1",
+        "r2_preview": "hits[100]{doc_id,domain,excerpt,rank,score,tokens,trust}:\n  doc_0000 | systems | Finding 1: aligned block transfer eliminates copy overhead across PCIe Gen4 lanes. | 1 | 0.99 | 180 | verified\n  doc_0001 | compilers | Finding 2: aligned block transfer eliminates copy overhead across PCIe Gen4 lanes. | 2 | 0.9858 | 217 | verified\n  doc_0002 | storage | Finding 3: aligned block transfer eliminates copy overhead across P"
+      },
+      "ratios": {
+        "r2_vs_json_pretty_token_reduction_pct": 53.0,
+        "r2_vs_json_mini_token_reduction_pct": 25.6,
+        "r0_vs_json_mini_compression_x": 234.5,
+        "binary_vs_json_mini_byte_reduction_pct": 28.6
+      }
+    },
+    {
+      "id": "W4_epistemic_dag",
+      "label": "Epistemic Lineage Graph (40 claims)",
+      "bytes": {
+        "json_pretty": 11581,
+        "json_minified": 8281,
+        "tessera_core": 5155,
+        "json_zstd3": 1645,
+        "tessera_zstd3": 1674
+      },
+      "modeled_bpe_tokens": {
+        "json_pretty": 4996,
+        "json_minified": 3221,
+        "tessera_r2_lens": 2012,
+        "tessera_r1_skeleton": 66,
+        "tessera_r0_handle": 24
+      },
+      "python_decode_us": {
+        "json_stdlib_c": 31.0,
+        "tessera_pure_py_ref": 173.0
+      },
+      "verification": {
+        "bijective_roundtrip": true,
+        "key_shuffle_bit_identical": true,
+        "tensor_count": 0,
+        "all_tensors_64b_aligned": true,
+        "core_sha256_prefix": "774d40936043ca87"
+      },
+      "samples": {
+        "r0": "@tsra:774d40936043 type=epistemic trust=VERIFIED bytes=5155 tensors=0",
+        "r1_preview": "claims: Table[40](ci_high,ci_low,claim_id,epistemic,evidence_cid,predicate,span,subject,value)\ngraph_epoch: 20261123\nschema: tessera.epistemic.v1\nverifier: bendtt-v2.0.35",
+        "r2_preview": "claims[40]{ci_high,ci_low,claim_id,epistemic,evidence_cid,predicate,span,subject,value}:\n  44.0 | 41.0 | clm_000 | observed_exact | d273ca51bdbcf60f | throughput_tps | 0..96 | engine_gate_0 | 42.5\n  46.15 | 43.15 | clm_001 | observed_exact | e8bd59a71e7e467b | throughput_tps | 128..224 | engine_gate_1 | 44.65\n  48.3 | 45.3 | clm_002 | inferred_prob | dc12c3266d9e7642 | throughput_tps | 256..352 | engine_gate_2 | 46.8"
+      },
+      "ratios": {
+        "r2_vs_json_pretty_token_reduction_pct": 59.7,
+        "r2_vs_json_mini_token_reduction_pct": 37.5,
+        "r0_vs_json_mini_compression_x": 134.2,
+        "binary_vs_json_mini_byte_reduction_pct": 37.7
+      }
+    }
+  ]
+}
