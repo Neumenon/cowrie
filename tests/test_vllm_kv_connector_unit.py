@@ -281,9 +281,9 @@ class _FakeForwardCtx:
     virtual_engine: int = 0
 
 
-def _make_vllm_config(state_dir: Path, max_inflight_bytes: int = 64 * 1024 * 1024):
+def _make_vllm_config(state_dir: Path, max_inflight_bytes: int = 64 * 1024 * 1024, block_size: int = 16):
     return types.SimpleNamespace(
-        cache_config=types.SimpleNamespace(block_size=16, cache_dtype="auto"),
+        cache_config=types.SimpleNamespace(block_size=block_size, cache_dtype="auto"),
         model_config=types.SimpleNamespace(model="Qwen/Qwen3.8-27B-FP8", dtype="auto"),
         parallel_config=types.SimpleNamespace(tensor_parallel_size=1, pipeline_parallel_size=1),
         kv_transfer_config=types.SimpleNamespace(
@@ -487,7 +487,99 @@ def main() -> int:
         )
         print("PASS 3: FlashInfer (blocks, 2, ...) store/restore bit-exact parity, counters & tamper rejection")
 
-        # 4. Inflight byte-cap skip accounting (prevents silent skips!)
+        # 4. vLLM 0.34 MLA: 3-D squeezed save (B, 64, 576) -> 4-D non-contiguous load (B, 1, 64, 576),
+        #    dict attn_metadata, and CachedRequestData WITHOUT resumed_req_ids!
+        with tempfile.TemporaryDirectory(prefix="cowrie_vllm_mla034_") as td:
+            rng = np.random.default_rng(20261128)
+            n_layers, num_blocks, block_size, kv_dim = 3, 6, 64, 576
+            prompt_tokens = list(range(10, 10 + 135))  # aligned = 128 tokens = 2 blocks of 64
+            store_blocks = [1, 4]
+            restore_blocks = [2, 5]
+            cfg_mla = _make_vllm_config(Path(td), block_size=block_size)
+
+            class MLACommonMetadata:
+                pass
+
+            sched_m1 = resolved(cfg_mla, KVConnectorRole.SCHEDULER)
+            work_m1 = resolved(cfg_mla, KVConnectorRole.WORKER)
+            req_m1 = _FakeReq("mla-1", prompt_tokens)
+            assert sched_m1.get_num_new_matched_tokens(req_m1, 0) == (0, False)
+            sched_m1.update_state_after_alloc(req_m1, None, 0)
+            meta_m1 = sched_m1.build_connector_meta(
+                _FakeSchedOut(
+                    scheduled_new_reqs=[_FakeNewReq("mla-1", prompt_tokens, (store_blocks,))],
+                    num_scheduled_tokens={"mla-1": len(prompt_tokens)},
+                )
+            )
+            # Allocate backing buffer with interleaved layer-block layout (non-contiguous per-layer view!)
+            backing_src = rng.standard_normal((num_blocks, n_layers, 1, block_size, kv_dim)).astype(np.float16)
+            kv_reg_src = {f"layer_{i:02d}": _FakeTensor(backing_src[:, i, :, :, :]) for i in range(n_layers)}
+            work_m1.register_kv_caches(kv_reg_src)
+            work_m1.bind_connector_metadata(meta_m1)
+            # save_kv_layer receives squeezed 3-D view (B, 64, 576), matching MLAAttention.bind_kv_cache!
+            for i in range(n_layers):
+                squeezed = _FakeTensor(backing_src[:, i, 0, :, :])
+                work_m1.save_kv_layer(f"layer_{i:02d}", squeezed, MLACommonMetadata())
+            work_m1.wait_for_save()
+            sched_m1.request_finished_all_groups(req_m1, (store_blocks,))
+            work_m1.shutdown()
+            sched_m1.shutdown()
+
+            reset_connector_stats(Path(td))
+            sched_m2 = resolved(cfg_mla, KVConnectorRole.SCHEDULER)
+            work_m2 = resolved(cfg_mla, KVConnectorRole.WORKER)
+            req_m2 = _FakeReq("mla-2", prompt_tokens + [777])
+            assert sched_m2.get_num_new_matched_tokens(req_m2, 0) == (128, False)
+            sched_m2.update_state_after_alloc(req_m2, None, 128)
+            # Simulate vLLM 0.34 CachedRequestData (NO resumed_req_ids attribute!)
+            cached_034 = types.SimpleNamespace(
+                req_ids=["mla-2"],
+                num_computed_tokens=[0],
+                new_block_ids=[(restore_blocks,)],
+            )
+            meta_m2 = sched_m2.build_connector_meta(
+                types.SimpleNamespace(
+                    scheduled_new_reqs=[],
+                    num_scheduled_tokens={"mla-2": len(req_m2.prompt_token_ids)},
+                    scheduled_cached_reqs=cached_034,
+                )
+            )
+            assert len(meta_m2.requests) == 1 and meta_m2.requests[0].is_store is False
+            backing_dst = np.zeros((num_blocks, n_layers, 1, block_size, kv_dim), dtype=np.float16)
+            kv_reg_dst = {f"layer_{i:02d}": _FakeTensor(backing_dst[:, i, :, :, :]) for i in range(n_layers)}
+            work_m2.register_kv_caches(kv_reg_dst)
+            work_m2.bind_connector_metadata(meta_m2)
+            # Pass dict attn_metadata (vLLM 0.34 style!)
+            fc_dict = _FakeForwardCtx(attn_metadata={f"layer_{i:02d}": MLACommonMetadata() for i in range(n_layers)})
+            work_m2.start_load_kv(fc_dict)
+            work_m2.shutdown()
+            sched_m2.shutdown()
+
+            for i in range(n_layers):
+                for sb, db in zip(store_blocks, restore_blocks):
+                    assert np.array_equal(backing_src[sb, i, 0], backing_dst[db, i, 0]), (
+                        f"MLA 0.34 non-contiguous restore mismatch at layer {i} block {sb}->{db}"
+                    )
+            st_m2 = read_connector_stats(Path(td))["totals"]
+            assert st_m2["kv_layouts"] == ["mla"]
+            assert st_m2["loads_completed"] == 1 and st_m2["loaded_tokens"] == 128
+        print("PASS 4: vLLM 0.34 MLA (3D save -> 4D non-contiguous load, dict metadata, no resumed_req_ids)")
+
+        # 5. Hybrid linear-attention / Mamba/GDN shape (e.g. Qwen3.8-27B-FP8 (1017, 4, 832, 512)) MUST fail closed!
+        with tempfile.TemporaryDirectory(prefix="cowrie_vllm_hybrid_") as td:
+            cfg_hyb = _make_vllm_config(Path(td), block_size=16)
+            work_hyb = resolved(cfg_hyb, KVConnectorRole.WORKER)
+            hybrid_state = _FakeTensor(np.zeros((8, 4, 32, 16), dtype=np.float16))
+            rejected = False
+            try:
+                work_hyb.register_kv_caches({"linear_layer_0": hybrid_state})
+            except ValueError as exc:
+                rejected = "Unsupported KV cache tensor shape" in str(exc)
+            assert rejected, "Hybrid linear-attention state cache MUST fail closed!"
+            work_hyb.shutdown()
+        print("PASS 5: Hybrid linear-attention/Mamba state shape fails closed cleanly")
+
+        # 6. Inflight byte-cap skip accounting (prevents silent skips!)
         with tempfile.TemporaryDirectory(prefix="cowrie_vllm_cap_") as td:
             cfg_tiny_cap = _make_vllm_config(Path(td), max_inflight_bytes=64)
             work_cap = resolved(cfg_tiny_cap, KVConnectorRole.WORKER)
@@ -509,8 +601,8 @@ def main() -> int:
             assert st["saves_skipped_inflight_cap"] == 1 and st["saves_submitted"] == 0
             work_cap.shutdown()
             sched_cap.shutdown()
-        print("PASS 4: Inflight backpressure skip counter verified")
-        print("VLLM KV CONNECTOR UNIT SUITE: 4/4 PASSED")
+        print("PASS 6: Inflight backpressure skip counter verified")
+        print("VLLM KV CONNECTOR UNIT SUITE: 6/6 PASSED")
         return 0
     finally:
         if old_hmac is None:

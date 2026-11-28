@@ -72,15 +72,71 @@ def _extract_mm_hashes(obj: Any) -> list[str]:
     return [str(getattr(f, "identifier", getattr(f, "mm_hash", ""))) for f in feats]
 
 
-def _detect_kv_layout(kv_layer: torch.Tensor, is_mla: bool) -> str:
-    """Detect KV cache tensor layout: MLA, FlashAttention `(2, blocks, ...)`, or FlashInfer `(blocks, 2, ...)`."""
+def _detect_kv_layout(
+    kv_layer: torch.Tensor,
+    is_mla: bool,
+    block_size: Optional[int] = None,
+) -> str:
+    """Detect KV cache tensor layout using structural shape + MLA capability (no version strings).
+
+    Supported layouts:
+      - ``mla_4d``         : ``(num_blocks, 1, block_size, kv_lora+rope)`` (vLLM 0.34 standardized MLA view)
+      - ``mla_3d``         : ``(num_blocks, block_size, kv_lora+rope)``    (squeezed MLA layer view / vLLM 0.15)
+      - ``2_blocks_first`` : ``(2, num_blocks, block_size, ...)``          (legacy FlashAttention GQA view)
+      - ``blocks_2_first`` : ``(num_blocks, 2, block_size, ...)``          (vLLM 0.34 standardized GQA / FlashInfer)
+
+    Any other shape (e.g. hybrid Mamba/GDN linear-attention state caches) fails closed.
+    """
+    shape = tuple(int(d) for d in kv_layer.shape)
+    ndim = len(shape)
     if is_mla:
-        return "mla"
-    if len(kv_layer.shape) >= 3 and kv_layer.shape[0] == 2:
+        if ndim == 4 and shape[1] == 1 and (block_size is None or shape[2] == block_size):
+            return "mla_4d"
+        if ndim == 3 and (block_size is None or shape[1] == block_size):
+            return "mla_3d"
+        raise ValueError(
+            f"Unsupported MLA KV cache tensor shape for CowrieKVConnectorV1: {shape} "
+            f"(expected (blocks, 1, {block_size}, C) or (blocks, {block_size}, C))"
+        )
+    if ndim == 4 and shape[1] == 1 and block_size is not None and shape[2] == block_size:
+        return "mla_4d"
+    if ndim == 3 and block_size is not None and shape[1] == block_size:
+        return "mla_3d"
+    if ndim >= 3 and shape[0] == 2 and (block_size is None or shape[2] == block_size):
         return "2_blocks_first"
-    if len(kv_layer.shape) >= 3 and kv_layer.shape[1] == 2:
+    if ndim >= 3 and shape[1] == 2 and (block_size is None or shape[2] == block_size):
         return "blocks_2_first"
-    raise ValueError(f"Unsupported KV cache tensor shape for CowrieKVConnectorV1: {tuple(kv_layer.shape)}")
+    raise ValueError(
+        f"Unsupported KV cache tensor shape for CowrieKVConnectorV1: {shape} "
+        f"(block_size={block_size}, is_mla={is_mla}). "
+        f"Hybrid Mamba/GDN linear-attention state caches are not supported in layout_ver={VLLM_LAYOUT_VER}."
+    )
+
+
+def _canonical_layout_label(layout: str) -> str:
+    return "mla" if layout in ("mla_3d", "mla_4d") else layout
+
+
+def _resolve_block_size(vllm_config: Any, kv_cache_config: Any) -> int:
+    bs = getattr(getattr(vllm_config, "cache_config", None), "block_size", None)
+    if bs is not None and int(bs) > 0:
+        return int(bs)
+    groups = getattr(kv_cache_config, "kv_cache_groups", None) or []
+    for grp in groups:
+        spec = getattr(grp, "kv_cache_spec", None)
+        sbs = getattr(spec, "block_size", None)
+        if sbs is not None and int(sbs) > 0:
+            return int(sbs)
+    return 16
+
+
+def _kv_cache_config_is_mla(kv_cache_config: Any) -> bool:
+    groups = getattr(kv_cache_config, "kv_cache_groups", None) or []
+    for grp in groups:
+        spec = getattr(grp, "kv_cache_spec", None)
+        if spec is not None and "MLA" in type(spec).__name__:
+            return True
+    return False
 
 
 def reset_connector_stats(storage_dir: str | Path) -> int:
@@ -182,14 +238,26 @@ def _default_cache_dir() -> Path:
     return base / "cowrie" / "vllm_kv"
 
 
-def _is_mla_metadata(attn_metadata: Any) -> bool:
-    if attn_metadata is None:
+def _is_single_mla_metadata(obj: Any) -> bool:
+    if obj is None:
         return False
     try:
         from vllm.model_executor.layers.attention.mla_attention import MLACommonMetadata
-        return isinstance(attn_metadata, MLACommonMetadata)
+        if isinstance(obj, MLACommonMetadata):
+            return True
     except Exception:
-        return type(attn_metadata).__name__ == "MLACommonMetadata"
+        pass
+    return "MLA" in type(obj).__name__
+
+
+def _is_mla_metadata(attn_metadata: Any) -> bool:
+    if attn_metadata is None:
+        return False
+    if isinstance(attn_metadata, dict):
+        return any(_is_single_mla_metadata(v) for v in attn_metadata.values() if v is not None)
+    if isinstance(attn_metadata, (list, tuple)):
+        return any(_is_mla_metadata(item) for item in attn_metadata)
+    return _is_single_mla_metadata(attn_metadata)
 
 
 def _get_parallel_topology(vllm_config: VllmConfig) -> tuple[int, int, int, int]:
@@ -319,7 +387,8 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
             role=role,
             kv_cache_config=kv_cache_config,
         )
-        self._block_size = vllm_config.cache_config.block_size
+        self._block_size = _resolve_block_size(vllm_config, kv_cache_config)
+        self._spec_is_mla = _kv_cache_config_is_mla(kv_cache_config)
         self._requests_need_load: dict[str, tuple["Request", int]] = {}
         self._requests_pending_store: dict[str, "Request"] = {}
         extra = self._kv_transfer_config.kv_connector_extra_config or {}
@@ -446,10 +515,19 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         )
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]) -> None:
+        detected: set[str] = set()
+        for layer_name, tensor in kv_caches.items():
+            try:
+                layout = _detect_kv_layout(tensor, self._spec_is_mla, self._block_size)
+            except ValueError as exc:
+                raise ValueError(f"Layer {layer_name!r}: {exc}") from exc
+            detected.add(_canonical_layout_label(layout))
         self._kv_caches = dict(kv_caches)
         with self._lock:
             self._stats["register_kv_caches_calls"] += 1
             self._stats["registered_layers"] = len(self._kv_caches)
+            if len(detected) == 1 and not self._stats["kv_layout"]:
+                self._stats["kv_layout"] = next(iter(detected))
         self._flush_stats()
 
     def request_finished(
@@ -686,16 +764,18 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                                 self._requests_pending_store.pop(new_req.req_id, None)
 
         cached_reqs = scheduler_output.scheduled_cached_reqs
+        resumed_ids = getattr(cached_reqs, "resumed_req_ids", None)
         for i, req_id in enumerate(cached_reqs.req_ids):
             total_tokens = cached_reqs.num_computed_tokens[i] + scheduler_output.num_scheduled_tokens[req_id]
             new_block_ids = cached_reqs.new_block_ids[i]
-            if req_id in cached_reqs.resumed_req_ids and req_id in self._requests_need_load:
+            if req_id in self._requests_need_load and (resumed_ids is None or req_id in resumed_ids):
                 request, matched_toks = self._requests_need_load[req_id]
                 req_salt = self._make_topo_salt(self._tp_rank, self._pp_rank, _request_lora_tag(request))
                 if new_block_ids is not None:
+                    req_tokens = getattr(request, "all_token_ids", None) or request.prompt_token_ids or []
                     rm = CowrieReqMeta.build(
                         req_id,
-                        list(request.all_token_ids[:total_tokens]),
+                        list(req_tokens[:total_tokens]),
                         new_block_ids[0],
                         self._block_size,
                         min(matched_toks, aligned_prefix_tokens(total_tokens, self._block_size)),
@@ -751,8 +831,10 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
             return
         attn_metadata = forward_context.attn_metadata
         if attn_metadata is None:
+            attn_metadata = kwargs.get("attn_metadata")
+        if attn_metadata is None:
             return
-        is_mla = _is_mla_metadata(attn_metadata)
+        is_mla = self._spec_is_mla or _is_mla_metadata(attn_metadata)
 
         attn_layers: list[tuple[str, torch.Tensor]] = []
         if self._kv_caches:
@@ -763,16 +845,17 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                 layer = forward_context.no_compile_layers[layer_name]
                 kv_attr = getattr(layer, "kv_cache", None)
                 if kv_attr is not None:
-                    attn_layers.append((layer_name, kv_attr[forward_context.virtual_engine]))
+                    kv_tensor = kv_attr[forward_context.virtual_engine] if isinstance(kv_attr, (list, tuple)) else kv_attr
+                    attn_layers.append((layer_name, kv_tensor))
         if not attn_layers:
             return
 
         sample_layer = attn_layers[0][1]
-        layout = _detect_kv_layout(sample_layer, is_mla)
+        layout = _detect_kv_layout(sample_layer, is_mla, self._block_size)
         with self._lock:
             self._stats["start_load_kv_calls"] += 1
             if not self._stats["kv_layout"]:
-                self._stats["kv_layout"] = layout
+                self._stats["kv_layout"] = _canonical_layout_label(layout)
         kv_quant, _ = _kv_dtype_tag(sample_layer.dtype)
         any_load = False
 
@@ -796,26 +879,45 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                         warnings.simplefilter("ignore", UserWarning)
                         raw_u8 = torch.frombuffer(mp.buffer, dtype=torch.uint8)
                     stacked_cpu = raw_u8.view(sample_layer.dtype)
-                    stacked_gpu = stacked_cpu.to(device=sample_layer.device, non_blocking=True)
-                    slots = req.slot_mapping.to(device=sample_layer.device, non_blocking=True)
+                    # Synchronous host-to-device copy ensures mp.buffer is finished before munmap on __exit__.
+                    stacked_gpu = stacked_cpu.to(device=sample_layer.device, non_blocking=False)
+                    slots = req.slot_mapping.to(device=sample_layer.device, non_blocking=False)
                     n_layers = len(attn_layers)
 
-                    if layout == "mla":
+                    if layout == "mla_4d":
+                        # Standardized vLLM 0.34 MLA view: (num_blocks, 1, block_size, kv_lora+rope)
                         stacked_gpu = stacked_gpu.reshape(n_layers, req.num_tokens, -1)
                         for idx, (_, dst_layer) in enumerate(attn_layers):
-                            orig_shape = dst_layer.shape
-                            flat = dst_layer.reshape(orig_shape[0] * orig_shape[1], -1)
-                            flat[slots, ...] = stacked_gpu[idx]
+                            page_size = int(dst_layer.shape[2])
+                            blk_idx = slots // page_size
+                            blk_off = slots % page_size
+                            dst_layer[blk_idx, 0, blk_off, :] = stacked_gpu[idx]
+                    elif layout == "mla_3d":
+                        # Squeezed MLA view: (num_blocks, block_size, kv_lora+rope)
+                        stacked_gpu = stacked_gpu.reshape(n_layers, req.num_tokens, -1)
+                        for idx, (_, dst_layer) in enumerate(attn_layers):
+                            page_size = int(dst_layer.shape[1])
+                            blk_idx = slots // page_size
+                            blk_off = slots % page_size
+                            dst_layer[blk_idx, blk_off, :] = stacked_gpu[idx]
                     elif layout == "2_blocks_first":
+                        # Legacy FlashAttention view: (2, num_blocks, block_size, ...)
                         stacked_gpu = stacked_gpu.reshape(n_layers, 2, req.num_tokens, -1)
                         for idx, (_, dst_layer) in enumerate(attn_layers):
-                            orig_shape = dst_layer.shape
-                            flat = dst_layer.reshape(2, orig_shape[1] * orig_shape[2], -1)
-                            flat[:, slots, ...] = stacked_gpu[idx]
+                            page_size = int(dst_layer.shape[2])
+                            tail_shape = dst_layer.shape[3:]
+                            blk_idx = slots // page_size
+                            blk_off = slots % page_size
+                            dst_layer[0, blk_idx, blk_off, ...] = stacked_gpu[idx, 0].reshape(
+                                req.num_tokens, *tail_shape
+                            )
+                            dst_layer[1, blk_idx, blk_off, ...] = stacked_gpu[idx, 1].reshape(
+                                req.num_tokens, *tail_shape
+                            )
                     else:  # "blocks_2_first": (num_blocks, 2, block_size, ...)
                         stacked_gpu = stacked_gpu.reshape(n_layers, 2, req.num_tokens, -1)
                         for idx, (_, dst_layer) in enumerate(attn_layers):
-                            page_size = dst_layer.shape[2]
+                            page_size = int(dst_layer.shape[2])
                             tail_shape = dst_layer.shape[3:]
                             blk_idx = slots // page_size
                             blk_off = slots % page_size
@@ -861,25 +963,36 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         metadata = self._get_connector_metadata()
         if not isinstance(metadata, CowrieConnectorMetadata) or not metadata.requests:
             return
-        is_mla = _is_mla_metadata(attn_metadata)
-        layout = _detect_kv_layout(kv_layer, is_mla)
+        is_mla = self._spec_is_mla or _is_mla_metadata(attn_metadata)
+        layout = _detect_kv_layout(kv_layer, is_mla, self._block_size)
         with self._lock:
             self._stats["save_kv_layer_calls"] += 1
             if not self._stats["kv_layout"]:
-                self._stats["kv_layout"] = layout
+                self._stats["kv_layout"] = _canonical_layout_label(layout)
 
         for req in metadata.requests:
             if not req.is_store:
                 continue
             slots = req.slot_mapping.to(device=kv_layer.device)
-            if layout == "mla":
-                num_pages, page_size = kv_layer.shape[0], kv_layer.shape[1]
-                sliced = kv_layer.reshape(num_pages * page_size, -1)[slots, ...].contiguous().cpu()
+            if layout == "mla_4d":
+                page_size = int(kv_layer.shape[2])
+                blk_idx = slots // page_size
+                blk_off = slots % page_size
+                sliced = kv_layer[blk_idx, 0, blk_off, :].reshape(req.num_tokens, -1).contiguous().cpu()
+            elif layout == "mla_3d":
+                page_size = int(kv_layer.shape[1])
+                blk_idx = slots // page_size
+                blk_off = slots % page_size
+                sliced = kv_layer[blk_idx, blk_off, :].reshape(req.num_tokens, -1).contiguous().cpu()
             elif layout == "2_blocks_first":
-                num_pages, page_size = kv_layer.shape[1], kv_layer.shape[2]
-                sliced = kv_layer.reshape(2, num_pages * page_size, -1)[:, slots, ...].contiguous().cpu()
+                page_size = int(kv_layer.shape[2])
+                blk_idx = slots // page_size
+                blk_off = slots % page_size
+                k_sl = kv_layer[0, blk_idx, blk_off, ...].reshape(req.num_tokens, -1)
+                v_sl = kv_layer[1, blk_idx, blk_off, ...].reshape(req.num_tokens, -1)
+                sliced = torch.stack((k_sl, v_sl), dim=0).contiguous().cpu()
             else:  # "blocks_2_first": (num_blocks, 2, block_size, ...)
-                page_size = kv_layer.shape[2]
+                page_size = int(kv_layer.shape[2])
                 blk_idx = slots // page_size
                 blk_off = slots % page_size
                 k_sl = kv_layer[blk_idx, 0, blk_off, ...].reshape(req.num_tokens, -1)
