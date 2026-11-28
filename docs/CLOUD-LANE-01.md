@@ -51,17 +51,17 @@ These models are **never** included in `notebooks/EXP-04-cowrie-kv-connector.ipy
 
 ## 3. Colab Hardware Profiles, Expected Runtime & Cost in Compute Units
 
-Burn rates come from the late-2026 Google AI Ultra resource audit (`2026-11-ultra-aeo-monetization-plan.md`). H100 wall times and fresh-VM CU totals remain **pre-execution estimates** (H100 is **not measured**). On a warm RTX PRO 6000 Blackwell VM (`exp04`, weights cached), the verified `glm-4.7-flash-awq` run completed end-to-end (`SupportsHMA` proof + Store + teardown + Restore + report) in **`~75 s`**.
+Burn rates come from the late-2026 Google AI Ultra resource audit (`2026-11-ultra-aeo-monetization-plan.md`). H100 wall times and fresh-VM CU totals remain **pre-execution estimates** (H100 is **not measured**). On a warm RTX PRO 6000 Blackwell VM (`exp04-ab`, weights cached), the complete 4-subprocess **paired A/B** `glm-4.7-flash-awq` run (`SupportsHMA` proof + ARM A Store/Restore + ARM B Store/Restore + parity gates + unified receipt) completed in **`~2.5 min`**.
 
 | Colab Ultra Profile | GPU / Arch / VRAM | Burn Rate (Est.) | Active Colab Models | Est. Wall Time (Fresh VM, 1 Profile) | Est. Cost per Profile (CU) | Share of 2,000 CU/mo Pool |
 |---|---|---:|---|---:|---:|---:|
 | **Primary** | NVIDIA **H100 80GB** HBM3 (`sm_90`) | `~18.0 CU/hr` | All 4 quantized profiles (`qwen3.8-27b-fp8` default) — **not measured** | `8 – 15 min` | **`2.4 – 4.5 CU`** | `0.12% – 0.23%` |
-| **Blackwell Variant** | NVIDIA **RTX PRO 6000 Blackwell 96GB** (`sm_120`, G4) | `~8.9 CU/hr` | `glm-4.7-flash-awq` **VERIFIED PASS**; `qwen3.8-27b-fp8` **FAIL-CLOSED (hybrid GDN)**; others **not measured** | `8 – 15 min` fresh (`~1.25 min` warm cache) | **`1.2 – 2.2 CU`** fresh (`~0.19 CU` warm) | `0.06% – 0.11%` |
+| **Blackwell Variant** | NVIDIA **RTX PRO 6000 Blackwell 96GB** (`sm_120`, G4) | `~8.9 CU/hr` | `glm-4.7-flash-awq` **VERIFIED PAIRED A/B PASS**; `qwen3.8-27b-fp8` **FAIL-CLOSED (hybrid GDN)**; others **not measured** | `8 – 15 min` fresh (`~2.5 min` warm A/B) | **`1.2 – 2.2 CU`** fresh (`~0.37 CU` warm A/B) | `0.06% – 0.11%` |
 
 ### Estimated Phase Breakdown (Fresh Colab VM, 1 Profile)
 1. `pip install -U vllm>=0.15.0` + minimal `rustup` + `cowrie-ai` Rust release build: **~3–6 min** (`0–1 min` on subsequent profiles in the same VM).
-2. Hugging Face weight download (`~18.5 – 28.3 GB` across the 4 quantized profiles): **~3–6 min** (`0 min` once cached).
-3. `SupportsHMA` factory verification + Phase 1 (Cold Store subprocess) + full VRAM teardown + Phase 2 (Warm Restore subprocess): **~1.25–3 min** (`~75 s` measured on warm Blackwell `exp04`).
+2. Hugging Face weight download (`~18.5 – 28.3 GB` across the 4 quantized profiles): **~1–6 min** (`0 min` once cached).
+3. `SupportsHMA` factory verification + ARM A (`without` Cowrie: Store + teardown + Restore) + ARM B (`with` Cowrie: Store + teardown + Restore): **~2.5–4 min** (`~140 s` measured on warm Blackwell `exp04-ab`).
 
 ---
 
@@ -79,26 +79,51 @@ Burn rates come from the late-2026 Google AI Ultra resource audit (`2026-11-ultr
    - Set `EXP04_ENFORCE_EAGER=0` to benchmark with `torch.compile` / CUDA graphs.
    - Set `AUTO_UNASSIGN_COLAB_RUNTIME = True` (or `EXP04_AUTO_UNASSIGN=1`) for unattended runs.
 4. Click **Runtime → Run all**. Cell 4 verifies hardware and VRAM fit before any weights download.
-5. Verify Cell 11 prints `VERDICT: PASS` and download `/tmp/cowrie_exp04_receipt.json` into `receipts/receipt_exp04_<gpu>_<profile>_<YYYY-MM-DD>.json`.
+5. Verify Cell 11 prints `VERDICT: PASS` (paired A/B with greedy parity in both arms) and download `/tmp/cowrie_exp04_receipt.json` into `receipts/receipt_exp04_<gpu>_<profile>_<YYYY-MM-DD>.json`.
 6. **Stop CU billing immediately:** run Cell 13 with `AUTO_UNASSIGN_COLAB_RUNTIME = True` or click **Runtime → Disconnect and delete runtime**.
 
 ---
 
-## 5. Measurement Status (Live RTX PRO 6000 Blackwell + Local)
+## 5. Measurement Status — Paired A/B (Live RTX PRO 6000 Blackwell + Local)
 
-**Verified Live Receipt (RTX PRO 6000 Blackwell `95.59 GiB`, `sm_120`, vLLM `0.34.0`, `enforce_eager=True`):** [`receipts/receipt_exp04_rtx_pro_6000_blackwell_glm47_awq_2026-11-28.json`](../receipts/receipt_exp04_rtx_pro_6000_blackwell_glm47_awq_2026-11-28.json).  
+**Verified Paired A/B Receipt (NVIDIA RTX PRO 6000 Blackwell `95.59 GiB`, `sm_120`, vLLM `0.34.0`, `max_model_len=8192`, `gpu_memory_utilization=0.90`, `seed=42`, `enforce_eager=True`):** [`receipts/receipt_exp04_rtx_pro_6000_blackwell_glm47_awq_2026-11-28.json`](../receipts/receipt_exp04_rtx_pro_6000_blackwell_glm47_awq_2026-11-28.json).  
 All H100 80GB metrics, `qwen3.6-27b-fp8`, and `inkling-2-mini` remain **`not measured`**.
 
-| Metric | Local Workstation | `qwen3.8-27b-fp8` (Blackwell) | `qwen3.6-27b-fp8` | `inkling-2-mini` | `glm-4.7-flash-awq` (RTX PRO 6000 Blackwell, vLLM `0.34.0`) |
+### Paired A/B Comparison: `cyankiwi/GLM-4.7-Flash-AWQ-4bit` (`Cowrie` vs `Native Prefix Cache`, Across OS Process Restart)
+
+> **ARM A restart outcome:** ARM A (plain vLLM with native prefix caching ON and no Cowrie connector) cannot produce a warm KV hit across an OS process restart because vLLM's in-GPU prefix cache is wiped on process exit (`vllm_num_cached_tokens_total=0`, cold TTFT `164.60 ms`, post-restart TTFT `162.92 ms`, speedup `1.010×`).
+>
+> **Headline comparison (Cowrie vs native prefix cache):** Post-restart TTFT drops from **`162.92 ms` (ARM A native)** to **`101.36 ms` (ARM B Cowrie)** — **`1.607×` speedup (`-61.56 ms`)**, with **`99.10%` (`12,544 / 12,658` tokens)** cross-restart KV hit rate vs **`0.0%` (`0` tokens)** in ARM A. ARM B's own cold-store TTFT (`331.02 ms`, `+166.42 ms` vs ARM A's `164.60 ms`) reflects Cowrie's synchronous D2H copy + serialization tax on the first write; the internal cold-vs-warm ratio (`3.266×`) must not be conflated with the true Cowrie-vs-native post-restart speedup (`1.607×`). Both arms AND cross-arm outputs achieved **`64/64` exact greedy token parity**.
+
+| Metric | ARM A (`without` Cowrie: plain vLLM + native prefix cache ON) | ARM B (`with` Cowrie: `CowrieKVConnectorV1` + native prefix cache ON) | Delta (`B - A`) | `B` vs `A` |
+|---|---:|---:|---:|---:|
+| `cold_ttft_ms` (`4,217` prompt tok) | `164.60 ms` | `331.02 ms` | `+166.42 ms` | `0.497×` *(write tax)* |
+| **`warm_ttft_ms` (post-restart, `4,217` prompt tok)** | **`162.92 ms`** | **`101.36 ms`** | **`-61.56 ms`** | **`1.607×`** |
+| `ttft_speedup_x` (within-arm cold/warm) | `1.010×` | `3.266×` | `+2.256×` | `3.234×` |
+| `cold_decode_e2e_ms` (`64` out tok) | `2,546.15 ms` | `2,633.11 ms` | `+86.96 ms` | `0.967×` |
+| `warm_decode_e2e_ms` (post-restart, `64` out tok) | `2,526.85 ms` | `2,505.02 ms` | `-21.83 ms` | `1.009×` |
+| `cold_e2e_tokens_per_s` | `25.14 tok/s` | `24.31 tok/s` | `-0.83 tok/s` | `0.967×` |
+| `warm_e2e_tokens_per_s` | `25.33 tok/s` | `25.55 tok/s` | `+0.22 tok/s` | `1.009×` |
+| `warm_decode_only_tokens_per_s` | `26.65 tok/s` | `26.21 tok/s` | `-0.44 tok/s` | `0.983×` |
+| `new_suffix_warm_e2e_ms` (`4,212` prompt / `64` out) | `2,497.01 ms` | `2,493.29 ms` | `-3.72 ms` | `1.001×` |
+| `new_suffix_warm_e2e_tokens_per_s` | `25.63 tok/s` | `25.67 tok/s` | `+0.04 tok/s` | `1.002×` |
+| `kv_cache_hit_rate_loaded_pct` | `0.00%` | **`99.10%`** | `+99.10%` | — |
+| `kv_cache_hit_rate_scheduler_pct` | `0.00%` | **`99.10%`** | `+99.10%` | — |
+| `kv_cache_request_hit_rate_pct` | `0.00%` (`0/3`) | **`100.00%`** (`3/3`) | `+100.00%` | — |
+| `vllm_num_cached_tokens_total` | `0` (`0.00%`) | **`12,544`** (`99.10%`) | `+12,544` | — |
+| `greedy_token_parity` (`store == restore == gpu_hit`) | **PASS (`64/64`)** | **PASS (`64/64`)** | Cross-arm: **PASS (`64/64`)** | — |
+| `state_shards_count` / `state_shards_total_bytes` / `hmac_sha256_verified` | `0` / `0 B` / `false` | **`3`** / **`679,248,154 B`** / **`true`** | `+3` / `+647.8 MiB` | — |
+| `SupportsHMA` & connector counters (Store / Restore) | `instance_count=0`, all counters `0` | `all_supports_hma=true`, `request_finished_all_groups_calls=5/4`; Store: `saves_completed=3`, `saved_tokens=12,544`, `saved_bytes=679,182,336`, `save_kv_layer_calls=141`, `save_ms_total=3,200.334 ms`, `saves_failed=0`; Restore: `scheduler_hits=3`, `start_load_kv_calls=3`, `loads_completed=3`, `loaded_tokens=12,544`, `loaded_bytes=679,182,336`, `load_ms_total=98.172 ms`, `loads_failed=0` | — | — |
+
+### Roster Status Matrix
+
+| Metric | Local Workstation | `qwen3.8-27b-fp8` (Blackwell) | `qwen3.6-27b-fp8` | `inkling-2-mini` | `glm-4.7-flash-awq` (Blackwell paired A/B) |
 |---|---|---|---|---|---|
 | `vLLM 0.15+` live plugin auto-discovery | not measured | verified (`vLLM 0.34.0`) | not measured | not measured | **PASS** (`vLLM 0.34.0`, `auto_registered_via_entry_point=true`) |
-| `SupportsHMA` runtime (`issubclass` + live instances) | mock unit test (`6/6`) | verified (`True`) before KV register | not measured | not measured | **PASS** (`native=True`, `issubclass=True`, `all_supports_hma=True`, `request_finished_all_groups_calls=5/4`) |
+| `SupportsHMA` runtime (`issubclass` + live instances) | mock unit test (`6/6`) | verified (`True`) before KV register | not measured | not measured | **PASS** (`native=True`, `issubclass=True`, `all_supports_hma=True`) |
 | KV cache layout registration | unit-tested (`GQA`, `MLA`, hybrid fail-closed) | **FAIL-CLOSED** (`ValueError`: hybrid `(1017, 4, 832, 512)`) | not measured | not measured | **PASS** (`mla`, 47 layers, `block_size=64`) |
-| Cold TTFT (`ms`) → Warm Cowrie TTFT (`ms`) | not measured | not measured | not measured | not measured | **`335.49 ms` → `98.32 ms` (`3.412×` speedup)** (`4,217` prompt tok) |
-| Decode throughput (`tokens/s`, 64 out tok) | not measured | not measured | not measured | not measured | Cold E2E `24.36 tok/s` (`2,627.68 ms`); Warm E2E **`26.85 tok/s`** (`2,383.27 ms`); Warm decode-only **`27.57 tok/s`**; New-suffix E2E **`26.91 tok/s`** (`2,378.65 ms`) |
-| KV cache hit rate (disk-loaded `%` / scheduler `%` / req `%`) | not measured | not measured | not measured | not measured | **`99.10%`** / **`99.10%`** (`12,544 / 12,658` tok; `vllm_num_cached_tokens_total=12,544`) / **`100.0%`** (`3/3`) |
-| Greedy token parity across OS process restart (`temp=0.0`) | unit-tested bit-exact | not measured | not measured | not measured | **PASS (`64/64` exact)**: `greedy_token_parity=true` (`store_cold == restore_cowrie`) & `gpu_prefix_hit_parity=true` (`store_gpu_hit == restore_cowrie`) |
-| Connector counters (`saves_completed`, `loads_completed`, payload, HMAC) | unit-tested via `libcowrie_core.so` | not measured | not measured | not measured | Store: `saves_completed=3`, `saved_tokens=12,544`, `saved_bytes=679,182,336`, `saves_failed=0`, `hmac_sha256_verified=true` (`3` shards, `679,248,154 B` on disk). Restore: `scheduler_hits=3`, `loads_completed=3`, `loaded_tokens=12,544`, `loaded_bytes=679,182,336`, `load_ms_total=97.261 ms`, `loads_failed=0` |
+| Paired A/B post-restart TTFT (`ARM A` → `ARM B`) | not measured | not measured | not measured | not measured | **`162.92 ms` → `101.36 ms` (`1.607×`)** |
+| Paired A/B greedy token parity | unit-tested bit-exact | not measured | not measured | not measured | **PASS (`64/64` in ARM A, ARM B, and cross-arm)** |
 
 ### 5.1 Decision: `Qwen/Qwen3.8-27B-FP8` Explicit Fail-Closed Gate (Hybrid Linear Attention)
 
