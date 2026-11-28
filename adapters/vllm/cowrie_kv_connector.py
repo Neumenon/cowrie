@@ -12,11 +12,14 @@ pp_size, kv_dtype, layout)`, with:
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+import itertools
+import json
 import os
 from pathlib import Path
 import struct
 import sys
 import threading
+import time
 from typing import TYPE_CHECKING, Any, Optional
 import warnings
 
@@ -38,7 +41,10 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
 )
 try:
     from vllm.distributed.kv_transfer.kv_connector.v1.base import SupportsHMA as _SupportsHMA
+    SUPPORTS_HMA_NATIVE = True
 except ImportError:  # Older vLLM V1 builds without SupportsHMA
+    SUPPORTS_HMA_NATIVE = False
+
     class _SupportsHMA:  # type: ignore[no-redef]
         pass
 from vllm.logger import init_logger
@@ -57,6 +63,92 @@ VLLM_RUNTIME_ID = "vllm-v1"
 VLLM_LAYOUT_VER = 3
 DEFAULT_MAX_CACHE_BYTES = 8 * 1024 * 1024 * 1024  # 8 GiB
 DEFAULT_MAX_INFLIGHT_BYTES = 512 * 1024 * 1024    # 512 MiB host-RAM backpressure cap
+_STATS_FILE_PREFIX = ".cowrie_stats_"
+_INSTANCE_COUNTER = itertools.count(1)
+
+
+def _extract_mm_hashes(obj: Any) -> list[str]:
+    feats = getattr(obj, "mm_features", None) or []
+    return [str(getattr(f, "identifier", getattr(f, "mm_hash", ""))) for f in feats]
+
+
+def _detect_kv_layout(kv_layer: torch.Tensor, is_mla: bool) -> str:
+    """Detect KV cache tensor layout: MLA, FlashAttention `(2, blocks, ...)`, or FlashInfer `(blocks, 2, ...)`."""
+    if is_mla:
+        return "mla"
+    if len(kv_layer.shape) >= 3 and kv_layer.shape[0] == 2:
+        return "2_blocks_first"
+    if len(kv_layer.shape) >= 3 and kv_layer.shape[1] == 2:
+        return "blocks_2_first"
+    raise ValueError(f"Unsupported KV cache tensor shape for CowrieKVConnectorV1: {tuple(kv_layer.shape)}")
+
+
+def reset_connector_stats(storage_dir: str | Path) -> int:
+    """Remove persisted `.cowrie_stats_*.json` snapshots in `storage_dir` (leaves `.state.cowrie` shards intact)."""
+    d = Path(storage_dir)
+    if not d.is_dir():
+        return 0
+    removed = 0
+    for f in d.glob(f"{_STATS_FILE_PREFIX}*.json"):
+        try:
+            f.unlink()
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def read_connector_stats(storage_dir: str | Path) -> dict[str, Any]:
+    """Read and aggregate all persisted `CowrieKVConnectorV1` counter snapshots from `storage_dir`."""
+    d = Path(storage_dir)
+    instances: list[dict[str, Any]] = []
+    if d.is_dir():
+        for f in sorted(d.glob(f"{_STATS_FILE_PREFIX}*.json")):
+            if ".tmp." in f.name:
+                continue
+            try:
+                instances.append(json.loads(f.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    sum_int_keys = (
+        "register_kv_caches_calls",
+        "get_num_new_matched_tokens_calls",
+        "scheduler_hits",
+        "scheduler_misses",
+        "scheduler_matched_tokens",
+        "update_state_after_alloc_load_calls",
+        "update_state_after_alloc_store_calls",
+        "build_connector_meta_calls",
+        "meta_load_requests",
+        "meta_store_requests",
+        "request_finished_calls",
+        "request_finished_all_groups_calls",
+        "start_load_kv_calls",
+        "loads_completed",
+        "loads_failed",
+        "loaded_tokens",
+        "loaded_bytes",
+        "save_kv_layer_calls",
+        "wait_for_save_calls",
+        "saves_submitted",
+        "saves_completed",
+        "saves_failed",
+        "saves_skipped_inflight_cap",
+        "saved_tokens",
+        "saved_bytes",
+        "inflight_saves",
+        "inflight_bytes",
+    )
+    totals: dict[str, Any] = {k: sum(int(inst.get(k, 0)) for inst in instances) for k in sum_int_keys}
+    totals["load_ms_total"] = round(sum(float(inst.get("load_ms_total", 0.0)) for inst in instances), 3)
+    totals["save_ms_total"] = round(sum(float(inst.get("save_ms_total", 0.0)) for inst in instances), 3)
+    totals["instance_count"] = len(instances)
+    totals["roles_seen"] = sorted({str(inst.get("role", "")) for inst in instances if inst.get("role")})
+    totals["kv_layouts"] = sorted({str(inst.get("kv_layout", "")) for inst in instances if inst.get("kv_layout")})
+    totals["any_supports_hma"] = any(bool(inst.get("supports_hma", False)) for inst in instances)
+    totals["all_supports_hma"] = bool(instances) and all(bool(inst.get("supports_hma", False)) for inst in instances)
+    return {"instances": instances, "totals": totals}
 
 
 def _request_lora_tag(request: Any) -> str:
@@ -255,7 +347,93 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         self._io_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="cowrie-kv-io")
         self._inflight_saves: set[tuple[int, str]] = set()
         self._inflight_bytes: int = 0
+        self._role_name = getattr(role, "name", str(role)).lower()
+        self._pid = os.getpid()
+        self._instance_id = next(_INSTANCE_COUNTER)
+        self._stats_path = (
+            self._storage_dir
+            / f"{_STATS_FILE_PREFIX}{self._role_name}_{self._topo_tag}_{self._pid}_{self._instance_id}.json"
+        )
+        self._stats: dict[str, Any] = {
+            "role": self._role_name,
+            "pid": self._pid,
+            "instance_id": self._instance_id,
+            "tp_rank": self._tp_rank,
+            "tp_size": self._tp_size,
+            "pp_rank": self._pp_rank,
+            "pp_size": self._pp_size,
+            "topo_tag": self._topo_tag,
+            "model_sha": self._model_sha,
+            "block_size": self._block_size,
+            "runtime_id": VLLM_RUNTIME_ID,
+            "layout_ver": VLLM_LAYOUT_VER,
+            "supports_hma": bool(SUPPORTS_HMA_NATIVE and isinstance(self, _SupportsHMA)),
+            "supports_hma_native_import": bool(SUPPORTS_HMA_NATIVE),
+            "max_cache_bytes": self._max_cache_bytes,
+            "max_inflight_bytes": self._max_inflight_bytes,
+            "kv_layout": "",
+            "register_kv_caches_calls": 0,
+            "registered_layers": 0,
+            "get_num_new_matched_tokens_calls": 0,
+            "scheduler_hits": 0,
+            "scheduler_misses": 0,
+            "scheduler_matched_tokens": 0,
+            "update_state_after_alloc_load_calls": 0,
+            "update_state_after_alloc_store_calls": 0,
+            "build_connector_meta_calls": 0,
+            "meta_load_requests": 0,
+            "meta_store_requests": 0,
+            "request_finished_calls": 0,
+            "request_finished_all_groups_calls": 0,
+            "start_load_kv_calls": 0,
+            "loads_completed": 0,
+            "loads_failed": 0,
+            "loaded_tokens": 0,
+            "loaded_bytes": 0,
+            "load_ms_total": 0.0,
+            "save_kv_layer_calls": 0,
+            "wait_for_save_calls": 0,
+            "saves_submitted": 0,
+            "saves_completed": 0,
+            "saves_failed": 0,
+            "saves_skipped_inflight_cap": 0,
+            "saved_tokens": 0,
+            "saved_bytes": 0,
+            "save_ms_total": 0.0,
+            "shutdown_called": False,
+        }
         self._scan_existing_index(force=True)
+        self._flush_stats()
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return a thread-safe snapshot of this connector instance's runtime counters."""
+        with self._lock:
+            snap = dict(self._stats)
+            snap["inflight_saves"] = len(self._inflight_saves)
+            snap["inflight_bytes"] = self._inflight_bytes
+            snap["indexed_shards"] = sum(len(v) for v in self._index_by_len.values())
+            snap["updated_at_unix"] = round(time.time(), 6)
+        return snap
+
+    def _flush_stats(self) -> None:
+        snap = self.get_stats()
+        tmp_path = (
+            self._storage_dir
+            / f"{_STATS_FILE_PREFIX}tmp.{self._pid}.{threading.get_ident()}.json"
+        )
+        try:
+            payload = json.dumps(snap, sort_keys=True).encode("utf-8")
+            fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, payload)
+            finally:
+                os.close(fd)
+            os.replace(str(tmp_path), str(self._stats_path))
+        except OSError:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _make_topo_tag(self, tp_rank: int, pp_rank: int) -> str:
         return f"tp{tp_rank}of{self._tp_size}_pp{pp_rank}of{self._pp_size}"
@@ -269,6 +447,10 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]) -> None:
         self._kv_caches = dict(kv_caches)
+        with self._lock:
+            self._stats["register_kv_caches_calls"] += 1
+            self._stats["registered_layers"] = len(self._kv_caches)
+        self._flush_stats()
 
     def request_finished(
         self,
@@ -277,6 +459,9 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
     ) -> tuple[bool, Optional[dict[str, Any]]]:
         self._requests_need_load.pop(request.request_id, None)
         self._requests_pending_store.pop(request.request_id, None)
+        with self._lock:
+            self._stats["request_finished_calls"] += 1
+        self._flush_stats()
         return False, None
 
     def request_finished_all_groups(
@@ -286,10 +471,16 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
     ) -> tuple[bool, Optional[dict[str, Any]]]:
         self._requests_need_load.pop(request.request_id, None)
         self._requests_pending_store.pop(request.request_id, None)
+        with self._lock:
+            self._stats["request_finished_all_groups_calls"] += 1
+        self._flush_stats()
         return False, None
 
     def shutdown(self) -> None:
         self._io_pool.shutdown(wait=True)
+        with self._lock:
+            self._stats["shutdown_called"] = True
+        self._flush_stats()
 
     def _shard_path(self, num_tokens: int, doc_cid: str, topo_tag: Optional[str] = None) -> Path:
         tt = topo_tag or self._topo_tag
@@ -401,15 +592,29 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
     ) -> tuple[int | None, bool]:
         hit = self._find_longest_match(
             list(request.prompt_token_ids or []),
-            [f.identifier for f in request.mm_features],
+            _extract_mm_hashes(request),
             _request_lora_tag(request),
         )
         if hit is None:
+            with self._lock:
+                self._stats["get_num_new_matched_tokens_calls"] += 1
+                self._stats["scheduler_misses"] += 1
+            self._flush_stats()
             return 0, False
         _, matched_tokens, _ = hit
         if matched_tokens <= num_computed_tokens:
+            with self._lock:
+                self._stats["get_num_new_matched_tokens_calls"] += 1
+                self._stats["scheduler_misses"] += 1
+            self._flush_stats()
             return 0, False
-        return matched_tokens - num_computed_tokens, False
+        new_matched = matched_tokens - num_computed_tokens
+        with self._lock:
+            self._stats["get_num_new_matched_tokens_calls"] += 1
+            self._stats["scheduler_hits"] += 1
+            self._stats["scheduler_matched_tokens"] += int(new_matched)
+        self._flush_stats()
+        return new_matched, False
 
     def update_state_after_alloc(
         self,
@@ -420,13 +625,17 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         if num_external_tokens > 0:
             hit = self._find_longest_match(
                 list(request.prompt_token_ids or []),
-                [f.identifier for f in request.mm_features],
+                _extract_mm_hashes(request),
                 _request_lora_tag(request),
             )
             matched = hit[1] if hit is not None else num_external_tokens
             self._requests_need_load[request.request_id] = (request, matched)
+            with self._lock:
+                self._stats["update_state_after_alloc_load_calls"] += 1
         else:
             self._requests_pending_store[request.request_id] = request
+            with self._lock:
+                self._stats["update_state_after_alloc_store_calls"] += 1
 
     def build_connector_meta(
         self,
@@ -435,7 +644,7 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         meta = CowrieConnectorMetadata()
         for new_req in scheduler_output.scheduled_new_reqs:
             token_ids = list(new_req.prompt_token_ids or [])
-            mm_hashes = [f.identifier for f in new_req.mm_features]
+            mm_hashes = _extract_mm_hashes(new_req)
             req_lora = _request_lora_tag(new_req)
             req_salt = self._make_topo_salt(self._tp_rank, self._pp_rank, req_lora)
             if new_req.req_id in self._requests_need_load:
@@ -491,7 +700,7 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                         self._block_size,
                         min(matched_toks, aligned_prefix_tokens(total_tokens, self._block_size)),
                         False,
-                        [f.identifier for f in request.mm_features],
+                        _extract_mm_hashes(request),
                         req_salt,
                     )
                     if rm is not None:
@@ -502,7 +711,7 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                 prompt_toks = list(request.prompt_token_ids or [])
                 target_store = aligned_prefix_tokens(len(prompt_toks), self._block_size)
                 if target_store > 0 and total_tokens >= target_store and new_block_ids is not None:
-                    mm_hashes = [f.identifier for f in request.mm_features]
+                    mm_hashes = _extract_mm_hashes(request)
                     req_salt = self._make_topo_salt(self._tp_rank, self._pp_rank, _request_lora_tag(request))
                     cid = _hash_prefix(prompt_toks, target_store, mm_hashes, req_salt)
                     if not self._shard_path(target_store, cid).is_file():
@@ -521,6 +730,15 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                     self._requests_pending_store.pop(req_id, None)
 
         self._requests_need_load.clear()
+        n_load = sum(1 for r in meta.requests if not r.is_store)
+        n_store = sum(1 for r in meta.requests if r.is_store)
+        with self._lock:
+            self._stats["build_connector_meta_calls"] += 1
+            self._stats["meta_load_requests"] += n_load
+            self._stats["meta_store_requests"] += n_store
+            should_flush = bool(meta.requests) or self._stats["build_connector_meta_calls"] == 1
+        if should_flush:
+            self._flush_stats()
         return meta
 
     # ==============================
@@ -550,12 +768,20 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
             return
 
         sample_layer = attn_layers[0][1]
+        layout = _detect_kv_layout(sample_layer, is_mla)
+        with self._lock:
+            self._stats["start_load_kv_calls"] += 1
+            if not self._stats["kv_layout"]:
+                self._stats["kv_layout"] = layout
         kv_quant, _ = _kv_dtype_tag(sample_layer.dtype)
+        any_load = False
 
         for req in metadata.requests:
             if req.is_store:
                 continue
+            any_load = True
             sp = self._shard_path(req.num_tokens, req.doc_cid)
+            t_load0 = time.perf_counter()
             try:
                 with cowrie.MappedStatePageView(
                     str(sp),
@@ -565,6 +791,7 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                     expected_kv_quant=kv_quant,
                     verify_hash=True,
                 ) as mp:
+                    n_bytes = len(mp.buffer)
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore", UserWarning)
                         raw_u8 = torch.frombuffer(mp.buffer, dtype=torch.uint8)
@@ -573,29 +800,53 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                     slots = req.slot_mapping.to(device=sample_layer.device, non_blocking=True)
                     n_layers = len(attn_layers)
 
-                    if is_mla:
+                    if layout == "mla":
                         stacked_gpu = stacked_gpu.reshape(n_layers, req.num_tokens, -1)
                         for idx, (_, dst_layer) in enumerate(attn_layers):
                             orig_shape = dst_layer.shape
                             flat = dst_layer.reshape(orig_shape[0] * orig_shape[1], -1)
                             flat[slots, ...] = stacked_gpu[idx]
-                    else:
+                    elif layout == "2_blocks_first":
                         stacked_gpu = stacked_gpu.reshape(n_layers, 2, req.num_tokens, -1)
                         for idx, (_, dst_layer) in enumerate(attn_layers):
                             orig_shape = dst_layer.shape
                             flat = dst_layer.reshape(2, orig_shape[1] * orig_shape[2], -1)
                             flat[:, slots, ...] = stacked_gpu[idx]
+                    else:  # "blocks_2_first": (num_blocks, 2, block_size, ...)
+                        stacked_gpu = stacked_gpu.reshape(n_layers, 2, req.num_tokens, -1)
+                        for idx, (_, dst_layer) in enumerate(attn_layers):
+                            page_size = dst_layer.shape[2]
+                            tail_shape = dst_layer.shape[3:]
+                            blk_idx = slots // page_size
+                            blk_off = slots % page_size
+                            dst_layer[blk_idx, 0, blk_off, ...] = stacked_gpu[idx, 0].reshape(
+                                req.num_tokens, *tail_shape
+                            )
+                            dst_layer[blk_idx, 1, blk_off, ...] = stacked_gpu[idx, 1].reshape(
+                                req.num_tokens, *tail_shape
+                            )
                     try:
                         os.utime(sp, None)
                     except OSError:
                         pass
+                load_ms = (time.perf_counter() - t_load0) * 1000.0
+                with self._lock:
+                    self._stats["loads_completed"] += 1
+                    self._stats["loaded_tokens"] += int(req.num_tokens)
+                    self._stats["loaded_bytes"] += int(n_bytes)
+                    self._stats["load_ms_total"] = round(self._stats["load_ms_total"] + load_ms, 3)
             except (cowrie.CowrieError, RuntimeError, ValueError, OSError) as exc:
                 # Fail CLOSED: scheduler already credited external prefix tokens for `req`;
                 # proceeding on uninitialized GPU KV blocks would silently corrupt model output.
+                with self._lock:
+                    self._stats["loads_failed"] += 1
+                self._flush_stats()
                 logger.error("Cowrie StatePage verified load failed for %s: %s", sp.name, exc)
                 raise RuntimeError(
                     f"Cowrie StatePage verified restore failed for {sp.name} (refusing uninitialized KV reuse): {exc}"
                 ) from exc
+        if any_load:
+            self._flush_stats()
 
     def wait_for_layer_load(self, layer_name: str) -> None:
         return
@@ -611,17 +862,29 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         if not isinstance(metadata, CowrieConnectorMetadata) or not metadata.requests:
             return
         is_mla = _is_mla_metadata(attn_metadata)
+        layout = _detect_kv_layout(kv_layer, is_mla)
+        with self._lock:
+            self._stats["save_kv_layer_calls"] += 1
+            if not self._stats["kv_layout"]:
+                self._stats["kv_layout"] = layout
 
         for req in metadata.requests:
             if not req.is_store:
                 continue
             slots = req.slot_mapping.to(device=kv_layer.device)
-            if is_mla:
+            if layout == "mla":
                 num_pages, page_size = kv_layer.shape[0], kv_layer.shape[1]
                 sliced = kv_layer.reshape(num_pages * page_size, -1)[slots, ...].contiguous().cpu()
-            else:
+            elif layout == "2_blocks_first":
                 num_pages, page_size = kv_layer.shape[1], kv_layer.shape[2]
                 sliced = kv_layer.reshape(2, num_pages * page_size, -1)[:, slots, ...].contiguous().cpu()
+            else:  # "blocks_2_first": (num_blocks, 2, block_size, ...)
+                page_size = kv_layer.shape[2]
+                blk_idx = slots // page_size
+                blk_off = slots % page_size
+                k_sl = kv_layer[blk_idx, 0, blk_off, ...].reshape(req.num_tokens, -1)
+                v_sl = kv_layer[blk_idx, 1, blk_off, ...].reshape(req.num_tokens, -1)
+                sliced = torch.stack((k_sl, v_sl), dim=0).contiguous().cpu()
             self._staging.setdefault((req.num_tokens, req.doc_cid), []).append((layer_name, sliced))
 
     def _persist_shard_bg(
@@ -633,6 +896,7 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
         raw_bytes: bytes,
     ) -> None:
         key = (num_tokens, doc_cid)
+        t_save0 = time.perf_counter()
         try:
             cowrie.save_statepage(
                 str(sp),
@@ -645,20 +909,31 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                 runtime_id=VLLM_RUNTIME_ID,
                 layout_ver=VLLM_LAYOUT_VER,
             )
+            save_ms = (time.perf_counter() - t_save0) * 1000.0
             with self._lock:
                 self._index_by_len.setdefault(num_tokens, set()).add(sp.name)
+                self._stats["saves_completed"] += 1
+                self._stats["saved_tokens"] += int(num_tokens)
+                self._stats["saved_bytes"] += len(raw_bytes)
+                self._stats["save_ms_total"] = round(self._stats["save_ms_total"] + save_ms, 3)
             self._evict_lru_if_needed()
         except Exception as exc:
+            with self._lock:
+                self._stats["saves_failed"] += 1
             logger.warning("Cowrie background StatePage save failed for %s: %s", sp.name, exc)
         finally:
             with self._lock:
                 self._inflight_saves.discard(key)
                 self._inflight_bytes = max(0, self._inflight_bytes - len(raw_bytes))
+            self._flush_stats()
 
     def wait_for_save(self) -> None:
         metadata = self._get_connector_metadata()
         if not isinstance(metadata, CowrieConnectorMetadata) or not self._staging:
             return
+        with self._lock:
+            self._stats["wait_for_save_calls"] += 1
+        any_change = False
         for req in metadata.requests:
             key = (req.num_tokens, req.doc_cid)
             if not req.is_store or key not in self._staging:
@@ -673,6 +948,8 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                 if key in self._inflight_saves:
                     continue
                 if self._max_inflight_bytes > 0 and (self._inflight_bytes + nbytes) > self._max_inflight_bytes:
+                    self._stats["saves_skipped_inflight_cap"] += 1
+                    any_change = True
                     logger.warning(
                         "Skipping Cowrie KV save (%d B): host-RAM inflight cap %d B reached",
                         nbytes,
@@ -681,11 +958,15 @@ class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
                     continue
                 self._inflight_saves.add(key)
                 self._inflight_bytes += nbytes
+                self._stats["saves_submitted"] += 1
+                any_change = True
             sp = self._shard_path(req.num_tokens, req.doc_cid)
             self._io_pool.submit(
                 self._persist_shard_bg, sp, req.num_tokens, req.doc_cid, kv_quant, raw_bytes
             )
         self._staging.clear()
+        if any_change:
+            self._flush_stats()
 
 
 def register_vllm_plugin() -> None:
