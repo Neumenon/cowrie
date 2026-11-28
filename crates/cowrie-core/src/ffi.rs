@@ -17,7 +17,10 @@ use crate::canonical::{
 use crate::ed25519::{action_from_code, ed25519_public_key, DeclassificationToken};
 #[cfg(unix)]
 use crate::ivf::{ColocatedIvfReader, IvfSearchHit};
-use crate::lens::{extract_field_json, project_r0, project_r1, project_r2, project_r2_compact, project_r3};
+use crate::lens::{
+    alpha_handle, extract_field_json, project_r0, project_r1, project_r2, project_r2_compact,
+    project_r3, project_virtual_atlas, query_frame_slice,
+};
 use crate::sha256::{content_address, to_hex};
 use crate::shard::{
     build_shard_16kb, resolved_frame_cid, verify_shard_and_localize, verify_statepage_bytes,
@@ -330,6 +333,116 @@ pub unsafe extern "C" fn cowrie_extract_field(
     })
 }
 
+/// Format the deterministic 10-letter 47-bit `Alpha32` handle (`@abcdefghij`, 11 bytes + NUL)
+/// from a 34-byte SHA-256 multihash CID.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_alpha_handle(
+    cid_34: *const u8,
+    out_handle_12: *mut c_char,
+) -> c_int {
+    ffi_code(|| {
+        if cid_34.is_null() || out_handle_12.is_null() {
+            return CowrieError::Truncated.code();
+        }
+        let cid: [u8; 34] = std::slice::from_raw_parts(cid_34, 34).try_into().unwrap();
+        let handle = alpha_handle(&cid);
+        let bytes = handle.as_bytes();
+        if bytes.len() != 11 {
+            return CowrieError::Internal.code();
+        }
+        ptr::copy_nonoverlapping(bytes.as_ptr(), out_handle_12 as *mut u8, 11);
+        *out_handle_12.add(11) = 0;
+        0
+    })
+}
+
+/// Project a canonical `COWR` frame into a bounded pre-append virtualization atlas (`B2-b`),
+/// automatically Mealy-fenced whenever the frame is untrusted or tainted.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_project_virtual_atlas(
+    frame_data: *const u8,
+    frame_len: usize,
+    max_chars: usize,
+    out_buf: *mut CowrieBuf,
+) -> c_int {
+    ffi_code(|| {
+        if out_buf.is_null() || (frame_data.is_null() && frame_len > 0) {
+            return CowrieError::Truncated.code();
+        }
+        *out_buf = CowrieBuf::empty();
+        let slice = if frame_len == 0 { &[] } else { std::slice::from_raw_parts(frame_data, frame_len) };
+        let dec = match decode_frame_strict(slice) {
+            Ok(d) => d,
+            Err(e) => return e.code(),
+        };
+        let cap = if max_chars == 0 { 1800 } else { max_chars };
+        *out_buf = CowrieBuf::from_string(project_virtual_atlas(slice, &dec, cap));
+        0
+    })
+}
+
+/// Bounded `cowrie_get` slice query over a canonical `COWR` frame (`pointer`, `grep`, 1-based
+/// inclusive `line_start..=line_end`, char `offset`, `max_chars`). Pass `0` for omitted lengths
+/// or `line_start == 0` when no line range is requested.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_query_frame_slice(
+    frame_data: *const u8,
+    frame_len: usize,
+    pointer_utf8: *const u8,
+    pointer_len: usize,
+    grep_utf8: *const u8,
+    grep_len: usize,
+    line_start: usize,
+    line_end: usize,
+    offset: usize,
+    max_chars: usize,
+    out_buf: *mut CowrieBuf,
+) -> c_int {
+    ffi_code(|| {
+        if out_buf.is_null()
+            || (frame_data.is_null() && frame_len > 0)
+            || (pointer_utf8.is_null() && pointer_len > 0)
+            || (grep_utf8.is_null() && grep_len > 0)
+        {
+            return CowrieError::Truncated.code();
+        }
+        *out_buf = CowrieBuf::empty();
+        let fslice = if frame_len == 0 { &[] } else { std::slice::from_raw_parts(frame_data, frame_len) };
+        let ptr_opt = if pointer_len == 0 {
+            None
+        } else {
+            let s = match std::str::from_utf8(std::slice::from_raw_parts(pointer_utf8, pointer_len)) {
+                Ok(v) => v,
+                Err(_) => return CowrieError::InvalidUtf8.code(),
+            };
+            Some(s)
+        };
+        let grep_opt = if grep_len == 0 {
+            None
+        } else {
+            let s = match std::str::from_utf8(std::slice::from_raw_parts(grep_utf8, grep_len)) {
+                Ok(v) => v,
+                Err(_) => return CowrieError::InvalidUtf8.code(),
+            };
+            Some(s)
+        };
+        let lines_opt = if line_start > 0 {
+            let end = if line_end > 0 { line_end } else { line_start.saturating_add(30) };
+            Some((line_start, end))
+        } else {
+            None
+        };
+        let cap = if max_chars == 0 { 2400 } else { max_chars };
+        match query_frame_slice(fslice, ptr_opt, grep_opt, lines_opt, offset, cap) {
+            Ok(rendered) => {
+                *out_buf = CowrieBuf::from_string(rendered);
+                0
+            }
+            Err(e) => e.code(),
+        }
+    })
+}
+
 /// Verify a `CWRF` shard buffer (both Plane A frames and Plane C tensor arenas).
 #[no_mangle]
 pub unsafe extern "C" fn cowrie_shard_verify(
@@ -386,7 +499,11 @@ pub unsafe extern "C" fn cowrie_propagate_authority(
     num_parents: usize,
 ) -> u8 {
     match catch_unwind(AssertUnwindSafe(|| {
-        let parents = if parent_auths.is_null() || num_parents == 0 {
+        // [FORMAL-F12] Fail closed if caller supplies a NULL pointer with non-zero parent count.
+        if parent_auths.is_null() && num_parents > 0 {
+            return base_auth | crate::trust::BIT_TAINTED;
+        }
+        let parents = if num_parents == 0 {
             &[]
         } else {
             std::slice::from_raw_parts(parent_auths, num_parents)

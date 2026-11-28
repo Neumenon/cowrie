@@ -17,9 +17,11 @@ import time
 from typing import Any, Dict, List, Optional, Sequence
 import uuid
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT / "python") not in sys.path:
-    sys.path.insert(0, str(ROOT / "python"))
+import importlib.util
+if importlib.util.find_spec("cowrie") is None:
+    ROOT = Path(__file__).resolve().parents[2]
+    if str(ROOT / "python") not in sys.path:
+        sys.path.insert(0, str(ROOT / "python"))
 
 import cowrie
 

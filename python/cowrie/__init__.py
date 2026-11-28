@@ -80,6 +80,14 @@ class CowrieError(Exception):
         self.rc = rc
 
 
+def _load_compatible_lib(path: Path):
+    """Load a candidate `libcowrie_core` and verify it exports the required v1.2 ABI symbols."""
+    lib = ctypes.CDLL(str(path))
+    if not hasattr(lib, "cowrie_query_frame_slice"):
+        return None
+    return lib
+
+
 def _find_lib() -> str:
     for var in ("COWRIE_LIB", "COWRIE_LIB_PATH"):
         env = os.environ.get(var)
@@ -87,20 +95,28 @@ def _find_lib() -> str:
             return env
     lib_name = _lib_filename()
     pkg_dir = Path(__file__).resolve().parent
-    trusted_candidates = [
-        pkg_dir / lib_name,
-        Path.home() / ".local" / "lib" / lib_name,
-        Path("/usr/local/lib") / lib_name,
-    ]
-    for c in trusted_candidates:
-        if _is_safe_shared_lib(c, require_owner_check=False):
-            return str(c)
-    # Scratch cargo target fallback: strictly verify ownership and non-world-writable mode (CWE-426 guard).
     cargo_target = Path(os.environ.get("CARGO_TARGET_DIR", "/tmp/cowrie-cargo-target"))
-    for profile in ("release", "debug"):
-        cand = cargo_target / profile / lib_name
-        if _is_safe_shared_lib(cand, require_owner_check=True):
-            return str(cand)
+
+    ordered_candidates = [
+        (pkg_dir / lib_name, False),
+        (cargo_target / "release" / lib_name, True),
+        (cargo_target / "debug" / lib_name, True),
+        (Path.home() / ".local" / "lib" / lib_name, False),
+        (Path("/usr/local/lib") / lib_name, False),
+    ]
+    fallback_path = None
+    for cand, req_owner in ordered_candidates:
+        if not _is_safe_shared_lib(cand, require_owner_check=req_owner):
+            continue
+        try:
+            if _load_compatible_lib(cand) is not None:
+                return str(cand)
+            if fallback_path is None:
+                fallback_path = str(cand)
+        except OSError:
+            continue
+    if fallback_path is not None:
+        return fallback_path
     raise FileNotFoundError(
         f"{lib_name} not found; set COWRIE_LIB (or COWRIE_LIB_PATH) or build with `make build`"
     )
@@ -140,6 +156,24 @@ _LIB.cowrie_extract_field.argtypes = [
     ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)
 ]
 _LIB.cowrie_extract_field.restype = ctypes.c_int
+
+_LIB.cowrie_alpha_handle.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+_LIB.cowrie_alpha_handle.restype = ctypes.c_int
+
+_LIB.cowrie_project_virtual_atlas.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)
+]
+_LIB.cowrie_project_virtual_atlas.restype = ctypes.c_int
+
+_LIB.cowrie_query_frame_slice.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t,
+    ctypes.c_char_p, ctypes.c_size_t,
+    ctypes.c_char_p, ctypes.c_size_t,
+    ctypes.c_size_t, ctypes.c_size_t,
+    ctypes.c_size_t, ctypes.c_size_t,
+    ctypes.POINTER(CowrieBuf),
+]
+_LIB.cowrie_query_frame_slice.restype = ctypes.c_int
 
 _LIB.cowrie_shard_pack_single.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)]
 _LIB.cowrie_shard_pack_single.restype = ctypes.c_int
@@ -700,6 +734,56 @@ def extract_field(frame: bytes, path: str) -> str:
     pb = path.encode("utf-8")
     out = CowrieBuf()
     rc = _LIB.cowrie_extract_field(frame, len(frame), pb, len(pb), ctypes.byref(out))
+    _check(rc)
+    return _take_buf(out).decode("utf-8")
+
+
+def alpha_handle(cid_34: bytes) -> str:
+    """Return the deterministic 10-letter Alpha32 handle (`@abcdefghij`) for a 34-byte CID."""
+    if not isinstance(cid_34, (bytes, bytearray)) or len(cid_34) != 34:
+        raise ValueError("cid_34 must be exactly 34 bytes")
+    out = ctypes.create_string_buffer(12)
+    _check(_LIB.cowrie_alpha_handle(bytes(cid_34), out))
+    return out.value.decode("ascii")
+
+
+def project_virtual_atlas(frame: bytes, max_chars: int = 1800) -> str:
+    """Project a canonical COWR frame into a bounded pre-append virtualization atlas (Mealy-fenced when untrusted/tainted)."""
+    out = CowrieBuf()
+    rc = _LIB.cowrie_project_virtual_atlas(frame, len(frame), int(max_chars), ctypes.byref(out))
+    _check(rc)
+    return _take_buf(out).decode("utf-8")
+
+
+def query_frame_slice(
+    frame: bytes,
+    pointer: str | None = None,
+    grep: str | None = None,
+    lines: tuple[int, int] | list[int] | None = None,
+    offset: int = 0,
+    max_chars: int = 2400,
+) -> str:
+    """Bounded `cowrie_get` slice query over a canonical COWR frame (pointer, grep, 1-based inclusive lines, offset, max_chars)."""
+    pb = pointer.encode("utf-8") if pointer else b""
+    gb = grep.encode("utf-8") if grep else b""
+    line_start = 0
+    line_end = 0
+    if lines is not None:
+        if len(lines) < 1:
+            raise ValueError("lines must have 1 or 2 positive integers")
+        line_start = int(lines[0])
+        line_end = int(lines[1]) if len(lines) >= 2 else line_start + 30
+        if line_start < 1 or line_end < 1:
+            raise ValueError("lines must be 1-based positive integers")
+    out = CowrieBuf()
+    rc = _LIB.cowrie_query_frame_slice(
+        frame, len(frame),
+        pb if pb else None, len(pb),
+        gb if gb else None, len(gb),
+        line_start, line_end,
+        max(0, int(offset)), max(0, int(max_chars)),
+        ctypes.byref(out),
+    )
     _check(rc)
     return _take_buf(out).decode("utf-8")
 

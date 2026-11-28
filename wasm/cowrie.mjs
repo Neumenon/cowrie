@@ -236,6 +236,61 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
       }
     },
 
+    alphaHandle(cid34) {
+      if (!(cid34 instanceof Uint8Array) || cid34.length !== 34) {
+        throw new Error("Expected 34-byte Uint8Array CID");
+      }
+      const outPtr = ex.cowrie_wasm_alloc(12);
+      try {
+        check(withBytes(cid34, (cp) => ex.cowrie_alpha_handle(cp, outPtr)));
+        return cstr(outPtr);
+      } finally {
+        ex.cowrie_wasm_free(outPtr, 12);
+      }
+    },
+
+    projectVirtualAtlas(frameU8, maxChars = 1800) {
+      const bufStruct = ex.cowrie_wasm_alloc(12);
+      try {
+        const rc = withBytes(frameU8, (p, n) =>
+          ex.cowrie_project_virtual_atlas(p, n, Number(maxChars) || 1800, bufStruct)
+        );
+        check(rc);
+        return dec.decode(takeCowrieBuf(bufStruct));
+      } finally {
+        ex.cowrie_wasm_free(bufStruct, 12);
+      }
+    },
+
+    queryFrameSlice(frameU8, opts = {}) {
+      const pointerBytes = opts.pointer ? enc.encode(String(opts.pointer)) : new Uint8Array(0);
+      const grepBytes = opts.grep ? enc.encode(String(opts.grep)) : new Uint8Array(0);
+      let lineStart = 0;
+      let lineEnd = 0;
+      if (Array.isArray(opts.lines) && opts.lines.length >= 1) {
+        lineStart = Math.max(0, Number(opts.lines[0]) | 0);
+        lineEnd = opts.lines.length >= 2 ? Math.max(0, Number(opts.lines[1]) | 0) : lineStart + 30;
+      }
+      const offset = Math.max(0, Number(opts.offset || 0) | 0);
+      const maxChars = Math.max(0, Number(opts.maxChars ?? opts.max_chars ?? 2400) | 0);
+      const bufStruct = ex.cowrie_wasm_alloc(12);
+      try {
+        const rc = withBytes(frameU8, (fp, fn) =>
+          withBytes(pointerBytes, (pp, pn) =>
+            withBytes(grepBytes, (gp, gn) =>
+              ex.cowrie_query_frame_slice(
+                fp, fn, pp, pn, gp, gn, lineStart, lineEnd, offset, maxChars, bufStruct
+              )
+            )
+          )
+        );
+        check(rc);
+        return dec.decode(takeCowrieBuf(bufStruct));
+      } finally {
+        ex.cowrie_wasm_free(bufStruct, 12);
+      }
+    },
+
     packSingleShard(frameU8) {
       const bufStruct = ex.cowrie_wasm_alloc(12);
       try {

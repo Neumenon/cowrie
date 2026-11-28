@@ -1,6 +1,11 @@
 target/
+build/
+dist/
+*.egg-info/
 __pycache__/
 *.pyc
 *.cowrie.tmp
 *.cwrf.tmp
 *.o
+wasm/cowrie_core.wasm
+wasm/*.tgz

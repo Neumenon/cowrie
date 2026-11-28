@@ -72,6 +72,16 @@ int cowrie_decode_to_json(const uint8_t* data, size_t len, CowrieBuf* out_buf);
 int cowrie_project_lens(const uint8_t* frame_data, size_t frame_len, uint8_t tier, size_t tensor_count, CowrieBuf* out_buf);
 int cowrie_project_r2_compact(const uint8_t* frame_data, size_t frame_len, CowrieBuf* out_buf);
 int cowrie_extract_field(const uint8_t* frame_data, size_t frame_len, const uint8_t* path_utf8, size_t path_len, CowrieBuf* out_buf);
+int cowrie_alpha_handle(const uint8_t* cid_34, char* out_handle_12);
+int cowrie_project_virtual_atlas(const uint8_t* frame_data, size_t frame_len, size_t max_chars, CowrieBuf* out_buf);
+int cowrie_query_frame_slice(
+    const uint8_t* frame_data, size_t frame_len,
+    const uint8_t* pointer_utf8, size_t pointer_len,
+    const uint8_t* grep_utf8, size_t grep_len,
+    size_t line_start, size_t line_end,
+    size_t offset, size_t max_chars,
+    CowrieBuf* out_buf
+);
 
 /* Plane C/D: 16 KB CWRF shard verification (Plane A + Plane C Merkle) & causal taint */
 int     cowrie_shard_pack_single(const uint8_t* frame_data, size_t frame_len, CowrieBuf* out_buf);

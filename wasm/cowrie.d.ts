@@ -47,6 +47,19 @@ export interface CowrieWasmClient {
   projectLens(frameU8: Uint8Array, tier?: CowrieLensTier, tensorCount?: number): string;
   projectR2Compact(frameU8: Uint8Array): string;
   extractField(frameU8: Uint8Array, fieldPath: string): string;
+  alphaHandle(cid34: Uint8Array): string;
+  projectVirtualAtlas(frameU8: Uint8Array, maxChars?: number): string;
+  queryFrameSlice(
+    frameU8: Uint8Array,
+    opts?: {
+      pointer?: string;
+      grep?: string;
+      lines?: [number, number] | [number];
+      offset?: number;
+      maxChars?: number;
+      max_chars?: number;
+    }
+  ): string;
   packSingleShard(frameU8: Uint8Array): Uint8Array;
   verifyShard(shardU8: Uint8Array): VerifiedShard;
   resolvedFrameCid(shardU8: Uint8Array, frameIdx?: number): { cid: Uint8Array; cidHex: string };

@@ -1,0 +1,8 @@
+include README.md LICENSE Cargo.toml Cargo.lock pyproject.toml setup.py
+recursive-include crates *.rs *.toml *.h
+recursive-include python *.py
+recursive-include adapters/vllm *.py
+prune target
+prune build
+prune dist
+global-exclude __pycache__ *.pyc *.pyo

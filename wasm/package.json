@@ -1,20 +1,46 @@
 {
-  "name": "@cowrie/wasm",
+  "name": "cowrie-ai",
   "version": "1.2.0",
-  "description": "Zero-dependency WebAssembly SDK for Cowrie canonical framing, R0-R2 lenses, 16 KB CWRF/CWSP Merkle verification, causal taint, and RFC 8032 Ed25519 declassification.",
+  "description": "Zero-dependency MCP virtualization & taint proxy (`npx cowrie-ai mcp-proxy --virtualize`), CLI, and WebAssembly SDK for Cowrie v1.2.",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./cowrie.mjs",
   "types": "./cowrie.d.ts",
+  "bin": {
+    "cowrie": "./bin/cowrie.mjs",
+    "cowrie-ai": "./bin/cowrie.mjs"
+  },
   "exports": {
     ".": {
       "types": "./cowrie.d.ts",
       "import": "./cowrie.mjs"
-    }
+    },
+    "./mcp-mediator": "./mcp-mediator.mjs",
+    "./mcp-proxy": "./mcp-proxy.mjs"
   },
   "files": [
     "cowrie.mjs",
-    "cowrie.d.ts"
+    "cowrie.d.ts",
+    "cowrie_core.wasm",
+    "mcp-mediator.mjs",
+    "mcp-proxy.mjs",
+    "bin/cowrie.mjs"
+  ],
+  "scripts": {
+    "build:wasm": "node -e 'import(\"node:child_process\").then(cp => { const target = process.env.CARGO_TARGET_DIR || \"/tmp/cowrie-cargo-target\"; cp.execFileSync(\"cargo\", [\"build\", \"-p\", \"cowrie-core\", \"--target\", \"wasm32-unknown-unknown\", \"--release\"], { cwd: \"..\", stdio: \"inherit\", env: { ...process.env, CARGO_TARGET_DIR: target, RUSTFLAGS: \"-C strip=symbols\" } }); import(\"node:fs\").then(fs => fs.copyFileSync(target + \"/wasm32-unknown-unknown/release/cowrie_core.wasm\", \"./cowrie_core.wasm\")); })'",
+    "test": "node ./test_wasm.mjs"
+  },
+  "keywords": [
+    "cowrie",
+    "mcp",
+    "mcp-proxy",
+    "claude",
+    "cursor",
+    "llm",
+    "wasm",
+    "security",
+    "prompt-injection",
+    "ed25519"
   ],
   "repository": {
     "type": "git",

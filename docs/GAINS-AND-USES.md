@@ -64,27 +64,35 @@ Runs zero-alloc frame verification (`1.72 µs`), `R0–R2` lens projection, 16 K
 
 ## 3. Copy-Paste Quickstarts
 
-### A. CLI & `cowrie mcp-proxy`
+### A. 30-Second Wedge: CLI, `npx`, & `cowrie mcp-proxy --virtualize`
 ```bash
-make -C /home/omen/cowrie build
-COWRIE=/tmp/cowrie-cargo-target/release/cowrie
+# Install self-contained wheel (bundles native Rust `cowrie` CLI + `libcowrie_core` + Python adapters)
+pip install cowrie-ai
+cowrie mcp-proxy --virtualize -- npx -y @modelcontextprotocol/server-everything
 
-$COWRIE pack input.json out.cowrie --auth verified
-$COWRIE verify out.cowrie
-$COWRIE lens out.cowrie --tier r2
+# Or zero-install via npm/WASM (works on macOS, Linux, Windows)
+npx -y cowrie-ai mcp-proxy --virtualize -- npx -y @modelcontextprotocol/server-everything
 
-$COWRIE keygen --out-seed-file /tmp/owner.seed
-PUB=$($COWRIE ed25519-pubkey --seed-file /tmp/owner.seed)
-$COWRIE mcp-proxy --owner-pubkey "$PUB" --audit-wal mcp_session.cwwal -- npx -y @modelcontextprotocol/server-everything
+# Generate ready-to-paste Claude Code / Cursor / Claude Desktop config
+cowrie mcp-config --client cursor --virtualize --trust-server-annotations -- fs npx -y @modelcontextprotocol/server-filesystem .
+
+# Offline RFC 8032 Ed25519 owner key + hash-chained `.cwwal` audit trail
+cowrie keygen --out-seed-file /tmp/owner.seed
+PUB=$(cowrie ed25519-pubkey --seed-file /tmp/owner.seed)
+cowrie mcp-proxy --virtualize --owner-pubkey "$PUB" --audit-wal mcp_session.cwwal -- npx -y @modelcontextprotocol/server-everything
 ```
 
-### B. `vLLM 0.15+` KV Offloading & Memory (`adapters/vllm/`)
+### B. `vLLM 0.15+` KV Offloading (`CowrieKVConnectorV1`) & Agent Memory
+```bash
+# Auto-registered via `vllm.general_plugins` after `pip install cowrie-ai`:
+vllm serve Qwen/Qwen3-8B \
+  --enable-prefix-caching \
+  --kv-transfer-config '{"kv_connector":"CowrieKVConnectorV1","kv_role":"kv_both"}'
+```
+
 ```python
 import cowrie
-from cowrie_vllm import CowrieMemoryStore
-
-# Enable CowrieKVConnectorV1 on vLLM launch:
-#   --kv-transfer-config '{"kv_connector":"CowrieKVConnectorV1","kv_role":"kv_both","kv_connector_module_path":"cowrie_kv_connector"}'
+from cowrie_vllm_adapters.cowrie_vllm import CowrieMemoryStore
 
 seed = bytes([0x5A]) * 32
 pk   = cowrie.ed25519_pubkey(seed)

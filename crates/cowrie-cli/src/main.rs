@@ -37,8 +37,10 @@ use cowrie_core::wal::WalStore;
 
 fn usage() {
     eprintln!(
-        "cowrie (Cowrie v1.2 CLI & Zero-Trust MCP Wire Firewall)\n\
+        "cowrie {} (Cowrie v1.2 CLI & Zero-Trust MCP Wire Firewall)\n\
          Usage:\n\
+         \x20 cowrie mcp-proxy [--mode enforce|observe] [--owner-pubkey <64-hex>] [--audit-wal <path.cwwal>] [--policy <policy.json>] [--trust-server-annotations] [--virtualize | --virtualize-bytes <N>] [--quiet] -- <mcp_cmd> [args...]\n\
+         \x20 cowrie mcp-config [--client claude-code|claude-desktop|cursor] [--bin cowrie|npx] [--mode enforce|observe] [--virtualize | --virtualize-bytes <N>] [--trust-server-annotations] [--policy <path>] [--audit-wal <path>] -- <server-name> <mcp_cmd> [args...]\n\
          \x20 cowrie pack <in.json> <out.cowrie> [--auth policy|verified|untrusted|synth] [--raw]\n\
          \x20 cowrie pack-batch <out.cowrie> [--auth ...] (--jsonl <in.jsonl> | <in1.json> [<in2.json> ...])\n\
          \x20 cowrie inspect <file.cowrie>\n\
@@ -50,7 +52,8 @@ fn usage() {
          \x20 cowrie keygen [--out-seed-file <path>]\n\
          \x20 cowrie ed25519-pubkey (<seed-64-hex> | --seed-file <path|->)\n\
          \x20 cowrie declassify-sign (<seed-64-hex> | --seed-file <path|->) <cid-68-hex> <shell_exec|cred_read|fs_write|net_exfil> <expiry_unix>\n\
-         \x20 cowrie mcp-proxy [--owner-pubkey <64-hex>] [--audit-wal <path.cwwal>] [--policy <policy.json>] [--trust-server-annotations] [--virtualize | --virtualize-bytes <N>] -- <mcp_cmd> [args...]"
+         \x20 cowrie --version | --help",
+        env!("CARGO_PKG_VERSION")
     );
 }
 
@@ -346,6 +349,12 @@ struct VirtualEntry {
     authority: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProxyMode {
+    Enforce,
+    Observe,
+}
+
 struct ProxyState {
     ledger: TrustLedger,
     tainted_context_cids: Vec<[u8; 34]>,
@@ -353,6 +362,8 @@ struct ProxyState {
     tool_readonly_hints: HashMap<String, bool>,
     tool_open_world_hints: HashMap<String, bool>,
     policy: HostToolPolicy,
+    mode: ProxyMode,
+    quiet: bool,
     wal_failed: bool,
     #[cfg(unix)]
     wal: Option<WalStore>,
@@ -360,6 +371,8 @@ struct ProxyState {
     virtualize_bytes: usize,
     virtual_store: HashMap<String, VirtualEntry>,
     virtual_order: VecDeque<String>,
+    total_raw_bytes: u64,
+    total_atlas_bytes: u64,
 }
 
 impl ProxyState {
@@ -770,7 +783,27 @@ fn evaluate_single_mcp_request(
                         .is_err()
                     {
                         let first_cid = to_hex(&lineage[0]);
-                        return Err(format_blocked_jsonrpc(&id_json, tool_name, &first_cid));
+                        match st.mode {
+                            ProxyMode::Enforce => {
+                                if !st.quiet {
+                                    eprintln!(
+                                        "[cowrie][enforce] BLOCKED tainted call '{}' (code=-32025, cid={}...)",
+                                        tool_name,
+                                        &first_cid[..16]
+                                    );
+                                }
+                                return Err(format_blocked_jsonrpc(&id_json, tool_name, &first_cid));
+                            }
+                            ProxyMode::Observe => {
+                                if !st.quiet {
+                                    eprintln!(
+                                        "[cowrie][observe] WOULD BLOCK tainted call '{}' (cid={}...) — pass --mode enforce to hard-block",
+                                        tool_name,
+                                        &first_cid[..16]
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -879,6 +912,25 @@ fn process_mcp_response_obj(val: &mut Value, raw_line: &str, st: &mut ProxyState
                                     let p_cid = content_address(&p_frame);
                                     let handle = alpha_handle(&p_cid);
                                     let atlas = project_virtual_atlas(&p_frame, &p_dec, 1800);
+                                    let atlas_len = atlas.len();
+                                    st.total_raw_bytes = st.total_raw_bytes.saturating_add(raw_bytes as u64);
+                                    st.total_atlas_bytes = st.total_atlas_bytes.saturating_add(atlas_len as u64);
+                                    if !st.quiet {
+                                        let pct = if raw_bytes > 0 {
+                                            (1.0 - (atlas_len as f64 / raw_bytes as f64)) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        let est_tok = raw_bytes.saturating_sub(atlas_len) / 4;
+                                        eprintln!(
+                                            "[cowrie] virtualized resource/prompt {:.1} KB -> {:.1} KB (-{:.1}%, ~{} tok saved) handle={} tainted=true",
+                                            raw_bytes as f64 / 1024.0,
+                                            atlas_len as f64 / 1024.0,
+                                            pct,
+                                            est_tok,
+                                            handle
+                                        );
+                                    }
                                     st.store_virtual(
                                         handle.clone(),
                                         VirtualEntry { cid, frame: p_frame, authority: resp_auth },
@@ -930,6 +982,27 @@ fn process_mcp_response_obj(val: &mut Value, raw_line: &str, st: &mut ProxyState
                                     let p_cid = content_address(&p_frame);
                                     let handle = alpha_handle(&p_cid);
                                     let atlas = project_virtual_atlas(&p_frame, &p_dec, 1800);
+                                    let atlas_len = atlas.len();
+                                    st.total_raw_bytes = st.total_raw_bytes.saturating_add(raw_bytes as u64);
+                                    st.total_atlas_bytes = st.total_atlas_bytes.saturating_add(atlas_len as u64);
+                                    if !st.quiet {
+                                        let pct = if raw_bytes > 0 {
+                                            (1.0 - (atlas_len as f64 / raw_bytes as f64)) * 100.0
+                                        } else {
+                                            0.0
+                                        };
+                                        let est_tok = raw_bytes.saturating_sub(atlas_len) / 4;
+                                        eprintln!(
+                                            "[cowrie] virtualized '{}' {:.1} KB -> {:.1} KB (-{:.1}%, ~{} tok saved) handle={} tainted={}",
+                                            tool_name,
+                                            raw_bytes as f64 / 1024.0,
+                                            atlas_len as f64 / 1024.0,
+                                            pct,
+                                            est_tok,
+                                            handle,
+                                            tainted
+                                        );
+                                    }
                                     st.store_virtual(
                                         handle.clone(),
                                         VirtualEntry { cid, frame: p_frame, authority: resp_auth },
@@ -953,6 +1026,8 @@ fn run_mcp_proxy(
     owner_pubkey: Option<[u8; 32]>,
     wal_path: Option<&str>,
     policy: HostToolPolicy,
+    mode: ProxyMode,
+    quiet: bool,
     virtualize_bytes: usize,
     cmd_args: &[String],
 ) -> ! {
@@ -1002,6 +1077,8 @@ fn run_mcp_proxy(
         tool_readonly_hints: HashMap::new(),
         tool_open_world_hints: HashMap::new(),
         policy,
+        mode,
+        quiet,
         wal_failed: false,
         #[cfg(unix)]
         wal,
@@ -1009,6 +1086,8 @@ fn run_mcp_proxy(
         virtualize_bytes,
         virtual_store: HashMap::new(),
         virtual_order: VecDeque::new(),
+        total_raw_bytes: 0,
+        total_atlas_bytes: 0,
     }));
 
     // Reader thread: MCP Server stdout -> canonicalize & taint external responses -> locked Agent stdout
@@ -1156,6 +1235,165 @@ fn main() {
     }
 
     match args[1].as_str() {
+        "--version" | "-V" | "version" => {
+            println!("cowrie {}", env!("CARGO_PKG_VERSION"));
+        }
+
+        "--help" | "-h" | "help" => {
+            usage();
+        }
+
+        "mcp-config" => {
+            let mut client = "cursor";
+            let mut bin_mode = "cowrie";
+            let mut mode_arg: Option<&str> = None;
+            let mut virtualize = true;
+            let mut virtualize_bytes: Option<usize> = None;
+            let mut trust_ann = false;
+            let mut policy_path: Option<String> = None;
+            let mut wal_path: Option<String> = None;
+            let mut sep = None;
+            let mut i = 2;
+            while i < args.len() {
+                if args[i] == "--" {
+                    sep = Some(i + 1);
+                    break;
+                } else if args[i] == "--client" && i + 1 < args.len() {
+                    client = args[i + 1].as_str();
+                    i += 2;
+                } else if args[i] == "--bin" && i + 1 < args.len() {
+                    bin_mode = args[i + 1].as_str();
+                    i += 2;
+                } else if args[i] == "--mode" && i + 1 < args.len() {
+                    let m = args[i + 1].as_str();
+                    if !matches!(m, "enforce" | "observe") {
+                        eprintln!("Invalid --mode '{}' (expected enforce|observe)", m);
+                        process::exit(2);
+                    }
+                    mode_arg = Some(m);
+                    i += 2;
+                } else if args[i] == "--virtualize" {
+                    virtualize = true;
+                    i += 1;
+                } else if args[i] == "--no-virtualize" {
+                    virtualize = false;
+                    i += 1;
+                } else if args[i] == "--virtualize-bytes" && i + 1 < args.len() {
+                    virtualize_bytes = Some(args[i + 1].parse().unwrap_or_else(|_| {
+                        eprintln!("Invalid --virtualize-bytes '{}'", args[i + 1]);
+                        process::exit(2);
+                    }));
+                    virtualize = true;
+                    i += 2;
+                } else if args[i] == "--trust-server-annotations" {
+                    trust_ann = true;
+                    i += 1;
+                } else if args[i] == "--policy" && i + 1 < args.len() {
+                    policy_path = Some(args[i + 1].clone());
+                    i += 2;
+                } else if args[i] == "--audit-wal" && i + 1 < args.len() {
+                    wal_path = Some(args[i + 1].clone());
+                    i += 2;
+                } else {
+                    eprintln!("Unknown mcp-config option '{}'", args[i]);
+                    process::exit(2);
+                }
+            }
+            let Some(cmd_start) = sep else {
+                usage();
+                process::exit(2);
+            };
+            if cmd_start + 1 >= args.len() {
+                eprintln!("mcp-config requires `-- <server-name> <mcp_cmd> [args...]`");
+                process::exit(2);
+            }
+            let server_name = &args[cmd_start];
+            let target_cmd = &args[cmd_start + 1..];
+
+            let (command, mut proxy_args): (&str, Vec<String>) = match bin_mode {
+                "cowrie" => ("cowrie", vec!["mcp-proxy".to_string()]),
+                "npx" => (
+                    "npx",
+                    vec![
+                        "-y".to_string(),
+                        "cowrie-ai".to_string(),
+                        "mcp-proxy".to_string(),
+                    ],
+                ),
+                other => {
+                    eprintln!("Unknown --bin '{}' (expected cowrie|npx)", other);
+                    process::exit(2);
+                }
+            };
+            if let Some(m) = mode_arg {
+                proxy_args.push("--mode".to_string());
+                proxy_args.push(m.to_string());
+            }
+            if let Some(vb) = virtualize_bytes {
+                proxy_args.push("--virtualize-bytes".to_string());
+                proxy_args.push(vb.to_string());
+            } else if virtualize {
+                proxy_args.push("--virtualize".to_string());
+            }
+            if trust_ann {
+                proxy_args.push("--trust-server-annotations".to_string());
+            }
+            if let Some(ref p) = policy_path {
+                proxy_args.push("--policy".to_string());
+                proxy_args.push(p.clone());
+            }
+            if let Some(ref w) = wal_path {
+                proxy_args.push("--audit-wal".to_string());
+                proxy_args.push(w.clone());
+            }
+            proxy_args.push("--".to_string());
+            proxy_args.extend(target_cmd.iter().cloned());
+
+            match client {
+                "claude-code" => {
+                    let quote_sh = |s: &str| -> String {
+                        if s.bytes()
+                            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/' | b':' | b'@'))
+                        {
+                            s.to_string()
+                        } else {
+                            format!("'{}'", s.replace('\'', "'\\''"))
+                        }
+                    };
+                    let mut parts = vec![
+                        "claude".to_string(),
+                        "mcp".to_string(),
+                        "add".to_string(),
+                        quote_sh(server_name),
+                        "--".to_string(),
+                        quote_sh(command),
+                    ];
+                    for a in &proxy_args {
+                        parts.push(quote_sh(a));
+                    }
+                    println!("{}", parts.join(" "));
+                }
+                "cursor" | "claude-desktop" => {
+                    let args_json: Vec<String> = proxy_args
+                        .iter()
+                        .map(|a| value_to_plain_json(&Value::Str(a.clone())))
+                        .collect();
+                    let name_json = value_to_plain_json(&Value::Str(server_name.clone()));
+                    let cmd_json = value_to_plain_json(&Value::Str(command.to_string()));
+                    println!(
+                        "{{\n  \"mcpServers\": {{\n    {}: {{\n      \"command\": {},\n      \"args\": [{}]\n    }}\n  }}\n}}",
+                        name_json,
+                        cmd_json,
+                        args_json.join(", ")
+                    );
+                }
+                other => {
+                    eprintln!("Unknown --client '{}' (expected claude-code|claude-desktop|cursor)", other);
+                    process::exit(2);
+                }
+            }
+        }
+
         "pack" => {
             if args.len() < 4 {
                 usage();
@@ -1678,6 +1916,8 @@ fn main() {
             let mut wal_path: Option<String> = None;
             let mut policy_path: Option<String> = None;
             let mut trust_server_annotations = false;
+            let mut mode = ProxyMode::Enforce;
+            let mut quiet = false;
             let mut virtualize_bytes: usize = 0;
             let mut sep = None;
             let mut i = 2;
@@ -1685,6 +1925,19 @@ fn main() {
                 if args[i] == "--" {
                     sep = Some(i + 1);
                     break;
+                } else if args[i] == "--mode" && i + 1 < args.len() {
+                    mode = match args[i + 1].as_str() {
+                        "enforce" => ProxyMode::Enforce,
+                        "observe" => ProxyMode::Observe,
+                        other => {
+                            eprintln!("Invalid --mode '{}' (expected enforce|observe)", other);
+                            process::exit(2);
+                        }
+                    };
+                    i += 2;
+                } else if args[i] == "--quiet" || args[i] == "-q" {
+                    quiet = true;
+                    i += 1;
                 } else if args[i] == "--owner-pubkey" && i + 1 < args.len() {
                     owner_pk = parse_hex_exact::<32>(&args[i + 1]);
                     if owner_pk.is_none() {
@@ -1726,7 +1979,15 @@ fn main() {
                     ..Default::default()
                 },
             };
-            run_mcp_proxy(owner_pk, wal_path.as_deref(), policy, virtualize_bytes, &args[cmd_start..]);
+            run_mcp_proxy(
+                owner_pk,
+                wal_path.as_deref(),
+                policy,
+                mode,
+                quiet,
+                virtualize_bytes,
+                &args[cmd_start..],
+            );
         }
 
         #[cfg(unix)]

@@ -1,0 +1,18 @@
+name = "cowrie-edge-mcp-gateway"
+main = "src/index.mjs"
+compatibility_date = "2026-11-01"
+
+[vars]
+COWRIE_VIRTUALIZE_BYTES = "16384"
+COWRIE_MODE = "enforce"
+# Set UPSTREAM_MCP_URL and COWRIE_OWNER_PUBKEY via `wrangler secret put` or [vars]:
+# UPSTREAM_MCP_URL = "https://your-mcp-server.example.com/mcp"
+# COWRIE_OWNER_PUBKEY = "<64-hex-ed25519-pubkey>"
+
+[[durable_objects.bindings]]
+name = "COWRIE_MCP_SESSION"
+class_name = "CowrieMcpSessionDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CowrieMcpSessionDO"]

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TARGET_DIR: /tmp/cowrie-cargo-target
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Rust tests & native build
+        run: make test && make build
+      - name: C-ABI & pure-Python oracle conformance
+        run: make conformance
+      - name: WebAssembly build & Node test suite
+        run: make wasm
+      - name: Ecosystem connectors, Cloudflare Workers & adversarial/legacy suites
+        run: make connectors && make adversarial
+      - name: Build & smoke-test self-contained Python wheel
+        run: |
+          python3 -m pip install --upgrade setuptools wheel
+          make wheel
+          python3 -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/pip install /tmp/cowrie-dist/*.whl
+          /tmp/wheel-venv/bin/cowrie --version
+          /tmp/wheel-venv/bin/python -c "import cowrie; from cowrie.integrations.langgraph import CowrieLangGraphGuard; print(cowrie.alpha_handle(cowrie.verify_frame(cowrie.encode_json({'ok':1}))['cid']))"

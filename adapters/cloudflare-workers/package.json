@@ -1,0 +1,11 @@
+{
+  "name": "cowrie-edge-mcp-gateway",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node ./test_worker.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  }
+}

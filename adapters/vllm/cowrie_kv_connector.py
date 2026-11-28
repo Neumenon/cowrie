@@ -22,9 +22,11 @@ import warnings
 
 import torch
 
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT / "python") not in sys.path:
-    sys.path.insert(0, str(ROOT / "python"))
+import importlib.util
+if importlib.util.find_spec("cowrie") is None:
+    ROOT = Path(__file__).resolve().parents[2]
+    if str(ROOT / "python") not in sys.path:
+        sys.path.insert(0, str(ROOT / "python"))
 
 import cowrie
 
@@ -34,6 +36,11 @@ from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorMetadata,
     KVConnectorRole,
 )
+try:
+    from vllm.distributed.kv_transfer.kv_connector.v1.base import SupportsHMA as _SupportsHMA
+except ImportError:  # Older vLLM V1 builds without SupportsHMA
+    class _SupportsHMA:  # type: ignore[no-redef]
+        pass
 from vllm.logger import init_logger
 from vllm.v1.attention.backend import AttentionMetadata
 from vllm.v1.core.sched.output import SchedulerOutput
@@ -206,7 +213,7 @@ class CowrieConnectorMetadata(KVConnectorMetadata):
     requests: list[CowrieReqMeta] = field(default_factory=list)
 
 
-class CowrieKVConnectorV1(KVConnectorBase_V1):
+class CowrieKVConnectorV1(KVConnectorBase_V1, _SupportsHMA):
     """vLLM V1 KVConnector storing/restoring multi-layer KV blocks as single 16 KB `.state.cowrie` shards."""
 
     def __init__(
@@ -262,6 +269,24 @@ class CowrieKVConnectorV1(KVConnectorBase_V1):
 
     def register_kv_caches(self, kv_caches: dict[str, torch.Tensor]) -> None:
         self._kv_caches = dict(kv_caches)
+
+    def request_finished(
+        self,
+        request: "Request",
+        block_ids: list[int],
+    ) -> tuple[bool, Optional[dict[str, Any]]]:
+        self._requests_need_load.pop(request.request_id, None)
+        self._requests_pending_store.pop(request.request_id, None)
+        return False, None
+
+    def request_finished_all_groups(
+        self,
+        request: "Request",
+        block_ids: tuple[list[int], ...],
+    ) -> tuple[bool, Optional[dict[str, Any]]]:
+        self._requests_need_load.pop(request.request_id, None)
+        self._requests_pending_store.pop(request.request_id, None)
+        return False, None
 
     def shutdown(self) -> None:
         self._io_pool.shutdown(wait=True)
@@ -665,12 +690,5 @@ class CowrieKVConnectorV1(KVConnectorBase_V1):
 
 def register_vllm_plugin() -> None:
     """Entry-point hook for `vllm.general_plugins` so CowrieKVConnectorV1 is auto-discoverable."""
-    try:
-        from vllm.distributed.kv_transfer.kv_connector.factory import KVConnectorFactory
-        KVConnectorFactory.register_connector(
-            "CowrieKVConnectorV1",
-            "cowrie_vllm_adapters.cowrie_kv_connector",
-            "CowrieKVConnectorV1",
-        )
-    except Exception:
-        pass
+    from cowrie_vllm_adapters._plugin import register_vllm_plugin as _reg
+    _reg()
