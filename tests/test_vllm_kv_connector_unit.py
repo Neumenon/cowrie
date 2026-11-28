@@ -284,7 +284,7 @@ class _FakeForwardCtx:
 def _make_vllm_config(state_dir: Path, max_inflight_bytes: int = 64 * 1024 * 1024):
     return types.SimpleNamespace(
         cache_config=types.SimpleNamespace(block_size=16, cache_dtype="auto"),
-        model_config=types.SimpleNamespace(model="Qwen/Qwen3-32B", dtype="bfloat16"),
+        model_config=types.SimpleNamespace(model="Qwen/Qwen3.8-27B-FP8", dtype="auto"),
         parallel_config=types.SimpleNamespace(tensor_parallel_size=1, pipeline_parallel_size=1),
         kv_transfer_config=types.SimpleNamespace(
             kv_connector="CowrieKVConnectorV1",
