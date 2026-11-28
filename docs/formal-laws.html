@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="paper">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cowrie v1.2 Formal Laws — Dual-Prover Atlas (Bend 2.0.35 &times; Lean 4.34.0)</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="making-manual.css">
+  <style>
+    /* Scoped extensions for Vol. III Formal Laws Atlas (uses making-manual.css tokens) */
+    .law-toolbar {
+      display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: center;
+      justify-content: space-between; margin-bottom: 1rem;
+    }
+    .law-search {
+      flex: 1 1 260px; min-width: 220px; padding: 0.52rem 0.78rem;
+      border: 1px solid var(--rule-strong); border-radius: 3px;
+      background: var(--surface); color: var(--ink);
+      font-family: var(--mono); font-size: 0.8rem; outline: none;
+    }
+    .law-search:focus { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); }
+    .law-count {
+      font-family: var(--mono); font-size: 0.74rem; color: var(--muted);
+      letter-spacing: 0.04em; text-transform: uppercase;
+    }
+    .law-card {
+      background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+      margin-bottom: 0.85rem; overflow: hidden; box-shadow: var(--shadow-fig);
+      transition: border-color 0.14s ease;
+    }
+    .law-card:hover { border-color: var(--blue-border); }
+    .law-card-head {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 0.6rem; padding: 0.78rem 1rem; cursor: pointer; user-select: none;
+      background: var(--surface-alt); border-bottom: 1px solid var(--rule);
+    }
+    .law-card-head-left {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem; min-width: 0;
+    }
+    .law-id-tag {
+      font-family: var(--mono); font-size: 0.76rem; font-weight: 700;
+      padding: 0.16rem 0.5rem; border-radius: 2px;
+      background: var(--blue); color: #fff; letter-spacing: 0.04em;
+    }
+    .law-id-tag.lean-only { background: var(--green); }
+    .law-card-title {
+      font-family: var(--sans); font-size: 0.96rem; font-weight: 700; color: var(--ink);
+    }
+    .law-card-badges { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+    .law-card-summary { padding: 0.85rem 1rem; }
+    .law-guarantee { margin: 0 0 0.55rem; font-size: 0.94rem; line-height: 1.56; color: var(--ink-2); }
+    .law-meta-strip {
+      display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; align-items: center;
+      font-family: var(--mono); font-size: 0.73rem; color: var(--muted);
+      padding-top: 0.45rem; border-top: 1px dashed var(--rule);
+    }
+    .law-critique-note {
+      margin-top: 0.55rem; padding: 0.5rem 0.72rem; border-left: 3px solid var(--blue);
+      background: var(--blue-soft); font-family: var(--sans); font-size: 0.82rem;
+      line-height: 1.48; color: var(--ink-2);
+    }
+    .law-code-drawer {
+      display: none; border-top: 1px solid var(--rule); padding: 0.9rem 1rem;
+      background: var(--bg);
+    }
+    .law-card.open .law-code-drawer { display: block; }
+    .law-chevron {
+      font-family: var(--mono); font-size: 0.74rem; color: var(--blue);
+      padding: 0.14rem 0.45rem; border: 1px solid var(--blue-border); border-radius: 2px;
+      background: var(--surface);
+    }
+    .law-code-pre {
+      margin: 0; padding: 0.85rem 0.95rem; background: var(--code-bg); color: var(--code-ink);
+      border: 1px solid var(--rule); border-radius: 2px; font-family: var(--mono);
+      font-size: 0.73rem; line-height: 1.5; overflow-x: auto; white-space: pre;
+    }
+    .law-code-head {
+      display: flex; justify-content: space-between; align-items: center;
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 700;
+      letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+      margin-bottom: 0.4rem;
+    }
+    .sha-code { font-size: 0.71rem; word-break: break-all; }
+    .chip-kill {
+      display: inline-block; font-family: var(--mono); font-size: 0.69rem;
+      padding: 0.08rem 0.36rem; border-radius: 2px; border: 1px solid var(--rule-strong);
+      background: var(--surface-alt); color: var(--ink-2);
+    }
+    .chip-kill.bug { border-color: var(--red); color: var(--red); background: var(--red-soft); }
+    .chip-kill.ref { border-color: var(--green); color: var(--green); background: var(--green-soft); }
+    .trust-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;
+      margin-top: 0.9rem;
+    }
+    .trust-box {
+      background: var(--surface); border: 1px solid var(--rule); border-radius: 3px;
+      padding: 0.95rem 1.05rem;
+    }
+    .trust-box h4 {
+      margin: 0 0 0.5rem; font-family: var(--sans); font-size: 0.88rem;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .trust-box.in h4 { color: var(--green); }
+    .trust-box.out h4 { color: var(--ochre); }
+    .trust-box ul { margin: 0; padding-left: 1.15rem; font-size: 0.88rem; line-height: 1.55; color: var(--ink-2); }
+    .receipt-pre {
+      margin: 0; max-height: 520px; overflow: auto; padding: 1rem;
+      background: var(--code-bg); color: var(--code-ink); border: 1px solid var(--rule);
+      font-family: var(--mono); font-size: 0.73rem; line-height: 1.48;
+    }
+    .copy-status {
+      font-family: var(--mono); font-size: 0.72rem; color: var(--green); margin-left: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+<div class="read-progress" id="progressBar"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand-mark" href="formal-laws.html">
+      <span class="brand-dot"></span>
+      <span>Eureka Manual</span>
+    </a>
+    <div class="vol-switch" role="navigation" aria-label="Manual volumes">
+      <a class="vol-link" href="ai-data-format.html">Vol. I &middot; Cowrie</a>
+      <a class="vol-link" href="making-cowrie.html">Vol. II &middot; Creative v7</a>
+      <a class="vol-link active" href="formal-laws.html">Vol. III &middot; Formal Laws</a>
+    </div>
+    <nav class="top-nav" aria-label="Chapters">
+      <a href="#ch1">01 Provers</a>
+      <a href="#ch2">02 40 Laws</a>
+      <a href="#ch3">03 Critique</a>
+      <a href="#ch4">04 Bugs F1&ndash;F18</a>
+      <a href="#ch5">05 Mutants</a>
+      <a href="#ch6">06 Receipts</a>
+    </nav>
+    <button class="mode-btn" id="themeBtn" type="button">Blueprint Mode</button>
+  </div>
+</header>
+
+<main class="manual-wrap">
+  <!-- BOOK COVER -->
+  <section class="book-cover">
+    <div class="cover-kicker">
+      <span>COWRIE FORMAL VERIFICATION MONOGRAPH &middot; VOLUME III &middot; v1.2.0</span>
+      <span>[ BEND 2.0.35 (37 LAWS) &times; LEAN 4.34.0 (40 LAWS, PURE CONSTRUCTIVE) ]</span>
+    </div>
+    <h1 class="cover-title">Machine-Checked <em>Formal Laws</em><br>of Cowrie v1.2</h1>
+    <p class="cover-deck">
+      As Cowrie grew from a single canonical frame encoder into a full four-plane AI substrate&mdash;adding
+      6-symbol ChatML/Unicode fence transducers, R2-Compact projections, multi-cell table markers, MCP tool
+      classifiers, <code>CWZM</code> binary-skip zonemaps, <code>LiveIvfStore</code> crash-safe compaction watermarks,
+      and HMAC-first <code>StatePage</code> verification&mdash;we audited the entire specification with
+      <strong>two independent proof assistants</strong> (<strong>Bend 2.0.35</strong> and <strong>Lean 4.34.0</strong>)
+      and <strong>two rounds of multi-agent adversarial critique</strong>. Every theorem, mutant, refutation, and
+      SHA-256 receipt below is generated directly from the verified source files and live verification receipts.
+    </p>
+
+    <div class="spec-ribbon">
+      <div class="spec-cell"><span class="sk">Bend 2.0.35 (BendTT)</span><span class="sv blue">37 / 37 Laws &middot; 467.2 ms</span></div>
+      <div class="spec-cell"><span class="sk">Lean 4.34.0 (leanchecker)</span><span class="sv green">40 / 40 Laws &middot; 16 Refutations</span></div>
+      <div class="spec-cell"><span class="sk">Lean Axiom Budget</span><span class="sv green">[propext, Quot.sound]</span></div>
+      <div class="spec-cell"><span class="sk">Planted-False Mutants</span><span class="sv">60 / 60 Rejected (34 + 26)</span></div>
+      <div class="spec-cell"><span class="sk">Lockstep &amp; Bug Catches</span><span class="sv">4,710 Vectors &middot; F1&ndash;F18 Fixed</span></div>
+    </div>
+
+    <div class="toc-directory">
+      <div class="toc-head">
+        <span>Table of Contents &mdash; Six Formal Verification Chapters</span>
+        <span>Reference Index</span>
+      </div>
+      <ol class="toc-list">
+        <li><a href="#ch1"><span class="toc-num">01</span><span class="toc-name">Dual-Prover Architecture &amp; Honest Trust Boundary</span><span class="toc-dots"></span><span class="toc-fig">BEND &times; LEAN 4</span></a></li>
+        <li><a href="#ch2"><span class="toc-num">02</span><span class="toc-name">Interactive 40-Law Atlas (Side-by-Side Bend &amp; Lean 4)</span><span class="toc-dots"></span><span class="toc-fig">L01 &ndash; L39</span></a></li>
+        <li><a href="#ch3"><span class="toc-num">03</span><span class="toc-name">Two-Round Multi-Agent Adversarial Critique Ledger</span><span class="toc-dots"></span><span class="toc-fig">5 SUBAGENTS</span></a></li>
+        <li><a href="#ch4"><span class="toc-num">04</span><span class="toc-name">Real Rust &amp; Oracle Defects Caught &amp; Fixed</span><span class="toc-dots"></span><span class="toc-fig">F1 &ndash; F18</span></a></li>
+        <li><a href="#ch5"><span class="toc-num">05</span><span class="toc-name">Mutation Controls (60), Refutations (16) &amp; 3-Way Lockstep</span><span class="toc-dots"></span><span class="toc-fig">M01&ndash;LM26 &middot; R1&ndash;R16</span></a></li>
+        <li><a href="#ch6"><span class="toc-num">06</span><span class="toc-name">Live Cryptographic SHA-256 Receipts &amp; Reproducibility</span><span class="toc-dots"></span><span class="toc-fig">SHA-256</span></a></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- CHAPTER 01 -->
+  <section class="chapter" id="ch1">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 01 &middot; Independent Dual Verification</span>
+        <h2 class="ch-title">Dual-Prover Architecture &amp; Honest Trust Boundary</h2>
+      </div>
+      <span class="ch-badge">0 External Deps &middot; 100% Constructive</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p class="lead-para">
+          A single formal suite can hide two subtle failure modes: a quirk in one proof assistant&rsquo;s kernel or
+          encoding, or a circular specification that merely restates its own implementation. Cowrie eliminates both by
+          maintaining <strong>two completely independent formalizations</strong> in distinct type theories&mdash;<strong>Bend 2.0.35</strong>
+          (checked by <code>bend2</code> and the Lean-proven BendTT kernel) and <strong>Lean 4.34.0</strong>
+          (pure <code>Init</code>, zero external Lake packages, re-checked from scratch by standalone <code>leanchecker --fresh</code>)&mdash;with
+          frozen specification modules strictly isolated from mutable kernels.
+        </p>
+        <div class="principle-box">
+          <span class="ptag">Zero-Classical Constructive Discipline</span>
+          <p>
+            Every one of the <strong>40 Lean 4 laws</strong> and <strong>16 constructive semantic refutations</strong>&mdash;including
+            the bit-exact 64-bit <code>Int64 &harr; UInt64</code> ZigZag bijection (<code>L37</code>), fuel-free universal
+            RFC 6962 Merkle injectivity (<code>L38</code>), and declarative <code>List.Infix</code> prefix safety (<code>L39</code>)&mdash;checks
+            strictly under <strong><code>[propext, Quot.sound]</code></strong>. Not even <code>Classical.choice</code> is used,
+            and zero <code>sorry</code>, <code>admit</code>, <code>axiom</code>, <code>native_decide</code>,
+            <code>bv_decide</code>, <code>unsafe</code>, or <code>extern</code> constructs exist anywhere in the proof tree.
+          </p>
+        </div>
+      </div>
+      <aside class="sidenote">
+        <strong>Why Clean-Room TCB Isolation Matters</strong>
+        In Bend, all 111 frozen spec predicates live in <code>formal/SPEC.bend</code> while mutable implementations live in
+        <code>CowrieKernel.bend</code>. In Lean, all frozen specs live in <code>Cowrie/Laws.lean</code> and are type-bound
+        via <code>Cowrie.AxiomAudit._bindCowrieSpec : Cowrie.Laws.CowrieSpec</code>. Mutating a kernel can never silently move the goalposts.
+      </aside>
+    </div>
+
+    <figure class="fig-frame">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">TBL_001</span>
+          <span class="fig-spec">[ DUAL-PROVER CAPABILITY &amp; VERIFICATION MATRIX ]</span>
+        </div>
+        <span class="fig-meta">MEASURED 2026-11-28 &middot; OFFLINE TOOLCHAINS</span>
+      </div>
+      <div class="fig-body">
+        <table class="manual-tbl">
+          <thead>
+            <tr>
+              <th>Dimension</th>
+              <th>Bend 2.0.35 Suite (<code>formal/</code>)</th>
+              <th>Lean 4.34.0 Suite (<code>formal/lean/</code>)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Proof Kernel</strong></td>
+              <td><code>bend2</code> + Lean-proven BendTT kernel (<code>--verdict</code>, 467.19 ms median)</td>
+              <td>Clean <code>lake clean &amp;&amp; lake build --wfail</code> (4.55 s) + <code>leanchecker --fresh</code> (32.00 s)</td>
+            </tr>
+            <tr>
+              <td><strong>Laws Verified</strong></td>
+              <td><strong>37 / 37</strong> (<code>L01</code>&ndash;<code>L36</code>, incl. <code>L06a</code>/<code>L06b</code>)</td>
+              <td><strong>40 / 40</strong> (all 37 parity laws + Lean-exclusive <code>L37</code>&ndash;<code>L39</code>)</td>
+            </tr>
+            <tr>
+              <td><strong>Axiom / Hygiene Budget</strong></td>
+              <td><code>0</code> <code>@unsafe</code>, <code>0</code> <code>?</code> holes, <code>0</code> <code>~</code> templates (435,837 B <code>.bendtt</code>)</td>
+              <td><code>[propext, Quot.sound]</code> only (zero <code>Classical.choice</code>, zero external deps, 0 forbidden tokens)</td>
+            </tr>
+            <tr>
+              <td><strong>Internal Refutations</strong></td>
+              <td>External scratch mutation suite only</td>
+              <td><strong>16 / 16</strong> constructive refutation theorems (<code>R1</code>&ndash;<code>R16</code>) in <code>Cowrie/Refutations.lean</code></td>
+            </tr>
+            <tr>
+              <td><strong>Planted-False Mutants</strong></td>
+              <td><strong>34 / 34</strong> rejected (<code>M01</code>&ndash;<code>M34</code> &rarr; <code>SOME PROOFS FAIL</code>)</td>
+              <td><strong>26 / 26</strong> rejected (<code>LM01</code>&ndash;<code>LM26</code> &rarr; Lean proof typecheck failure)</td>
+            </tr>
+            <tr>
+              <td><strong>Executable Lockstep</strong></td>
+              <td>Compiled <code>.mjs</code> (159,890 B) &times; Rust WASM (<code>2,600</code> vectors) + <code>100</code> C-ABI trials</td>
+              <td>Native Linux binary <code>cowrie_lean_oracle</code> (7.35 ms) &times; Bend <code>.mjs</code> &times; Rust WASM (<code>1,544</code> true 3-way + <code>566</code> 2-way)</td>
+            </tr>
+            <tr>
+              <td><strong>Unique Strengths</strong></td>
+              <td>Sub-second full-suite verdict, interaction-net codegen to JS, linear resource checking (<code>+</code> duplicable binders)</td>
+              <td>Bit-exact <code>UInt8</code>/<code>Int64</code>/<code>UInt64</code> machine words (<code>L37</code>), fuel-free universal Merkle injectivity (<code>L38</code>), declarative <code>List.Infix</code> prefix safety (<code>L39</code>), signed <code>Int</code> CWZM keys</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="trust-grid">
+          <div class="trust-box in">
+            <h4>Inside the Formal Proof Boundary</h4>
+            <ul>
+              <li>All <strong>37 Bend</strong> &amp; <strong>40 Lean 4</strong> algebraic, state-machine, canonical-wire, and machine-word invariants.</li>
+              <li>Non-circular frozen TCB specifications (<code>SPEC.bend</code> &amp; <code>Cowrie/Laws.lean</code>) verified against <strong>60/60</strong> planted-false mutants and <strong>16/16</strong> internal semantic refutations.</li>
+              <li>Empirical behavioral binding to compiled <code>cowrie_core.wasm</code> and <code>libcowrie_core.so</code> across <strong>4,710 lockstep vectors</strong> + <strong>100 C-ABI trials</strong> + <strong>182 independent Python oracle checks</strong>.</li>
+            </ul>
+          </div>
+          <div class="trust-box out">
+            <h4>Honest Boundary: Outside Mechanized Proofs</h4>
+            <ul>
+              <li><strong>Hand-rolled Crypto &amp; Hardware SIMD:</strong> Curve25519 <code>GF(2^255-19)</code> limb math, <code>SHA-NI</code>/<code>ARMv8 SHA2</code>, <code>HMAC-SHA256</code>, and <code>AVX2</code>/<code>NEON</code> kernels rely on RFC 8032 / RFC 4231 vectors and scalar-vs-SIMD parity tests.</li>
+              <li><strong>Rust <code>unsafe</code>, FFI &amp; OS Durability:</strong> Raw C-ABI pointer checks, <code>mmap</code> lifetimes, <code>flock(2)</code>/<code>rename(2)</code>/<code>fsync(2)</code> crash semantics are verified by Rust unit/negative suites (<code>F12</code>, <code>F15</code>&ndash;<code>F17</code>), not Kani/Verus.</li>
+              <li><strong>External Connectors:</strong> Out-of-core adapters (<code>mcp-mediator.mjs</code>, Cloudflare Workers, Python integrations) rely on integration suites rather than mechanized proofs.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 02 -->
+  <section class="chapter" id="ch2">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 02 &middot; Complete Law Reference</span>
+        <h2 class="ch-title">Interactive 40-Law Atlas (Bend &times; Lean 4)</h2>
+      </div>
+      <span class="ch-badge">Verbatim Extracted Statements</span>
+    </div>
+
+    <p style="margin-top:0;color:var(--ink-2)">
+      Filter by architectural plane or search by law ID (<code>L01</code>&ndash;<code>L39</code>), Rust source file,
+      bug ID (<code>F1</code>&ndash;<code>F18</code>), mutant (<code>M01</code>&ndash;<code>M34</code>, <code>LM01</code>&ndash;<code>LM26</code>),
+      or keyword. Click any law header to expand the <strong>verbatim side-by-side formal definitions</strong> from
+      <code>formal/LAWS.bend</code> and <code>formal/lean/Cowrie/Laws.lean</code>.
+    </p>
+
+    <div class="lab-controls" id="planeFilters">
+      <button class="lab-btn active" type="button" data-plane="ALL">All Laws (40)</button>
+      <button class="lab-btn" type="button" data-plane="D">Plane D &middot; Trust &amp; MCP (15)</button>
+      <button class="lab-btn" type="button" data-plane="B">Plane B &middot; Fence &amp; R2 (7)</button>
+      <button class="lab-btn" type="button" data-plane="A">Plane A &middot; Wire &amp; RCID (7)</button>
+      <button class="lab-btn" type="button" data-plane="CD">Plane C&ndash;D &middot; CWZM, Merkle, WAL, CWSP (8)</button>
+      <button class="lab-btn" type="button" data-plane="LEAN">Lean-Exclusive &middot; L37&ndash;L39 (3)</button>
+    </div>
+
+    <div class="law-toolbar">
+      <input class="law-search" id="lawSearch" type="search" placeholder="Search laws, e.g. 'F9', 'ZigZag', 'M32', 'wal.rs', 'Merkle', 'L36'...">
+      <div style="display:flex;gap:0.45rem;align-items:center">
+        <span class="law-count" id="lawCount">Showing 40 of 40 laws</span>
+        <button class="lab-btn" id="expandAllBtn" type="button">Expand All Code</button>
+        <button class="lab-btn" id="collapseAllBtn" type="button">Collapse All</button>
+      </div>
+    </div>
+
+    <div id="lawAtlas"></div>
+  </section>
+
+  <!-- CHAPTER 03 -->
+  <section class="chapter" id="ch3">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 03 &middot; Adversarial Proof Auditing</span>
+        <h2 class="ch-title">Two-Round Multi-Agent Critique Ledger</h2>
+      </div>
+      <span class="ch-badge">5 Independent Audit Agents</span>
+    </div>
+
+    <div class="prose-grid">
+      <div class="prose-main">
+        <p class="lead-para">
+          Formal proofs are only as strong as the theorems they state. Before and after writing the Lean 4 mirror and
+          upgrading the Bend suite from 26 to 37 laws, five specialized read-only research subagents adversarially attacked
+          both the Rust implementation and the formal law statements themselves&mdash;actively searching for vacuous
+          implications, circular self-checks, TCB leaks, missing boundary branches, and harness gaps.
+        </p>
+      </div>
+      <aside class="sidenote">
+        <strong>Every Finding Closed</strong>
+        Zero findings were hand-waved or deferred. Each formal weakness gained a dedicated regression mutant
+        (<code>M14</code>&ndash;<code>M34</code>, <code>LM06</code>&ndash;<code>LM26</code>) or constructive refutation
+        (<code>R1</code>&ndash;<code>R16</code>); each Rust/oracle weakness became a verified fix (<code>F9</code>&ndash;<code>F18</code>).
+      </aside>
+    </div>
+
+    <figure class="fig-frame">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">TBL_002</span>
+          <span class="fig-spec">[ MULTI-AGENT ADVERSARIAL CRITIQUE &amp; RESOLUTION LOG ]</span>
+        </div>
+        <span class="fig-meta">ROUND 1 (3 AGENTS) + ROUND 2 (2 AGENTS) &middot; ALL RESOLVED</span>
+      </div>
+      <div class="fig-body">
+        <table class="manual-tbl">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Auditor</th>
+              <th>Severity</th>
+              <th>Vulnerability / Law Validity Defect Found</th>
+              <th>Fix &amp; Regression Guard Applied</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td><code>R1-SG1</code></td><td>Round 1 · Validity Critic</td><td><span class="pill block">CRITICAL</span></td><td>Original is_tainted could ignore UNTRUSTED_EXT (0x04) and still pass all 26 laws.</td><td>Split frozen SPEC.bend; pinned exact ext | tainted in L01/L03/L16/L25 + M14/LM06/R1.</td></tr><tr><td><code>R1-SG2</code></td><td>Round 1 · Validity Critic</td><td><span class="pill block">CRITICAL</span></td><td>Original any_tainted could inspect only head(ps) and ignore deeper tainted parents.</td><td>Added universal arbitrary-index parent/arg taint laws L01/L04/L19/L25 + M15/LM07/R2.</td></tr><tr><td><code>R1-SG3</code></td><td>Round 1 · Validity Critic</td><td><span class="pill block">CRITICAL</span></td><td>Original derive_chain could be a no-op returning root unchanged.</td><td>Upgraded L02 to exact biconditional root || any(hops) + M16/LM08/R3.</td></tr><tr><td><code>R1-SG4</code></td><td>Round 1 · Validity Critic</td><td><span class="pill block">CRITICAL</span></td><td>Original declassification token matcher could ignore target_cid.</td><td>Added solo [c2] rejection in L06b + frozen spec_gate in L17 + M19/LM11/R4.</td></tr><tr><td><code>R1-SG5</code></td><td>Round 1 · Validity Critic</td><td><span class="pill block">CRITICAL</span></td><td>Original Merkle laws allowed merkle_tree_digest = const HEmpty or CVE-2012-2459 odd-leaf duplication.</td><td>Added direct leaf/pair/odd non-collision + universal flatten_leaves / structural injectivity (L13/L34/L38) + M22/M23/LM16/LM17/R8/R9.</td></tr><tr><td><code>R1-SG6</code></td><td>Round 1 · Validity Critic</td><td><span class="pill block">CRITICAL</span></td><td>Original WAL OpFrame replay could omit deduplication of re-inserted live CIDs.</td><td>Pinned exact count == 1 in L24 + M24/LM18/R10.</td></tr><tr><td><code>R2-C1</code></td><td>Round 2 · Law Critic</td><td><span class="pill block">CRITICAL</span></td><td>Lean L37 had circular self-checks across UInt8, Int64 ZigZag, and UInt64 Float64.</td><td>De-circularized all 3 against frozen literal specs + arithmetic specZigzag64 + pure constructive BitVec proof ([propext, Quot.sound]) + LM25/LM26.</td></tr><tr><td><code>R2-C2</code></td><td>Round 2 · Law Critic</td><td><span class="pill block">CRITICAL</span></td><td>Bend L36 omitted the 9th StatePage branch (has_key=False, flag=0, hv=False) == SpInvalidContract.</td><td>Added 9th branch to Bend L36 for 100% parity with Lean L36 + Bend mutant M29.</td></tr><tr><td><code>R2-C3</code></td><td>Round 2 · Law Critic</td><td><span class="pill block">CRITICAL</span></td><td>Bend L13/L34 finite 0..3 leaf checks allowed fuel=2n truncation or dropping frame trees in shard_merkle_root.</td><td>Proved universal flatten_leaves(merkle_tree_digest(xs)) == flat_map_leaves(xs) across ALL lengths 0..inf + shard frame sensitivity + M30/M31.</td></tr><tr><td><code>R2-C4</code></td><td>Round 2 · Law Critic</td><td><span class="pill block">CRITICAL</span></td><td>TCB boundary leaks: Bend L15 used mutable K.auth_* helpers; Lean L20/L21/L39 used mutable Fence.stripEsc/stripSpoof.</td><td>Moved every spec predicate into frozen SPEC.bend &amp; Laws.lean + added M34.</td></tr><tr><td><code>R2-H1</code></td><td>Round 2 · Law Critic</td><td><span class="pill warn">HIGH</span></td><td>L27 MCP classifier allowed a fail-open policy-override bypass; L31 Float64 was circular; L14 WAL missed rollback seq &lt; exp_seq.</td><td>Closed L27 with full 6-arg biconditional (M32/LM23/R15), de-circularized L31, and generalized L14 to arbitrary start_seq &amp; bad_seq != exp_seq (M33/LM24/R16).</td></tr><tr><td><code>R2-H2</code></td><td>Round 2 · Law Critic</td><td><span class="pill warn">HIGH</span></td><td>L29 (3 examples), L30 (head/idx 0 only), and L33 (single ref [0]) had narrow finite coverage.</td><td>Generalized L29 to universal raw, L30 to deep map/arbitrary array/composition, and L33 to universal refs &amp; ts ++ extra.</td></tr><tr><td><code>R2-H3</code></td><td>Round 2 · Law Critic</td><td><span class="pill warn">HIGH</span></td><td>AxiomAudit didn&#x27;t explicitly bind CowrieSpec; static scanner regex could be fooled by nested comments; lake build used warm cache.</td><td>Bound _bindCowrieSpec : CowrieSpec in AxiomAudit.lean; replaced regex with lexical comment/string stripper; forced lake clean &amp;&amp; lake build --wfail.</td></tr><tr><td><code>R2-R1</code></td><td>Round 2 · Rust/Lockstep</td><td><span class="pill block">CRITICAL</span></td><td>ffi.rs cowrie_statepage_verify_bytes(NULL, len &gt; 0) failed open to unkeyed None; cowrie_wal_live_len lacked catch_unwind.</td><td>Fixed fail-closed InvalidContract &amp; catch_unwind in ffi.rs + Rust regression tests (F15).</td></tr><tr><td><code>R2-R2</code></td><td>Round 2 · Rust/Lockstep</td><td><span class="pill warn">HIGH</span></td><td>wal.rs checked seq overflow after fsync, missed LiveIvfStore forward-gap check, and dropped flock on compaction rename.</td><td>Fixed all 3 in wal.rs + Rust regression tests (F16).</td></tr><tr><td><code>R2-R3</code></td><td>Round 2 · Rust/Lockstep</td><td><span class="pill warn">HIGH</span></td><td>lens.rs query_frame_slice could overflow offset+cap or exceed cap after fence escaping; zonemap.rs allowed record_count &lt; page_count; oracle had 0 TAG_TENSOR_REF tests &amp; lockstep SP_PRECEDENCE had correlated modulo bias.</td><td>Fixed lens.rs &amp; zonemap.rs (F17), added 12 TAG_TENSOR_REF oracle vectors &amp; unbiased 16-state real-HMAC 3-way SP_PRECEDENCE lockstep (F18).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 04 -->
+  <section class="chapter" id="ch4">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 04 &middot; Formal Methods Finding Real Bugs</span>
+        <h2 class="ch-title">Implementation &amp; Oracle Defects Caught (F1&ndash;F18)</h2>
+      </div>
+      <span class="ch-badge">18 / 18 Fixed &amp; Regression-Tested</span>
+    </div>
+
+    <div class="lab-controls" id="bugFilters">
+      <button class="lab-btn active" type="button" data-round="all">All Catches (18)</button>
+      <button class="lab-btn" type="button" data-round="round0">Round 0 &middot; Original Bend (F1&ndash;F8)</button>
+      <button class="lab-btn" type="button" data-round="round1">Round 1 &middot; v1.2 Growth Audit (F9&ndash;F14)</button>
+      <button class="lab-btn" type="button" data-round="round2">Round 2 &middot; Rust Fidelity Audit (F15&ndash;F18)</button>
+    </div>
+
+    <figure class="fig-frame">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">TBL_003</span>
+          <span class="fig-spec">[ PRODUCTION RUST CORE &amp; INDEPENDENT ORACLE DEFECT LEDGER ]</span>
+        </div>
+        <span class="fig-meta">CARGO TEST 16/16 &middot; WASM 150+20+14 &middot; ORACLE 182 CHECKS</span>
+      </div>
+      <div class="fig-body">
+        <table class="manual-tbl" id="bugTable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Phase</th>
+              <th>File(s)</th>
+              <th>Real Defect / Exploit Vector</th>
+              <th>Verified Fix &amp; Law Link</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-round="round0"><td><strong><code>F1</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/lens.rs</code></td><td>Multi-bracket &#x27;&lt;&lt;&lt;&lt;END:COWRIE&gt;&gt;&gt;&gt;&#x27; reformed &#x27;&lt;&lt;&lt;&#x27; under single-pass replace.</td><td>Replaced with Mealy transducer (L07, L08, L20, L39).</td></tr><tr data-round="round0"><td><strong><code>F2</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/zonemap.rs</code></td><td>CWZM directory root omitted full 64B page bounds / monotonic fence enforcement.</td><td>Bound full 64B entries into Merkle root &amp; enforced monotonic fences (L12, L23).</td></tr><tr data-round="round0"><td><strong><code>F3</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/shard.rs</code></td><td>CWRF frame/tensor tables could leave unhashed slack bytes inside Plane A / Plane C.</td><td>Enforced exact contiguous plane partitioning with zero slack (L33, L34).</td></tr><tr data-round="round0"><td><strong><code>F4</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/lens.rs</code></td><td>Hoisted R2/R1 table column headers skipped fence sanitization.</td><td>Applied sanitize_r2_inline_key to hoisted headers (L21).</td></tr><tr data-round="round0"><td><strong><code>F5</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/wal.rs</code></td><td>Unordered HashSet tombstone filter caused zombie re-insertion bug &amp; non-atomic WAL reset.</td><td>Sequential replay + kind &lt;= 2 check + atomic rename() reset (L14, L24).</td></tr><tr data-round="round0"><td><strong><code>F6</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/canonical.rs</code></td><td>Partial/malformed &#x27;$tensor&#x27; or &#x27;$bytes&#x27; JSON objects silently fell through as plain maps.</td><td>Fail closed with Err(InvalidContract) on malformed reserved sentinels (L32).</td></tr><tr data-round="round0"><td><strong><code>F7</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/shard.rs</code></td><td>StatePage with empty runtime_id bypassed non-empty expected_runtime_id check.</td><td>Enforced Err(RuntimeMismatch) on empty or mismatched runtime_id (L24).</td></tr><tr data-round="round0"><td><strong><code>F8</code></strong></td><td><span class="pill blue">Round 0</span></td><td><code>crates/cowrie-core/src/lens.rs</code></td><td>TensorRef space ending in &#x27;&gt;&gt;&#x27; combined with closing &#x27;&gt;&#x27; to emit &#x27;&gt;&gt;&gt;&#x27;.</td><td>Wrapped full &lt;T:dtype[dims]@space&gt; output in sanitize_r2_fences (L21).</td></tr><tr data-round="round1"><td><strong><code>F9</code></strong></td><td><span class="pill warn">Round 1</span></td><td><code>crates/cowrie-core/src/lens.rs</code></td><td>Multi-cell R2Table &#x27;|&#x27; join enabled ChatML &#x27;&lt;|&#x27;|&#x27;|&gt;&#x27; breakout; invisible spoof chars forged &#x27;null&#x27;/&#x27;&lt;missing&gt;&#x27;.</td><td>Stripped invisible spoof chars before classification &amp; sanitized joined row (L07, L21, L29, L39).</td></tr><tr data-round="round1"><td><strong><code>F10</code></strong></td><td><span class="pill warn">Round 1</span></td><td><code>crates/cowrie-core/src/wal.rs</code></td><td>Crash between .cwgen write and .cwwal reset replayed compacted vectors twice in LiveIvfStore.</td><td>Added CWAL v2 wal_base_seq + applied_wal_seq_exclusive watermark (L35).</td></tr><tr data-round="round1"><td><strong><code>F11</code></strong></td><td><span class="pill warn">Round 1</span></td><td><code>tests/independent_cowr_oracle.py</code></td><td>Independent Python oracle drifted from Rust extended tensor dtype codes 5..=8.</td><td>Aligned oracle to Rust dtype 5..=8 (F8_E4M3, F8_E5M2, I4, U4) (L22).</td></tr><tr data-round="round1"><td><strong><code>F12</code></strong></td><td><span class="pill warn">Round 1</span></td><td><code>crates/cowrie-core/src/ffi.rs</code></td><td>Null parent_auths with parent_len &gt; 0 failed to fail closed before slice handling.</td><td>Enforced immediate fail-closed tainted/error check on (NULL, len &gt; 0) (L01, L04, L37).</td></tr><tr data-round="round1"><td><strong><code>F13</code></strong></td><td><span class="pill warn">Round 1</span></td><td><code>crates/cowrie-core/src/shard.rs</code></td><td>StatePage parsed/reported unauthenticated header errors ahead of HMAC-SHA256 verification.</td><td>Enforced HMAC-first verification precedence across all 9 state classes (L36).</td></tr><tr data-round="round1"><td><strong><code>F14</code></strong></td><td><span class="pill warn">Round 1</span></td><td><code>crates/cowrie-core/src/zonemap.rs</code></td><td>CWZM page-0 bounds and unauthenticated EOF trailing padding were insufficiently rejected.</td><td>Hardened page-0 validation and strict EOF trailing-byte rejection (L12, L23).</td></tr><tr data-round="round2"><td><strong><code>F15</code></strong></td><td><span class="pill block">Round 2</span></td><td><code>crates/cowrie-core/src/ffi.rs</code></td><td>cowrie_statepage_verify_bytes(NULL, hmac_key_len &gt; 0) silently fell back to unkeyed None; cowrie_wal_live_len lacked catch_unwind.</td><td>Fail closed with InvalidContract on (NULL, len &gt; 0) and wrapped in catch_unwind (L36, cargo test).</td></tr><tr data-round="round2"><td><strong><code>F16</code></strong></td><td><span class="pill block">Round 2</span></td><td><code>crates/cowrie-core/src/wal.rs</code></td><td>next_seq.checked_add(1) ran after fsync; LiveIvfStore::open missed forward-gap check; compaction dropped flock across rename.</td><td>Pre-write overflow check, forward-gap rejection, and compaction flock preservation (L14, L35, cargo test).</td></tr><tr data-round="round2"><td><strong><code>F17</code></strong></td><td><span class="pill block">Round 2</span></td><td><code>crates/cowrie-core/src/lens.rs, zonemap.rs</code></td><td>query_frame_slice offset+cap overflow &amp; post-cap fence expansion; double spoof scan; impossible zonemap record_count &lt; page_count.</td><td>Saturating bounds + post-sanitize cap truncation (justified by L39), single spoof pass, zonemap count check (L23, L29, L39, cargo test).</td></tr><tr data-round="round2"><td><strong><code>F18</code></strong></td><td><span class="pill block">Round 2</span></td><td><code>tests/independent_cowr_oracle.py, formal/*lockstep*.mjs</code></td><td>Zero TAG_TENSOR_REF coverage in oracle; correlated modulo sampling hid SpOk/SpInvalidContract in SP_PRECEDENCE lockstep.</td><td>Added 12 TAG_TENSOR_REF oracle checks &amp; unbiased 16-state real-HMAC 3-way SP_PRECEDENCE lockstep (160 vectors).</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 05 -->
+  <section class="chapter" id="ch5">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 05 &middot; Anti-Vacuity Controls &amp; Lockstep</span>
+        <h2 class="ch-title">60 Mutants, 16 Semantic Refutations &amp; 3-Way Lockstep</h2>
+      </div>
+      <span class="ch-badge">100% Rejection Rate</span>
+    </div>
+
+    <div class="lab-controls" id="mutantTabs">
+      <button class="lab-btn active" type="button" data-mtab="bend">Bend 2.0.35 Mutants (34 / 34)</button>
+      <button class="lab-btn" type="button" data-mtab="lean">Lean 4.34.0 Mutants (26 / 26)</button>
+      <button class="lab-btn" type="button" data-mtab="refute">Lean Constructive Refutations (16 / 16)</button>
+      <button class="lab-btn" type="button" data-mtab="lockstep">2-Way &amp; 3-Way Lockstep (4,710 Vectors)</button>
+    </div>
+
+    <figure class="fig-frame">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag" id="mutTag">MUT_BEND</span>
+          <span class="fig-spec" id="mutSpec">[ 34 PLANTED-FALSE KERNEL MUTATIONS &middot; ALL REJECTED BY BENDTT ]</span>
+        </div>
+        <span class="fig-meta">LIVE FROM RECEIPT JSON</span>
+      </div>
+      <div class="fig-body">
+        <div id="mtab-bend">
+          <table class="manual-tbl">
+            <thead><tr><th>#</th><th>Mutant Control ID (<code>formal/verify_formal.py</code>)</th><th>BendTT Verdict</th></tr></thead>
+            <tbody><tr><td><code>#01</code></td><td><code>M01_empty_args_fail_open</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#02</code></td><td><code>M02_four_bracket_fence_bypass_F1</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#03</code></td><td><code>M03_non_canonical_int_accepted</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#04</code></td><td><code>M04_zonemap_strict_lt_false_negative</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#05</code></td><td><code>M05_wal_mid_tamper_silently_truncated</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#06</code></td><td><code>M06_underspec_deny_all_gate</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#07</code></td><td><code>M07_underspec_taint_all_ledger</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#08</code></td><td><code>M08_underspec_head_only_ledger_lookup</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#09</code></td><td><code>M09_underspec_wipe_string_fence_sanitizer</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#10</code></td><td><code>M10_wrongspec_unsanitized_table_col_header_F4</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#11</code></td><td><code>M11_wrongspec_tensor_ref_boundary_breakout_F8</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#12</code></td><td><code>M12_wal_tombstone_wipes_bystanders_F5</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#13</code></td><td><code>M13_statepage_empty_runtime_bypass_F7</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#14</code></td><td><code>M14_smoking_gun_is_tainted_ignores_ext</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#15</code></td><td><code>M15_smoking_gun_head_only_any_tainted</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#16</code></td><td><code>M16_smoking_gun_noop_derive_chain</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#17</code></td><td><code>M17_unknown_parent_fail_open_nonempty</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#18</code></td><td><code>M18_credread_unprivileged_bypass</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#19</code></td><td><code>M19_token_ignores_target_cid</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#20</code></td><td><code>M20_r2_table_multicell_chatml_breakout_F9</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#21</code></td><td><code>M21_r2_compact_allows_model_synth</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#22</code></td><td><code>M22_smoking_gun_merkle_const_empty</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#23</code></td><td><code>M23_smoking_gun_merkle_cve_2012_2459_dup_odd</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#24</code></td><td><code>M24_smoking_gun_wal_opframe_no_dedup</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#25</code></td><td><code>M25_live_ivf_ignores_watermark_F10</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#26</code></td><td><code>M26_statepage_hmac_flag_precedence_bypass_F13</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#27</code></td><td><code>M27_missing_owner_pubkey_allows_declass</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#28</code></td><td><code>M28_table_cell_hidden_spoof_marker_F9</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#29</code></td><td><code>M29_statepage_nokey_bad_hdr_accept</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#30</code></td><td><code>M30_merkle_fuel_truncated_to_2n</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#31</code></td><td><code>M31_shard_merkle_drops_frames</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#32</code></td><td><code>M32_mcp_policy_override_fail_open</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#33</code></td><td><code>M33_wal_rollback_seq_le_replay</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr><tr><td><code>#34</code></td><td><code>M34_l15_tcb_clobber_origin_bits</code></td><td><span class="pill pass">REJECTED (SOME PROOFS FAIL)</span></td></tr></tbody>
+          </table>
+        </div>
+        <div id="mtab-lean" style="display:none">
+          <table class="manual-tbl">
+            <thead><tr><th>#</th><th>Mutant Control ID (<code>formal/lean/verify_lean.py</code>)</th><th>Lean 4.34 Verdict</th></tr></thead>
+            <tbody><tr><td><code>#01</code></td><td><code>LM01_empty_args_fail_open</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#02</code></td><td><code>LM02_four_bracket_fence_bypass_F1</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#03</code></td><td><code>LM03_non_canonical_int_accepted</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#04</code></td><td><code>LM04_zonemap_strict_lt_false_negative</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#05</code></td><td><code>LM05_wal_mid_tamper_silently_truncated</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#06</code></td><td><code>LM06_smoking_gun_isTainted_ignores_ext</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#07</code></td><td><code>LM07_smoking_gun_head_only_anyTainted</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#08</code></td><td><code>LM08_smoking_gun_noop_deriveChain</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#09</code></td><td><code>LM09_unknown_parent_fail_open</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#10</code></td><td><code>LM10_credRead_unprivileged_bypass</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#11</code></td><td><code>LM11_token_ignores_target_cid</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#12</code></td><td><code>LM12_missing_owner_pubkey_allows_declass</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#13</code></td><td><code>LM13_r2_table_multicell_chatml_breakout_F9</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#14</code></td><td><code>LM14_r2_compact_allows_model_synth</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#15</code></td><td><code>LM15_table_cell_hidden_spoof_marker_F9</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#16</code></td><td><code>LM16_smoking_gun_merkle_const_empty</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#17</code></td><td><code>LM17_smoking_gun_merkle_cve_2012_2459_dup_odd</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#18</code></td><td><code>LM18_smoking_gun_wal_opframe_no_dedup</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#19</code></td><td><code>LM19_live_ivf_ignores_watermark_F10</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#20</code></td><td><code>LM20_statepage_hmac_flag_precedence_bypass_F13</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#21</code></td><td><code>LM21_lean_uint8_propagate_clobbers_origin</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#22</code></td><td><code>LM22_lean_i64_zigzag_drops_sign_xor</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#23</code></td><td><code>LM23_mcp_policy_override_fail_open</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#24</code></td><td><code>LM24_wal_rollback_seq_le_replay</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#25</code></td><td><code>LM25_f64_bits_drops_nan_canon</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr><tr><td><code>#26</code></td><td><code>LM26_uint8_isTainted_ignores_ext</code></td><td><span class="pill pass">REJECTED (proof typecheck failed)</span></td></tr></tbody>
+          </table>
+        </div>
+        <div id="mtab-refute" style="display:none">
+          <table class="manual-tbl">
+            <thead><tr><th>ID</th><th>Theorem (<code>Cowrie/Refutations.lean</code>)</th><th>Target Law</th><th>Constructive Witness Proved</th><th>Audit Status</th></tr></thead>
+            <tbody><tr><td><code>R01</code></td><td><code>refute_M14_ignore_ext</code></td><td><span class="pill blue">L01 / L03</span></td><td>Broken isTainted ignoring UNTRUSTED_EXT (0x04) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R02</code></td><td><code>refute_M15_head_only_anyTainted</code></td><td><span class="pill blue">L01 / L25</span></td><td>Broken anyTainted inspecting only head parent is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R03</code></td><td><code>refute_M16_noop_deriveChain</code></td><td><span class="pill blue">L02</span></td><td>No-op deriveChain ignoring intermediate hops is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R04</code></td><td><code>refute_M19_token_ignores_cid</code></td><td><span class="pill blue">L06b / L17</span></td><td>Token matcher ignoring target_cid is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R05</code></td><td><code>refute_M20_F9_multicell_chatml_breakout</code></td><td><span class="pill blue">L21 / L39</span></td><td>Unsanitized multi-cell &#x27;|&#x27; join producing &#x27;&lt;|&#x27; / &#x27;|&gt;&#x27; (F9) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R06</code></td><td><code>refute_M28_F9_hidden_cell_marker_spoof</code></td><td><span class="pill blue">L29</span></td><td>Cell classifier that fails to strip invisible spoof chars before &#x27;null&#x27; match (F9) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R07</code></td><td><code>refute_M21_r2_compact_allows_synth</code></td><td><span class="pill blue">L28</span></td><td>R2-Compact granting compact mode to MODEL_SYNTH (3) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R08</code></td><td><code>refute_M22_merkle_const_empty</code></td><td><span class="pill blue">L13 / L38</span></td><td>Degenerate constant-HEmpty Merkle tree is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R09</code></td><td><code>refute_M23_merkle_cve_2012_2459</code></td><td><span class="pill blue">L13 / L38</span></td><td>CVE-2012-2459 odd-leaf duplication Merkle tree is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R10</code></td><td><code>refute_M24_wal_opframe_no_dedup</code></td><td><span class="pill blue">L24</span></td><td>WAL OpFrame replay omitting duplicate CID removal is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R11</code></td><td><code>refute_M25_F10_live_ivf_watermark_ignored</code></td><td><span class="pill blue">L35</span></td><td>LiveIvfStore recovery ignoring applied_wal_seq_exclusive watermark (F10) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R12</code></td><td><code>refute_M26_F13_statepage_hmac_flag_precedence</code></td><td><span class="pill blue">L36</span></td><td>StatePage checking header validity ahead of HMAC-SHA256 flag/key mismatch (F13) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R13</code></td><td><code>refute_M27_missing_owner_pubkey</code></td><td><span class="pill blue">L17 / L18</span></td><td>Gate permitting declassification when owner_pubkey is absent (hasPk=false) is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R14</code></td><td><code>refute_L23_unsorted_zonemap_needs_disjoint_precondition</code></td><td><span class="pill blue">L23 (Necessity)</span></td><td>Proves L23&#x27;s disjoint-monotonic precondition is strictly necessary: unsorted zones break early-break pruning.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R15</code></td><td><code>refute_M32_mcp_policy_override_bypass</code></td><td><span class="pill blue">L27</span></td><td>MCP classifier letting a permissive hint/verb bypass an explicit policy override is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr><tr><td><code>R16</code></td><td><code>refute_M33_wal_rollback_seq_le_replay</code></td><td><span class="pill blue">L14</span></td><td>WAL recovery accepting seq &lt;= expSeq rollback replays instead of strict seq == expSeq is constructively refuted.</td><td><span class="pill pass">PROVED [propext, Quot.sound]</span></td></tr></tbody>
+          </table>
+        </div>
+        <div id="mtab-lockstep" style="display:none">
+          <p style="margin-top:0;color:var(--ink-2)">
+            Both formal kernels compile to executable code (<code>cowrie_kernel_verified.mjs</code> from Bend and native
+            Linux binary <code>cowrie_lean_oracle</code> from Lean 4) and are differentially tested against production
+            <code>cowrie_core.wasm</code> and <code>libcowrie_core.so</code>. True 3-way coverage is accounted separately
+            from 2-way subsystem comparisons.
+          </p>
+          <div class="lab-grid-2">
+            <div class="card-box">
+              <h4 style="margin:0 0 0.55rem;font-family:var(--sans)">Lean 4 &times; Bend &times; Rust WASM (True 3-Way: 1,544)</h4>
+              <table class="manual-tbl">
+                <thead><tr><th>Subsystem</th><th>Vectors</th><th>Engines Checked</th></tr></thead>
+                <tbody>
+                  <tr><td><code>propagate_authority</code> (14 mixed bases)</td><td>300</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>is_valid_header_meta_byte</code></td><td>100</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>sanitize_r2_fences</code> (6-symbol Mealy)</td><td>300</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>r2_compact_mode</code></td><td>84</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>canonical_wire_int</code></td><td>300</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>canonicalize_f64_bits</code> (IEEE-754)</td><td>100</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>verify_map_keys</code></td><td>200</td><td>Lean &times; Bend &times; WASM</td></tr>
+                  <tr><td><code>sp_precedence</code> (all 16 states, real HMAC-SHA256)</td><td>160</td><td>Lean &times; Bend &times; WASM</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="card-box">
+              <h4 style="margin:0 0 0.55rem;font-family:var(--sans)">2-Way &amp; Native C-ABI Lockstep (3,166 + 100)</h4>
+              <table class="manual-tbl">
+                <thead><tr><th>Subsystem</th><th>Vectors</th><th>Engines Checked</th></tr></thead>
+                <tbody>
+                  <tr><td><code>zigzag_i64</code> (incl. <code>Int64.minValue</code>)</td><td>120</td><td>Lean &times; WASM</td></tr>
+                  <tr><td><code>CWZM</code> disjoint + inverted <code>hi &lt; lo</code></td><td>200</td><td>Lean &times; Bend</td></tr>
+                  <tr><td><code>LiveIvfStore</code> compaction watermark</td><td>150</td><td>Lean &times; Bend</td></tr>
+                  <tr><td><code>MCP</code> 6-arg tool classifier</td><td>96</td><td>Lean &times; Bend</td></tr>
+                  <tr><td>Bend Plane D / B / A / C&ndash;D full lockstep</td><td>2,600</td><td>Bend &times; WASM</td></tr>
+                  <tr><td>Native <code>libcowrie_core.so</code> CWZM + WAL</td><td>100</td><td>Bend &times; Rust C-ABI</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </section>
+
+  <!-- CHAPTER 06 -->
+  <section class="chapter" id="ch6">
+    <div class="ch-header">
+      <div>
+        <span class="ch-kicker">Chapter 06 &middot; Verifiable Provenance</span>
+        <h2 class="ch-title">Live Cryptographic SHA-256 Receipts</h2>
+      </div>
+      <span class="ch-badge">Reproducible: make formal</span>
+    </div>
+
+    <figure class="fig-frame">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag">SHA_256</span>
+          <span class="fig-spec">[ CRYPTOGRAPHIC FINGERPRINTS OF ALL 16 FORMAL SOURCE FILES ]</span>
+        </div>
+        <span class="fig-meta">4 BEND FILES + 12 LEAN 4 FILES</span>
+      </div>
+      <div class="fig-body">
+        <table class="manual-tbl">
+          <thead><tr><th>Source File</th><th>Prover</th><th>SHA-256 Digest</th></tr></thead>
+          <tbody><tr><td><code>formal/SPEC.bend</code></td><td><span class="pill blue">Bend 2.0.35</span></td><td><code class="sha-code">ecf430c2c7ef967c03ed59ab3161dd1fce8fd1f5c2879f1f204326dac9733228</code></td></tr><tr><td><code>formal/CowrieKernel.bend</code></td><td><span class="pill blue">Bend 2.0.35</span></td><td><code class="sha-code">06686b8596fc9b58d4a42ee18f595e4b03ecb61c5845d6ec2c19253132499cf6</code></td></tr><tr><td><code>formal/LAWS.bend</code></td><td><span class="pill blue">Bend 2.0.35</span></td><td><code class="sha-code">35eb3c0912b63fab19d84110e0786cf98da31ba617d43409b6addaf96ed1fa04</code></td></tr><tr><td><code>formal/PROOF.bend</code></td><td><span class="pill blue">Bend 2.0.35</span></td><td><code class="sha-code">14d9feedfd11599654c7142be2627459609934a0dd14a471a46f0a21407a092b</code></td></tr><tr><td><code>formal/lean/lean-toolchain</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">8733782dc070a99b312039cda424f601b80f3be6f6f512627da5ba25adc27632</code></td></tr><tr><td><code>formal/lean/lakefile.toml</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">ed2fbdb4afc97b2addf5685329960d53f07915b36a0deb8d13f6fa524ef4025a</code></td></tr><tr><td><code>formal/lean/Cowrie.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">a884e4e781ac75e712057f8934324210dda0165a1bbb3d10fda2ac56b64c8b1a</code></td></tr><tr><td><code>formal/lean/Main.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">532a770359a1fd70b3d896e5641ba24dca13438e5e78619ffdabd081db8b5d06</code></td></tr><tr><td><code>formal/lean/Cowrie/Trust.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">0e0f3d96fd0109cf64b9d319626805b659475499c1366902f222e91868ddfa25</code></td></tr><tr><td><code>formal/lean/Cowrie/Fence.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">7ae7c8d1a89bacc97e8b4636cf9eaf24c2d8a6abc328ba666aa39922b0dc13ba</code></td></tr><tr><td><code>formal/lean/Cowrie/Canonical.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">5ced270cf91d134f8cb99599eef4a6345260f7fa042df3c3493babda29fc2337</code></td></tr><tr><td><code>formal/lean/Cowrie/Storage.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">03c65412c5f8f09efa9ccbc4b47d0de146c8c36b8dd9711374da64ebbbc52a9d</code></td></tr><tr><td><code>formal/lean/Cowrie/Laws.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">4e557ecb691d987f43160488d72314d1b594b0647e256dd2aa4f5eb1449aa009</code></td></tr><tr><td><code>formal/lean/Cowrie/Proofs.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">f18d3a0a64fa0aefc855adaa49de4f01f6bc31d576a66a42ee447711b8eefd6c</code></td></tr><tr><td><code>formal/lean/Cowrie/Refutations.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">767596a99a8b7230972db150625c949bea8f0c465f7a60869e6db1b7aaf36cca</code></td></tr><tr><td><code>formal/lean/Cowrie/AxiomAudit.lean</code></td><td><span class="pill pass">Lean 4.34.0</span></td><td><code class="sha-code">28a01d2b9b75e968e990eade635698d58a5c49f4ef8f60f81d596fc659486e23</code></td></tr></tbody>
+        </table>
+      </div>
+    </figure>
+
+    <div class="lab-controls" id="receiptTabs" style="margin-top:1.2rem">
+      <button class="lab-btn active" type="button" data-rtab="bend">receipt_v1_2_formal_bend.json</button>
+      <button class="lab-btn" type="button" data-rtab="lean">receipt_v1_2_formal_lean.json</button>
+      <button class="lab-btn" id="copyReceiptBtn" type="button">Copy Active Receipt JSON</button>
+      <span class="copy-status" id="copyStatus"></span>
+    </div>
+
+    <figure class="fig-frame">
+      <div class="fig-bar">
+        <div class="fig-bar-left">
+          <span class="fig-tag" id="recTag">REC_BEND</span>
+          <span class="fig-spec" id="recSpec">[ receipts/receipt_v1_2_formal_bend.json &middot; VERDICT: PASS ]</span>
+        </div>
+        <span class="fig-meta">RUN: make formal</span>
+      </div>
+      <div class="fig-body flush">
+        <pre class="receipt-pre" id="receiptViewer"></pre>
+      </div>
+    </figure>
+  </section>
+
+  <footer class="colophon">
+    <div>
+      <strong>Cowrie v1.2 Formal Verification Monograph (Vol. III)</strong> &middot;
+      Generated directly from <code>formal/LAWS.bend</code>, <code>formal/lean/Cowrie/Laws.lean</code>,
+      and live receipts on <code>2026-11-28</code>.
+    </div>
+    <div>
+      Self-hosted fonts &middot; Zero external CDN requests &middot;
+      <a href="ai-data-format.html">Vol. I &middot; Cowrie</a> &middot;
+      <a href="making-cowrie.html">Vol. II &middot; Creative v7</a>
+    </div>
+  </footer>
+</main>
+
+<script>
+(() => {
+  "use strict";
+
+  // Reading progress bar & Paper/Blueprint mode toggle
+  const progressBar = document.getElementById("progressBar");
+  window.addEventListener("scroll", () => {
+    const h = document.documentElement;
+    const max = Math.max(1, h.scrollHeight - h.clientHeight);
+    progressBar.style.width = ((h.scrollTop / max) * 100).toFixed(2) + "%";
+  }, { passive: true });
+
+  const themeBtn = document.getElementById("themeBtn");
+  const rootEl = document.documentElement;
+  themeBtn.addEventListener("click", () => {
+    const next = rootEl.getAttribute("data-theme") === "blueprint" ? "paper" : "blueprint";
+    rootEl.setAttribute("data-theme", next);
+    themeBtn.textContent = next === "blueprint" ? "Paper Mode" : "Blueprint Mode";
+  });
+
+  // Verbatim law atlas data
+  const LAWS = [{"id": "L01", "symbol": "L01_propagate_iff", "plane": "D", "title": "Exact Causal Taint & Bit-7 Propagation Biconditional", "rust": "crates/cowrie-core/src/taint.rs · is_tainted, propagate_authority", "guarantee": "An authority byte is tainted iff UNTRUSTED_EXT (0x04) or BIT_TAINTED (0x80) is set; propagate sets bit-7 tainted iff base OR any parent is tainted.", "kills": ["M14", "M15", "LM06", "LM07", "LM26", "R1", "R2", "F12"], "critique": "Round 1 killed the smoking-gun bypass where is_tainted ignored 0x04 and any_tainted checked head only; Round 2 pinned the raw bit-7 tainted field even when base.ext = true.", "hasBend": true, "bendCode": "law L01_propagate_iff:\n  for +c: Nat\n  for +e: Bool\n  for +t: Bool\n  for +base: S.Auth\n  for +ps: List<&2, S.Auth>\n  {(K.is_tainted(S.Auth{c, e, t}), (K.is_tainted(K.propagate(base, ps)), S.spec_auth_tainted_bit(K.propagate(base, ps)))) == (S.bor(e, t), (S.bor(S.spec_tainted(base), S.spec_any_tainted(ps)), S.bor(S.spec_tainted(base), S.spec_any_tainted(ps)))) : Bool & (Bool & Bool)}", "leanCode": "def L01_Prop : Prop :=\n  ∀ (c : Nat) (e t : Bool) (base : Auth) (ps : List Auth),\n    isTainted { cleanBits := c, ext := e, tainted := t } = (e || t) ∧\n    isTainted (propagate base ps) = (specTainted base || specAnyTainted ps) ∧\n    (propagate base ps).tainted = (specTainted base || specAnyTainted ps)"}, {"id": "L02", "symbol": "L02_taint_irrevocable_hops", "plane": "D", "title": "Irrevocable Multi-Hop Causal Taint Propagation", "rust": "crates/cowrie-core/src/taint.rs · propagate_authority (N-hop chains)", "guarantee": "Across any finite derivation chain derive_chain(hops, root), the terminal authority is tainted iff root OR any intermediate hop is tainted — taint can never wash away.", "kills": ["M16", "LM08", "R3"], "critique": "Upgraded from one-way implication to an exact biconditional so a no-op derive_chain or always-taint implementation cannot pass vacuously.", "hasBend": true, "bendCode": "law L02_taint_irrevocable_hops:\n  for +hops: List<&2, S.Auth>\n  for +root: S.Auth\n  {K.is_tainted(K.derive_chain(hops, root)) == S.bor(S.spec_tainted(root), S.spec_any_tainted(hops)) : Bool}", "leanCode": "def L02_Prop : Prop :=\n  ∀ (hops : List Auth) (root : Auth),\n    isTainted (deriveChain hops root) = (specTainted root || specAnyTainted hops)"}, {"id": "L03", "symbol": "L03_sticky_reregister", "plane": "D", "title": "Sticky Re-Registration on Both UNTRUSTED_EXT & BIT_TAINTED", "rust": "crates/cowrie-core/src/taint.rs · TaintLedger::record", "guarantee": "Re-registering an existing CID with a clean base and clean parents remains tainted whenever the prior entry had either ext=true (0x04) OR tainted=true (0x80).", "kills": ["M07", "M14", "LM06", "R1"], "critique": "Hardened to assert stickiness for pure UNTRUSTED_EXT (ext=true, tainted=false), not just pre-tainted entries.", "hasBend": true, "bendCode": "law L03_sticky_reregister:\n  for +cid: Nat\n  for +oc: Nat\n  for +old: S.Auth\n  for +rest: List<&2, S.LedgerNode>\n  for +base: S.Auth\n  for +ps: List<&2, Nat>\n  {(K.is_tainted(K.ledger_record(S.LNode{cid, S.Auth{oc, True{}, False{}}} <> rest, cid, base, ps)), K.is_tainted(K.ledger_record(S.LNode{cid, S.spec_set_tainted(old)} <> rest, cid, base, ps))) == (True{}, True{}) : Bool & Bool}", "leanCode": "def L03_Prop : Prop :=\n  ∀ (cid oc : Nat) (old : Auth) (rest : List LedgerNode) (base : Auth) (ps : List Nat),\n    isTainted (ledgerRecord ({ cid := cid, auth := { cleanBits := oc, ext := true, tainted := false } } :: rest) cid base ps) = true ∧\n    isTainted (ledgerRecord ({ cid := cid, auth := specSetTainted old } :: rest) cid base ps) = true"}, {"id": "L04", "symbol": "L04_unknown_parent_fails_closed", "plane": "D", "title": "Unknown Parent Fails Closed at Any Index on Any Ledger", "rust": "crates/cowrie-core/src/taint.rs · TaintLedger::record / ffi.rs", "guarantee": "If any parent CID at any position p_pre ++ [unk] ++ p_tail is absent from an arbitrary (empty or non-empty) ledger, ledger_record fails closed to tainted=true.", "kills": ["M17", "LM09", "F12"], "critique": "Generalized from empty-ledger-only to arbitrary non-empty ledgers and arbitrary parent list positions.", "hasBend": true, "bendCode": "law L04_unknown_parent_fails_closed:\n  for +lg: List<&2, S.LedgerNode>\n  for +cid: Nat\n  for +base: S.Auth\n  for +p_pre: List<&2, Nat>\n  for +unk: Nat\n  for +p_tail: List<&2, Nat>\n  {S.implies(S.bnot(S.spec_ledger_has_cid(lg, unk)), K.is_tainted(K.ledger_record(lg, cid, base, S.append_nat(p_pre, unk <> p_tail)))) == True{} : Bool}", "leanCode": "def L04_Prop : Prop :=\n  ∀ (lg : List LedgerNode) (cid : Nat) (base : Auth) (pPre : List Nat) (unk : Nat) (pTail : List Nat),\n    specLedgerHasCid lg unk = false →\n    isTainted (ledgerRecord lg cid base (pPre ++ unk :: pTail)) = true"}, {"id": "L05", "symbol": "L05_empty_args_fail_closed", "plane": "D", "title": "Privileged Action Classification & Empty-Args Fail-Closed", "rust": "crates/cowrie-core/src/taint.rs · is_privileged, check_gate_signed", "guarantee": "is_privileged matches the frozen 5-action spec (ReadOnly=false; ShellExec, CredRead, FsWrite, NetExfil=true), and empty arg lists fail closed on every privileged action.", "kills": ["M01", "M18", "LM01", "LM10"], "critique": "Pinned is_privileged against frozen SPEC so dropping CredRead or FsWrite from privileged status is rejected.", "hasBend": true, "bendCode": "law L05_empty_args_fail_closed:\n  for +act: S.Action\n  for +lg: List<&2, S.LedgerNode>\n  for +toks: List<&2, S.DeclassToken>\n  for +has_pk: Bool\n  for +now: Nat\n  {(K.is_privileged(act), S.implies(S.spec_is_privileged(act), S.bnot(K.check_gate_signed_pk(lg, act, Nil{}, toks, has_pk, now)))) == (S.spec_is_privileged(act), True{}) : Bool & Bool}", "leanCode": "def L05_Prop : Prop :=\n  ∀ (act : Action) (lg : List LedgerNode) (toks : List DeclassToken) (hasPk : Bool) (now : Nat),\n    isPrivileged act = specIsPrivileged act ∧\n    (specIsPrivileged act = true → checkGateSignedPk lg act [] toks hasPk now = false)"}, {"id": "L06a", "symbol": "L06a_wrong_action_token_rejected", "plane": "D", "title": "Action-Scoped Ed25519 Declassification Token Isolation", "rust": "crates/cowrie-core/src/taint.rs · check_gate_signed", "guarantee": "A validly signed token scoped to action a2 != a1 never authorizes a privileged action a1 on any tainted (ext or tainted-bit) argument.", "kills": ["M18", "LM10"], "critique": "Quantified universally over all distinct action pairs (a1 != a2) and both taint sources (oe || ot).", "hasBend": true, "bendCode": "law L06a_wrong_action_token_rejected:\n  for +a1: S.Action\n  for +a2: S.Action\n  for +cid: Nat\n  for +oc: Nat\n  for +oe: Bool\n  for +ot: Bool\n  for +expiry: Nat\n  for +now: Nat\n  {S.implies(S.band(S.spec_is_privileged(a1), S.band(S.bor(oe, ot), S.bnot(S.spec_action_eq(a1, a2)))), S.bnot(K.check_gate_signed([S.LNode{cid, S.Auth{oc, oe, ot}}], a1, [cid], [S.Tok{cid, a2, expiry, True{}}], now))) == True{} : Bool}", "leanCode": "def L06a_Prop : Prop :=\n  ∀ (a1 a2 : Action) (cid oc : Nat) (oe ot : Bool) (expiry now : Nat),\n    specIsPrivileged a1 = true →\n    (oe || ot) = true →\n    a1 ≠ a2 →\n    checkGateSigned [{ cid := cid, auth := { cleanBits := oc, ext := oe, tainted := ot } }]\n      a1 [cid] [{ cid := cid, act := a2, expiry := expiry, sigValid := true }] now = false"}, {"id": "L06b", "symbol": "L06b_partial_declass_blocks", "plane": "D", "title": "CID-Scoped Partial Declassification Blocks Distinct Tainted Args", "rust": "crates/cowrie-core/src/taint.rs · check_gate_signed", "guarantee": "A valid token for tainted CID c1 never authorizes a distinct tainted CID c2 != c1 — neither in a multi-arg call [c1, c2] nor alone as [c2].", "kills": ["M19", "LM11", "R4"], "critique": "Added the solo [c2] conjunct so a buggy token matcher that ignores target_cid cannot pass via partial-list coincidences.", "hasBend": true, "bendCode": "law L06b_partial_declass_blocks:\n  for +act: S.Action\n  for +c1: Nat\n  for +c2: Nat\n  for +o1: S.Auth\n  for +oc2: Nat\n  for +oe2: Bool\n  for +ot2: Bool\n  for +exp: Nat\n  for +now: Nat\n  {S.implies(S.band(S.spec_is_privileged(act), S.band(S.bnot(S.nat_eq(c1, c2)), S.bor(oe2, ot2))), S.band(S.bnot(K.check_gate_signed([S.LNode{c1, S.spec_set_tainted(o1)}, S.LNode{c2, S.Auth{oc2, oe2, ot2}}], act, [c1, c2], [S.Tok{c1, act, exp, True{}}], now)), S.bnot(K.check_gate_signed([S.LNode{c1, S.spec_set_tainted(o1)}, S.LNode{c2, S.Auth{oc2, oe2, ot2}}], act, [c2], [S.Tok{c1, act, exp, True{}}], now)))) == True{} : Bool}", "leanCode": "def L06b_Prop : Prop :=\n  ∀ (act : Action) (c1 c2 : Nat) (o1 : Auth) (oc2 : Nat) (oe2 ot2 : Bool) (exp now : Nat),\n    specIsPrivileged act = true →\n    c1 ≠ c2 →\n    (oe2 || ot2) = true →\n    let lg := [{ cid := c1, auth := specSetTainted o1 },\n               { cid := c2, auth := { cleanBits := oc2, ext := oe2, tainted := ot2 } }]\n    let toks := [{ cid := c1, act := act, expiry := exp, sigValid := true }]\n    checkGateSigned lg act [c1, c2] toks now = false ∧\n    checkGateSigned lg act [c2] toks now = false"}, {"id": "L15", "symbol": "L15_propagate_preserves_origin", "plane": "D", "title": "Origin Bitfield & UNTRUSTED_EXT Bit Preservation", "rust": "crates/cowrie-core/src/taint.rs · propagate_authority, TaintLedger::record", "guarantee": "Neither propagate nor ledger_record ever alters base.clean_bits (low 7 bits) or base.ext — taint propagation is strictly additive onto bit 7 (0x80).", "kills": ["M34", "LM21"], "critique": "Round 2 eliminated the TCB leak where Bend L15 projected bits through mutable K.auth_* helpers instead of frozen SPEC.bend accessors.", "hasBend": true, "bendCode": "law L15_propagate_preserves_origin:\n  for +base: S.Auth\n  for +ps: List<&2, S.Auth>\n  for +lg: List<&2, S.LedgerNode>\n  for +cid: Nat\n  for +pids: List<&2, Nat>\n  {((S.spec_auth_clean_bits(K.propagate(base, ps)), S.spec_auth_ext_bit(K.propagate(base, ps))), (S.spec_auth_clean_bits(K.ledger_record(lg, cid, base, pids)), S.spec_auth_ext_bit(K.ledger_record(lg, cid, base, pids)))) == ((S.spec_auth_clean_bits(base), S.spec_auth_ext_bit(base)), (S.spec_auth_clean_bits(base), S.spec_auth_ext_bit(base))) : (Nat & Bool) & (Nat & Bool)}", "leanCode": "def L15_Prop : Prop :=\n  ∀ (base : Auth) (ps : List Auth) (lg : List LedgerNode) (cid : Nat) (pids : List Nat),\n    (propagate base ps).cleanBits = base.cleanBits ∧\n    (propagate base ps).ext = base.ext ∧\n    (ledgerRecord lg cid base pids).cleanBits = base.cleanBits ∧\n    (ledgerRecord lg cid base pids).ext = base.ext"}, {"id": "L16", "symbol": "L16_sticky_deep_and_clean_liveness", "plane": "D", "title": "Deep Sticky Lookup, Clean Liveness & Stateful ledgerInsert Monotonicity", "rust": "crates/cowrie-core/src/taint.rs · TaintLedger::record", "guarantee": "Sticky taint survives behind arbitrary ledger prefixes; clean base + clean parents stays clean (liveness); and in Lean 4, multi-step stateful ledgerInsert preserves taint monotonicity for every target CID.", "kills": ["M07", "M08"], "critique": "Round 2 wired stateful ledgerInsert into Lean L16 so multi-step ledger updates are proved monotonic, not just single-shot lookups.", "hasBend": true, "bendCode": "law L16_sticky_deep_and_clean_liveness:\n  for +prefix: List<&2, S.LedgerNode>\n  for +cid: Nat\n  for +oc: Nat\n  for +oe: Bool\n  for +ot: Bool\n  for +rest: List<&2, S.LedgerNode>\n  for +base: S.Auth\n  for +ps: List<&2, Nat>\n  for +lg: List<&2, S.LedgerNode>\n  for +bc: Nat\n  for +clean_ps: List<&2, Nat>\n  {(S.implies(S.band(S.bnot(S.spec_ledger_has_cid(prefix, cid)), S.bor(oe, ot)), K.is_tainted(K.ledger_record(S.append_lg(prefix, S.LNode{cid, S.Auth{oc, oe, ot}} <> rest), cid, base, ps))), S.implies(S.band(S.bnot(S.spec_existing_tainted(S.spec_ledger_lookup(lg, cid))), S.bnot(S.spec_parents_tainted(clean_ps, lg))), S.bnot(K.is_tainted(K.ledger_record(lg, cid, S.Auth{bc, False{}, False{}}, clean_ps))))) == (True{}, True{}) : Bool & Bool}", "leanCode": "def L16_Prop : Prop :=\n  ∀ (prefixLg rest : List LedgerNode) (cid oc : Nat) (oe ot : Bool) (base : Auth) (ps : List Nat)\n    (lg : List LedgerNode) (bc : Nat) (cleanPs : List Nat) (target : Nat),\n    (specLedgerHasCid prefixLg cid = false → (oe || ot) = true →\n      isTainted (ledgerRecord (prefixLg ++ { cid := cid, auth := { cleanBits := oc, ext := oe, tainted := ot } } :: rest) cid base ps) = true) ∧\n    (specExistingTainted (specLedgerLookup lg cid) = false →\n      specParentsTainted cleanPs lg = false →\n      isTainted (ledgerRecord lg cid { cleanBits := bc, ext := false, tainted := false } cleanPs) = false) ∧\n    (specExistingTainted (specLedgerLookup lg target) = true →\n      specExistingTainted (specLedgerLookup (ledgerInsert lg cid base ps) target) = true)"}, {"id": "L17", "symbol": "L17_gate_exact_iff_and_liveness", "plane": "D", "title": "Exact Gate Biconditional (5-Arg & 6-Arg) & Deep-Token Liveness", "rust": "crates/cowrie-core/src/taint.rs · check_gate_signed", "guarantee": "Both check_gate_signed_pk (6-arg) and check_gate_signed (5-arg wrapper) match frozen spec_gate identically; ReadOnly always passes; a valid token buried at any index in toks authorizes its CID.", "kills": ["M06", "M27", "LM12", "R13"], "critique": "Round 2 pinned the 5-arg check_gate_signed wrapper directly (closing a dead-wrapper gap) alongside 6-arg check_gate_signed_pk.", "hasBend": true, "bendCode": "law L17_gate_exact_iff_and_liveness:\n  for +lg: List<&2, S.LedgerNode>\n  for +act: S.Action\n  for +args: List<&2, Nat>\n  for +toks: List<&2, S.DeclassToken>\n  for +has_pk: Bool\n  for +now: Nat\n  for +cid: Nat\n  for +old: S.Auth\n  for +tpre: List<&2, S.DeclassToken>\n  for +ttail: List<&2, S.DeclassToken>\n  for +d: Nat\n  {((K.check_gate_signed_pk(lg, act, args, toks, has_pk, now), K.check_gate_signed(lg, act, args, toks, now)), (K.check_gate_signed_pk(lg, S.ReadOnly{}, Nil{}, Nil{}, False{}, now), K.check_gate_signed_pk([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], S.append_toks(tpre, S.Tok{cid, act, S.nat_add(now, d), True{}} <> ttail), True{}, now))) == ((S.spec_gate(lg, act, args, toks, has_pk, now), S.spec_gate(lg, act, args, toks, True{}, now)), (True{}, True{})) : (Bool & Bool) & (Bool & Bool)}", "leanCode": "def L17_Prop : Prop :=\n  ∀ (lg : List LedgerNode) (act : Action) (args : List Nat) (toks : List DeclassToken)\n    (hasPk : Bool) (now cid : Nat) (old : Auth) (tpre ttail : List DeclassToken) (d : Nat),\n    checkGateSignedPk lg act args toks hasPk now = specGate lg act args toks hasPk now ∧\n    checkGateSigned lg act args toks now = specGate lg act args toks true now ∧\n    checkGateSignedPk lg .readOnly [] [] false now = true ∧\n    checkGateSignedPk [{ cid := cid, auth := specSetTainted old }] act [cid]\n      (tpre ++ { cid := cid, act := act, expiry := now + d, sigValid := true } :: ttail) true now = true"}, {"id": "L18", "symbol": "L18_expired_and_forged_sig_rejected", "plane": "D", "title": "Expired, Forged-Signature & Missing-Owner-Pubkey Rejection", "rust": "crates/cowrie-core/src/taint.rs · verify_declass_token, check_gate_signed", "guarantee": "For every privileged action: expired tokens (now >= exp + 1), invalid Ed25519 signatures at any timestamp, and missing owner_pubkey (has_pk=false) unconditionally fail closed.", "kills": ["M27", "LM12", "R13"], "critique": "Added explicit missing owner_pubkey fail-closed conjunct (has_pk=false) to block unconfigured-key declassification.", "hasBend": true, "bendCode": "law L18_expired_and_forged_sig_rejected:\n  for +act: S.Action\n  for +cid: Nat\n  for +old: S.Auth\n  for +exp: Nat\n  for +d: Nat\n  for +now: Nat\n  {S.implies(S.spec_is_privileged(act), S.band(S.bnot(K.check_gate_signed([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], [S.Tok{cid, act, exp, True{}}], 1n+S.nat_add(exp, d))), S.band(S.bnot(K.check_gate_signed([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], [S.Tok{cid, act, exp, False{}}], now)), S.bnot(K.check_gate_signed_pk([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], [S.Tok{cid, act, S.nat_add(now, d), True{}}], False{}, now))))) == True{} : Bool}", "leanCode": "def L18_Prop : Prop :=\n  ∀ (act : Action) (cid : Nat) (old : Auth) (exp d now : Nat),\n    specIsPrivileged act = true →\n    let lg := [{ cid := cid, auth := specSetTainted old }]\n    checkGateSigned lg act [cid] [{ cid := cid, act := act, expiry := exp, sigValid := true }] (exp + d + 1) = false ∧\n    checkGateSigned lg act [cid] [{ cid := cid, act := act, expiry := exp, sigValid := false }] now = false ∧\n    checkGateSignedPk lg act [cid] [{ cid := cid, act := act, expiry := now + d, sigValid := true }] false now = false"}, {"id": "L19", "symbol": "L19_nth_arg_taint_blocks", "plane": "D", "title": "Universal N-th Unauthorized/Tainted Argument Fail-Closed", "rust": "crates/cowrie-core/src/taint.rs · check_gate_signed", "guarantee": "If any argument evil_cid at any list position prefix ++ [evil_cid] ++ tail fails spec_arg_ok, the entire privileged call is blocked.", "kills": ["M06", "M15", "LM07"], "critique": "De-circularized precondition against frozen spec_arg_ok instead of kernel helper.", "hasBend": true, "bendCode": "law L19_nth_arg_taint_blocks:\n  for +act: S.Action\n  for +prefix: List<&2, Nat>\n  for +evil_cid: Nat\n  for +tail: List<&2, Nat>\n  for +lg: List<&2, S.LedgerNode>\n  for +toks: List<&2, S.DeclassToken>\n  for +has_pk: Bool\n  for +now: Nat\n  {S.implies(S.band(S.spec_is_privileged(act), S.bnot(S.spec_arg_ok(evil_cid, lg, act, toks, has_pk, now))), S.bnot(K.check_gate_signed_pk(lg, act, S.append_nat(prefix, evil_cid <> tail), toks, has_pk, now))) == True{} : Bool}", "leanCode": "def L19_Prop : Prop :=\n  ∀ (act : Action) (pfx : List Nat) (evilCid : Nat) (tl : List Nat)\n    (lg : List LedgerNode) (toks : List DeclassToken) (hasPk : Bool) (now : Nat),\n    specIsPrivileged act = true →\n    specArgOk evilCid lg act toks hasPk now = false →\n    checkGateSignedPk lg act (pfx ++ evilCid :: tl) toks hasPk now = false"}, {"id": "L25", "symbol": "L25_ledger_record_exact_iff", "plane": "D", "title": "Exact Ledger Record Biconditional, Bit-7 Pinning & Deep Bad-Parent", "rust": "crates/cowrie-core/src/taint.rs · TaintLedger::record", "guarantee": "Both is_tainted(ledger_record(...)) and raw bit-7 .tainted equal (base_tainted || existing_tainted || any_parent_tainted), and any tainted parent at any depth forces taint.", "kills": ["M07", "M08", "M17", "LM09"], "critique": "Round 2 pinned raw .tainted (bit 7) alongside is_tainted so ext=true base cannot mask an unset bit 7.", "hasBend": true, "bendCode": "law L25_ledger_record_exact_iff:\n  for +lg: List<&2, S.LedgerNode>\n  for +cid: Nat\n  for +base: S.Auth\n  for +ps: List<&2, Nat>\n  for +p_pre: List<&2, Nat>\n  for +bad_p: Nat\n  for +p_tail: List<&2, Nat>\n  {((K.is_tainted(K.ledger_record(lg, cid, base, ps)), S.spec_auth_tainted_bit(K.ledger_record(lg, cid, base, ps))), S.implies(S.spec_opt_tainted(S.spec_ledger_lookup(lg, bad_p)), K.is_tainted(K.ledger_record(lg, cid, base, S.append_nat(p_pre, bad_p <> p_tail))))) == ((S.bor(S.spec_tainted(base), S.bor(S.spec_existing_tainted(S.spec_ledger_lookup(lg, cid)), S.spec_parents_tainted(ps, lg))), S.bor(S.spec_tainted(base), S.bor(S.spec_existing_tainted(S.spec_ledger_lookup(lg, cid)), S.spec_parents_tainted(ps, lg)))), True{}) : (Bool & Bool) & Bool}", "leanCode": "def L25_Prop : Prop :=\n  ∀ (lg : List LedgerNode) (cid : Nat) (base : Auth) (ps pPre : List Nat) (badP : Nat) (pTail : List Nat),\n    isTainted (ledgerRecord lg cid base ps) =\n      (specTainted base || specExistingTainted (specLedgerLookup lg cid) || specParentsTainted ps lg) ∧\n    (ledgerRecord lg cid base ps).tainted =\n      (specTainted base || specExistingTainted (specLedgerLookup lg cid) || specParentsTainted ps lg) ∧\n    (specOptTainted (specLedgerLookup lg badP) = true →\n      isTainted (ledgerRecord lg cid base (pPre ++ badP :: pTail)) = true)"}, {"id": "L26", "symbol": "L26_header_meta_and_owner_pubkey", "plane": "D", "title": "COWR v1 Header Authority, Epistemic & Flags Validation", "rust": "crates/cowrie-core/src/canonical.rs · validate_header_meta", "guarantee": "Header metadata is valid iff low4 in 1..=15, reserved bits 4..6 == 0, epistemic in 1..=3, and flags == 0; every boundary outside that domain fails closed.", "kills": ["F12"], "critique": "Added for v1.2 header validation growth; paired with bit-exact UInt8 isValidHeaderMetaByte in Lean L37.", "hasBend": true, "bendCode": "law L26_header_meta_and_owner_pubkey:\n  for +low4: Nat\n  for +res3: Nat\n  for +epi: Nat\n  for +flags: Nat\n  for +r: Nat\n  for +e: Nat\n  for +f: Nat\n  {((K.is_valid_header_meta(low4, res3, epi, flags), K.is_valid_header_meta(0n, 0n, 1n, 0n)), ((K.is_valid_header_meta(16n+r, 0n, 1n, 0n), K.is_valid_header_meta(2n, 1n+r, 1n, 0n)), ((K.is_valid_header_meta(2n, 0n, 0n, 0n), K.is_valid_header_meta(2n, 0n, 4n+e, 0n)), (K.is_valid_header_meta(2n, 0n, 1n, 1n+f), (K.is_valid_header_meta(1n, 0n, 1n, 0n), K.is_valid_header_meta(15n, 0n, 3n, 0n)))))) == ((S.spec_valid_header_meta(low4, res3, epi, flags), False{}), ((False{}, False{}), ((False{}, False{}), (False{}, (True{}, True{}))))) : (Bool & Bool) & ((Bool & Bool) & ((Bool & Bool) & (Bool & (Bool & Bool))))}", "leanCode": "def L26_Prop : Prop :=\n  ∀ (low4 res3 epi flags r e f : Nat),\n    isValidHeaderMeta low4 res3 epi flags = specValidHeaderMeta low4 res3 epi flags ∧\n    isValidHeaderMeta 0 0 1 0 = false ∧\n    isValidHeaderMeta (16 + r) 0 1 0 = false ∧\n    isValidHeaderMeta 2 (r + 1) 1 0 = false ∧\n    isValidHeaderMeta 2 0 0 0 = false ∧\n    isValidHeaderMeta 2 0 (4 + e) 0 = false ∧\n    isValidHeaderMeta 2 0 1 (f + 1) = false ∧\n    isValidHeaderMeta 1 0 1 0 = true ∧\n    isValidHeaderMeta 15 0 3 0 = true"}, {"id": "L27", "symbol": "L27_ed25519_action_code_and_mcp_classifier", "plane": "D", "title": "Ed25519 Action-Code Bijection (0..=4) & Full 6-Arg MCP Classifier", "rust": "crates/cowrie-core/src/taint.rs · action_code, classify_mcp_tool", "guarantee": "Action codes bijectively map ReadOnly..NetExfil <-> 0..4 (>=5 rejected); MCP tool classification matches the exact 6-arg precedence (policy override > verb > allow_ro | builtin_ro | (trust_ann && hint) > default-deny) and ignores untrusted hints.", "kills": ["M32", "LM23", "R15"], "critique": "Round 2 caught that L27 previously didn't constrain policy override precedence, allowing a fail-open override mutant; closed with full 6-arg biconditional + M32/LM23/R15.", "hasBend": true, "bendCode": "law L27_ed25519_action_code_and_mcp_classifier:\n  for +a: S.Action\n  for +b: S.Action\n  for +k: Nat\n  for +pol: Maybe<&2, S.Action>\n  for +verb: Maybe<&2, S.Action>\n  for +allow_ro: Bool\n  for +builtin_ro: Bool\n  for +trust_ann: Bool\n  for +hint: Bool\n  {(((K.action_to_code(a), K.action_from_code(K.action_to_code(a))), S.implies(S.bnot(S.spec_action_eq(a, b)), S.bnot(S.nat_eq(K.action_to_code(a), K.action_to_code(b))))), ((K.action_from_code(5n+k), K.classify_mcp_tool(pol, verb, allow_ro, builtin_ro, trust_ann, hint)), (S.spec_is_privileged(K.classify_mcp_tool(None{}, None{}, False{}, False{}, False{}, hint)), S.spec_action_eq(K.classify_mcp_tool(pol, verb, allow_ro, builtin_ro, False{}, hint), K.classify_mcp_tool(pol, verb, allow_ro, builtin_ro, False{}, False{}))))) == (((S.spec_action_to_code(a), Some{a}), True{}), ((None{}, S.spec_classify_mcp_tool(pol, verb, allow_ro, builtin_ro, trust_ann, hint)), (True{}, True{}))) : ((Nat & Maybe<&2, S.Action>) & Bool) & ((Maybe<&2, S.Action> & S.Action) & (Bool & Bool))}", "leanCode": "def L27_Prop : Prop :=\n  ∀ (a b : Action) (k : Nat) (pol verb : Option Action) (allowRo builtinRo trustAnn hint : Bool),\n    actionToCode a = specActionToCode a ∧\n    actionFromCode (actionToCode a) = some a ∧\n    (a ≠ b → actionToCode a ≠ actionToCode b) ∧\n    actionFromCode (5 + k) = none ∧\n    classifyMcpTool pol verb allowRo builtinRo trustAnn hint =\n      specClassifyMcpTool pol verb allowRo builtinRo trustAnn hint ∧\n    specIsPrivileged (classifyMcpTool none none false false false hint) = true ∧\n    classifyMcpTool pol verb allowRo builtinRo false hint =\n      classifyMcpTool pol verb allowRo builtinRo false false"}, {"id": "L07", "symbol": "L07_fence_no_triple", "plane": "B", "title": "6-Symbol Mealy Sanitizer Eliminates All Fence & ChatML Breakouts", "rust": "crates/cowrie-core/src/lens.rs · sanitize_r2_fences", "guarantee": "For every symbol list xs over the 6-symbol alphabet {Lt, Gt, Pipe, Esc, Hidden/Spoof, Other}, sanitize_fences(xs) never contains <<<, >>>, <|, |>, or any Hidden/Spoof character.", "kills": ["M02", "M20", "LM02", "LM13", "F1", "F9"], "critique": "Upgraded from 3-symbol (<<< / >>>) to 6-symbol Mealy transducer covering ChatML (<|, |>) and invisible Unicode spoof stripping (F9).", "hasBend": true, "bendCode": "law L07_fence_no_triple:\n  for +xs: List<&2, S.Sym>\n  {S.has_forbidden(K.sanitize_fences(xs)) == False{} : Bool}", "leanCode": "def L07_Prop : Prop :=\n  ∀ (xs : List Sym), hasForbidden (sanitizeFences xs) = false"}, {"id": "L08", "symbol": "L08_fence_safe_identity", "plane": "B", "title": "Zero-Overhead Identity on Already-Safe Inputs", "rust": "crates/cowrie-core/src/lens.rs · sanitize_r2_fences", "guarantee": "Any input already free of <<<, >>>, <|, |>, and Hidden/Spoof symbols is emitted completely unchanged (zero unnecessary escape inflation).", "kills": ["M09"], "critique": "Kills trivial over-escaping sanitizers that corrupt benign text.", "hasBend": true, "bendCode": "law L08_fence_safe_identity:\n  for +xs: List<&2, S.Sym>\n  {S.implies(S.bnot(S.has_forbidden(xs)), S.sym_list_eq(K.sanitize_fences(xs), xs)) == True{} : Bool}", "leanCode": "def L08_Prop : Prop :=\n  ∀ (xs : List Sym), hasForbidden xs = false → sanitizeFences xs = xs"}, {"id": "L20", "symbol": "L20_fence_preserves_all_non_esc_symbols", "plane": "B", "title": "Content Preservation, Order-Preserving Subsequence & <= 2x Bound", "rust": "crates/cowrie-core/src/lens.rs · sanitize_r2_fences", "guarantee": "Stripping escapes recovers specStripEsc(specStripSpoof(xs)), all non-spoof symbols (including original escapes) appear as an order-preserving Sublist/subseq, and Lean proves output length <= 2 * stripped input length.", "kills": ["M09"], "critique": "Round 2 moved stripEsc/stripSpoof out of mutable Fence.lean into frozen Laws.lean and added the <= 2x DoS expansion bound.", "hasBend": true, "bendCode": "law L20_fence_preserves_all_non_esc_symbols:\n  for +xs: List<&2, S.Sym>\n  {(S.strip_esc(K.sanitize_fences(xs)), S.sym_subseq(S.strip_hidden(xs), K.sanitize_fences(xs))) == (S.strip_esc(S.strip_hidden(xs)), True{}) : List<&2, S.Sym> & Bool}", "leanCode": "def L20_Prop : Prop :=\n  ∀ (xs : List Sym),\n    specStripEsc (sanitizeFences xs) = specStripEsc (specStripSpoof xs) ∧\n    List.Sublist (specStripSpoof xs) (sanitizeFences xs) ∧\n    (sanitizeFences xs).length <= 2 * (specStripSpoof xs).length"}, {"id": "L21", "symbol": "L21_r2_structured_table_header_safe", "plane": "B", "title": "Structured R2 Scalar, Multi-Cell Table & TensorRef Safety + Fidelity", "rust": "crates/cowrie-core/src/lens.rs · render_r2, sanitize_r2_inline_key", "guarantee": "Rendering R2Scalar, multi-cell R2Table joined by '|' (F4 + F9), and R2TensorRef <T:...@space> (F8) never emits forbidden sequences and preserves content (plus full List.Sublist in Lean) across all 3 variants.", "kills": ["M10", "M11", "M20", "LM13", "R5", "F4", "F8", "F9"], "critique": "Round 1 added multi-cell ChatML boundary join (F9); Round 2 added List.Sublist content preservation for all 3 R2Field constructors.", "hasBend": true, "bendCode": "law L21_r2_structured_table_header_safe:\n  for +field: S.R2Field\n  for +sk: List<&2, S.Sym>\n  for +sv: List<&2, S.Sym>\n  for +tk: List<&2, S.Sym>\n  for +tcol: List<&2, S.Sym>\n  for +tc1: List<&2, S.Sym>\n  for +tc2: List<&2, S.Sym>\n  for +rk: List<&2, S.Sym>\n  for +rsp: List<&2, S.Sym>\n  {((S.has_forbidden(K.render_r2_field(field)), S.strip_esc(K.render_r2_field(S.R2Scalar{sk, sv}))), (S.strip_esc(K.render_r2_field(S.R2Table{tk, tcol, tc1, tc2})), S.strip_esc(K.render_r2_field(S.R2TensorRef{rk, rsp})))) == ((False{}, S.append_sym(S.strip_esc(S.strip_hidden(sk)), S.Other{} <> S.strip_esc(S.strip_hidden(sv)))), (S.append_sym(S.strip_esc(S.strip_hidden(tk)), S.Other{} <> S.append_sym(S.strip_esc(S.strip_hidden(tcol)), S.Other{} <> S.append_sym(S.strip_esc(S.strip_hidden(tc1)), S.Pipe{} <> S.strip_esc(S.strip_hidden(tc2))))), S.append_sym(S.strip_esc(S.strip_hidden(rk)), S.Other{} <> (S.Lt{} <> (S.Other{} <> S.append_sym(S.strip_esc(S.strip_hidden(rsp)), [S.Gt{}])))))) : (Bool & List<&2, S.Sym>) & (List<&2, S.Sym> & List<&2, S.Sym>)}", "leanCode": "def L21_Prop : Prop :=\n  ∀ (field : R2Field) (sk sv tk tcol tc1 tc2 rk rsp : List Sym),\n    hasForbidden (renderR2Field field) = false ∧\n    specStripEsc (renderR2Field (.scalar sk sv)) =\n      specStripEsc (specStripSpoof sk) ++ (.other :: specStripEsc (specStripSpoof sv)) ∧\n    List.Sublist (specStripSpoof sk ++ (.other :: specStripSpoof sv))\n      (renderR2Field (.scalar sk sv)) ∧\n    specStripEsc (renderR2Field (.table tk tcol tc1 tc2)) =\n      specStripEsc (specStripSpoof tk) ++ (.other :: specStripEsc (specStripSpoof tcol) ++\n        (.other :: specStripEsc (specStripSpoof tc1) ++ (.pipe :: specStripEsc (specStripSpoof tc2)))) ∧\n    List.Sublist (specStripSpoof tk ++ (.other :: specStripSpoof tcol ++\n        (.other :: specStripSpoof tc1 ++ (.pipe :: specStripSpoof tc2))))\n      (renderR2Field (.table tk tcol tc1 tc2)) ∧\n    specStripEsc (renderR2Field (.tensorRef rk rsp)) =\n      specStripEsc (specStripSpoof rk) ++ (.other :: .lt :: .other :: specStripEsc (specStripSpoof rsp) ++ [.gt]) ∧\n    List.Sublist (specStripSpoof rk ++ (.other :: .lt :: .other :: specStripSpoof rsp ++ [.gt]))\n      (renderR2Field (.tensorRef rk rsp))"}, {"id": "L28", "symbol": "L28_r2_compact_and_virtual_atlas_fail_closed", "plane": "B", "title": "R2-Compact & Virtual Atlas Fail-Closed + Prefix Truncation Safety", "rust": "crates/cowrie-core/src/lens.rs · project_r2_compact, project_virtual_atlas", "guarantee": "Compact header mode is granted ONLY to clean SYS_POLICY (1) or VERIFIED_TOOL (2); zero, UNTRUSTED_EXT, MODEL_SYNTH (>=3), tainted, or mixed authorities fail closed to FullMealyFence; prefix .take n remains forbidden-free.", "kills": ["M21", "LM14", "R7", "F17"], "critique": "Added for v1.2 R2-Compact and Virtual Atlas growth; prefix safety underpins F17 cap truncation.", "hasBend": true, "bendCode": "law L28_r2_compact_and_virtual_atlas_fail_closed:\n  for +a: S.Auth\n  for +c: Nat\n  for +t: Bool\n  for +e: Bool\n  for +k: Nat\n  for +n: Nat\n  for +xs: List<&2, S.Sym>\n  {((K.r2_compact_mode(S.Auth{1n, False{}, False{}}), K.r2_compact_mode(S.Auth{2n, False{}, False{}})), ((K.r2_compact_mode(S.Auth{0n, e, t}), K.r2_compact_mode(S.Auth{c, True{}, t})), ((K.r2_compact_mode(S.Auth{c, e, True{}}), K.r2_compact_mode(S.Auth{3n+k, e, t})), (K.virtual_atlas_mode(a), S.has_forbidden(S.take_sym(n, K.sanitize_fences(xs))))))) == ((S.CompactHeader{}, S.CompactHeader{}), ((S.FullMealyFence{}, S.FullMealyFence{}), ((S.FullMealyFence{}, S.FullMealyFence{}), (K.r2_compact_mode(a), False{})))) : (S.LensMode & S.LensMode) & ((S.LensMode & S.LensMode) & ((S.LensMode & S.LensMode) & (S.LensMode & Bool)))}", "leanCode": "def L28_Prop : Prop :=\n  ∀ (a : Auth) (c k n : Nat) (e t : Bool) (xs : List Sym),\n    r2CompactMode { cleanBits := 1, ext := false, tainted := false } = .compactHeader ∧\n    r2CompactMode { cleanBits := 2, ext := false, tainted := false } = .compactHeader ∧\n    r2CompactMode { cleanBits := 0, ext := e, tainted := t } = .fullMealyFence ∧\n    r2CompactMode { cleanBits := c, ext := true, tainted := t } = .fullMealyFence ∧\n    r2CompactMode { cleanBits := c, ext := e, tainted := true } = .fullMealyFence ∧\n    r2CompactMode { cleanBits := 3 + k, ext := e, tainted := t } = .fullMealyFence ∧\n    virtualAtlasMode a = r2CompactMode a ∧\n    hasForbidden ((sanitizeFences xs).take n) = false"}, {"id": "L29", "symbol": "L29_r2_table_marker_injectivity", "plane": "B", "title": "Universal R2 Table Cell Marker Injectivity & Spoof-Stripping Invariance", "rust": "crates/cowrie-core/src/lens.rs · encode_r2_table_cell, cell_escape", "guarantee": "Across ALL raw strings: Null, Missing, and Str cells are mutually disjoint; stripping Hidden/Spoof chars before classification yields spoof-invariance; empty/'null'/'<missing>' strings are quoted; visible content is preserved.", "kills": ["M28", "LM15", "R6", "F9", "F17"], "critique": "Round 2 upgraded L29 from 3 hardcoded spoof examples to universal quantification over ALL raw symbol lists + full content preservation.", "hasBend": true, "bendCode": "law L29_r2_table_marker_injectivity:\n  for +c: S.TableCell\n  for +raw: List<&2, S.Sym>\n  {((S.cell_tag_has_forbidden(K.encode_table_cell(c)), S.cell_tag_eq(K.encode_table_cell(S.CellNull{}), K.encode_table_cell(S.CellStr{raw}))), ((S.cell_tag_eq(K.encode_table_cell(S.CellMissing{}), K.encode_table_cell(S.CellStr{raw})), S.cell_tag_eq(K.encode_table_cell(S.CellNull{}), K.encode_table_cell(S.CellMissing{}))), ((K.encode_table_cell(S.CellStr{raw}), S.strip_esc(S.cell_tag_content(K.encode_table_cell(S.CellStr{raw})))), (S.sym_subseq(S.strip_hidden(raw), S.cell_tag_content(K.encode_table_cell(S.CellStr{raw}))), ((S.implies(S.sym_list_eq(S.strip_hidden(raw), Nil{}), S.cell_tag_eq(K.encode_table_cell(S.CellStr{raw}), S.OutEmptyQuoted{})), S.implies(S.sym_list_eq(S.strip_hidden(raw), [S.Other{}]), S.cell_tag_eq(K.encode_table_cell(S.CellStr{raw}), S.OutQuotedStr{[S.Other{}]}))), S.implies(S.sym_list_eq(S.strip_hidden(raw), [S.Lt{}, S.Other{}, S.Gt{}]), S.cell_tag_eq(K.encode_table_cell(S.CellStr{raw}), S.OutQuotedStr{[S.Lt{}, S.Other{}, S.Gt{}]}))))))) == ((False{}, False{}), ((False{}, False{}), ((K.encode_table_cell(S.CellStr{S.strip_hidden(raw)}), S.strip_esc(S.strip_hidden(raw))), (True{}, ((True{}, True{}), True{}))))) : (Bool & Bool) & ((Bool & Bool) & ((S.CellTag & List<&2, S.Sym>) & (Bool & ((Bool & Bool) & Bool))))}", "leanCode": "def L29_Prop : Prop :=\n  ∀ (c : TableCell) (raw : List Sym),\n    cellTagHasForbidden (encodeTableCell c) = false ∧\n    encodeTableCell .cellNull ≠ encodeTableCell (.cellStr raw) ∧\n    encodeTableCell .cellMissing ≠ encodeTableCell (.cellStr raw) ∧\n    encodeTableCell .cellNull ≠ encodeTableCell .cellMissing ∧\n    encodeTableCell (.cellStr raw) = encodeTableCell (.cellStr (specStripSpoof raw)) ∧\n    (specStripSpoof raw = [] → encodeTableCell (.cellStr raw) = .outEmptyQuoted) ∧\n    (specStripSpoof raw = [.other] → encodeTableCell (.cellStr raw) = .outQuotedStr [.other]) ∧\n    (specStripSpoof raw = [.lt, .other, .gt] →\n      encodeTableCell (.cellStr raw) = .outQuotedStr [.lt, .other, .gt]) ∧\n    specStripEsc (cellTagContent (encodeTableCell (.cellStr raw))) = specStripEsc (specStripSpoof raw) ∧\n    List.Sublist (specStripSpoof raw) (cellTagContent (encodeTableCell (.cellStr raw)))"}, {"id": "L30", "symbol": "L30_lens_tier_bounds_and_extract_field", "plane": "B", "title": "Strict Lens Tier Bounds (0..=3) & Universal extract_field Semantics", "rust": "crates/cowrie-core/src/lens.rs · extract_field, project_tier", "guarantee": "Lens tiers are valid iff t <= 3; extract_field satisfies empty-path identity, path composition (p1 ++ p2), deep map lookup at any position, arbitrary array indexing, and fail-closed None on OOB or type mismatch.", "kills": ["F17"], "critique": "Round 2 upgraded L30 from head-only map and index-0 array tests to universal deep-map, arbitrary-index, and path-composition laws.", "hasBend": true, "bendCode": "law L30_lens_tier_bounds_and_extract_field:\n  for +t: Nat\n  for +k: Nat\n  for +idx: Nat\n  for +v: S.ValTree\n  for +pre_m: List<&2, S.MapEntry>\n  for +post_m: List<&2, S.MapEntry>\n  for +pre_a: List<&2, S.ValTree>\n  for +post_a: List<&2, S.ValTree>\n  for +a: Nat\n  for +seg: S.PathSeg\n  for +p1: List<&2, S.PathSeg>\n  for +p2: List<&2, S.PathSeg>\n  {(((K.is_valid_lens_tier(t), K.is_valid_lens_tier(4n+k)), (K.extract_field(v, p1), (K.extract_field(v, Nil{}), K.extract_field(v, S.append_path(p1, p2))))), ((S.implies(S.bnot(S.spec_map_has_key(pre_m, k)), S.spec_maybe_val_is_atom(K.extract_field(S.VMap{S.append_map(pre_m, S.MEntry{k, S.VAtom{a}} <> post_m)}, [S.PKey{k}]), a)), K.extract_field(S.VArr{S.append_val(pre_a, v <> post_a)}, [S.PIdx{S.list_len_val(pre_a)}])), ((K.extract_field(S.VArr{pre_a}, [S.PIdx{S.nat_add(S.list_len_val(pre_a), k)}]), K.extract_field(S.VMap{pre_m}, [S.PIdx{idx}])), (K.extract_field(S.VArr{pre_a}, [S.PKey{k}]), K.extract_field(S.VAtom{a}, seg <> p1))))) == (((S.nat_le(t, 3n), False{}), (S.spec_extract_field(v, p1), (Some{v}, opt_val_bind_extract(K.extract_field(v, p1), p2)))), ((True{}, Some{v}), ((None{}, None{}), (None{}, None{})))) : ((Bool & Bool) & (Maybe<&2, S.ValTree> & (Maybe<&2, S.ValTree> & Maybe<&2, S.ValTree>))) & ((Bool & Maybe<&2, S.ValTree>) & ((Maybe<&2, S.ValTree> & Maybe<&2, S.ValTree>) & (Maybe<&2, S.ValTree> & Maybe<&2, S.ValTree>)))}", "leanCode": "def L30_Prop : Prop :=\n  ∀ (t k a idx : Nat) (v : ValTree) (preMap postMap : List (Nat × ValTree))\n    (preArr postArr : List ValTree) (seg : PathSeg) (p1 p2 : List PathSeg),\n    isValidLensTier t = decide (t <= 3) ∧\n    isValidLensTier (4 + k) = false ∧\n    extractField v [] = some v ∧\n    extractField v (p1 ++ p2) = (extractField v p1).bind (fun u => extractField u p2) ∧\n    (specMapHasKey preMap k = false →\n      extractField (.vMap (preMap ++ (k, v) :: postMap)) [.pKey k] = some v) ∧\n    extractField (.vArr (preArr ++ v :: postArr)) [.pIdx preArr.length] = some v ∧\n    extractField (.vArr preArr) [.pIdx (preArr.length + k)] = none ∧\n    extractField (.vMap preMap) [.pIdx idx] = none ∧\n    extractField (.vArr preArr) [.pKey k] = none ∧\n    extractField (.vAtom a) (seg :: p1) = none"}, {"id": "L09", "symbol": "L09_canon_roundtrip", "plane": "A", "title": "Canonical Integer Wire Round-Trip Identity", "rust": "crates/cowrie-core/src/canonical.rs · encode_int, decode_int", "guarantee": "For all fixint/uint threshold limits and every logical integer (LPos, LNeg, LBigUint), decode_canon_int(encode_canon_int(v)) == Some(v).", "kills": ["M03", "LM03"], "critique": "Parameterized universally over thresholds (lim, ulim), covering both COWR canonical bounds and edge cases.", "hasBend": true, "bendCode": "law L09_canon_roundtrip:\n  for +lim: Nat\n  for +ulim: Nat\n  for +v: S.LogicalInt\n  {K.decode_canon_int(lim, ulim, K.encode_canon_int(lim, ulim, v)) == Some{v} : Maybe<&2, S.LogicalInt>}", "leanCode": "def L09_Prop : Prop :=\n  ∀ (lim ulim : Nat) (v : LogicalInt),\n    decodeCanonInt lim ulim (encodeCanonInt lim ulim v) = some v"}, {"id": "L10", "symbol": "L10_verify_iff_decode", "plane": "A", "title": "Zero-Alloc Verifier Equivalence with Strict Decoder & Frozen Spec", "rust": "crates/cowrie-core/src/canonical.rs · verify_frame_zero_alloc, decode_frame_strict", "guarantee": "verify_canon_int_zero_alloc matches BOTH frozen spec_valid_wire AND decode_canon_int(...).isSome for every wire representation.", "kills": ["M03", "LM03"], "critique": "Pinned to frozen spec_valid_wire so an equally broken verifier + decoder pair cannot self-validate.", "hasBend": true, "bendCode": "law L10_verify_iff_decode:\n  for +lim: Nat\n  for +ulim: Nat\n  for +w: S.WireInt\n  {(K.verify_canon_int_zero_alloc(lim, ulim, w), K.verify_canon_int_zero_alloc(lim, ulim, w)) == (S.spec_valid_wire(lim, ulim, w), S.spec_is_some_int(K.decode_canon_int(lim, ulim, w))) : Bool & Bool}", "leanCode": "def L10_Prop : Prop :=\n  ∀ (lim ulim : Nat) (w : WireInt),\n    verifyCanonIntZeroAlloc lim ulim w = specValidWire lim ulim w ∧\n    verifyCanonIntZeroAlloc lim ulim w = (decodeCanonInt lim ulim w).isSome"}, {"id": "L11", "symbol": "L11_canon_wire_unique", "plane": "A", "title": "Canonical Wire Uniqueness (Bijective Content Addressing)", "rust": "crates/cowrie-core/src/canonical.rs · encode_frame, verify_frame_zero_alloc", "guarantee": "Every wire integer accepted by decode_canon_int re-encodes to the exact same wire representation — guaranteeing deterministic SHA-256 CIDs.", "kills": ["M03", "LM03"], "critique": "Establishes injectivity of the wire representation alongside L09 round-trip surjectivity.", "hasBend": true, "bendCode": "law L11_canon_wire_unique:\n  for +lim: Nat\n  for +ulim: Nat\n  for +w: S.WireInt\n  {decoded_reencodes_identically(lim, ulim, w, K.decode_canon_int(lim, ulim, w)) == True{} : Bool}", "leanCode": "def L11_Prop : Prop :=\n  ∀ (lim ulim : Nat) (w : WireInt) (v : LogicalInt),\n    decodeCanonInt lim ulim w = some v → encodeCanonInt lim ulim v = w"}, {"id": "L22", "symbol": "L22_map_keys_and_dict_all_used", "plane": "A", "title": "Strictly Ascending Map Keys & Universal UnusedDictKey Rejection", "rust": "crates/cowrie-core/src/canonical.rs · verify_map_keys, verify_dict_used", "guarantee": "verify_map_keys and all_dict_keys_used match their frozen specs identically; any OOB key or non-strictly-ascending/duplicate pair at any depth fails closed; any unused dict key m < nkeys fails closed.", "kills": ["F11"], "critique": "Fully non-circular biconditional with deep-prefix counterexample guarantees.", "hasBend": true, "bendCode": "law L22_map_keys_and_dict_all_used:\n  for +nkeys: Nat\n  for +ks: List<&2, Nat>\n  for +prefix: List<&2, Nat>\n  for +b: Nat\n  for +d: Nat\n  for +tail: List<&2, Nat>\n  for +m: Nat\n  for +refs: List<&2, Nat>\n  {((K.verify_map_keys(nkeys, ks), K.all_dict_keys_used(nkeys, refs)), ((K.verify_map_keys(nkeys, S.append_nat(prefix, S.nat_add(nkeys, d) <> tail)), K.verify_map_keys(nkeys, S.append_nat(prefix, S.nat_add(b, d) <> (b <> tail)))), S.implies(S.nat_lt(m, nkeys), S.implies(S.bnot(S.nat_mem(refs, m)), S.bnot(K.all_dict_keys_used(nkeys, refs)))))) == ((S.spec_strictly_asc_from(ks, 0n, nkeys), S.spec_all_lt_in(nkeys, refs)), ((False{}, False{}), True{})) : (Bool & Bool) & ((Bool & Bool) & Bool)}", "leanCode": "def L22_Prop : Prop :=\n  ∀ (nkeys b d m : Nat) (ks pfx tl refs : List Nat),\n    verifyMapKeys nkeys ks = specStrictlyAscFrom ks 0 nkeys ∧\n    allDictKeysUsed nkeys refs = specAllLtIn nkeys refs ∧\n    verifyMapKeys nkeys (pfx ++ (nkeys + d) :: tl) = false ∧\n    verifyMapKeys nkeys (pfx ++ (b + d) :: b :: tl) = false ∧\n    (m < nkeys → refs.contains m = false → allDictKeysUsed nkeys refs = false)"}, {"id": "L31", "symbol": "L31_canon_float64_bijective_and_idempotent", "plane": "A", "title": "De-Circularized Canonical Float64 (-0.0 -> +0.0 & Quiet NaN)", "rust": "crates/cowrie-core/src/canonical.rs · canonicalize_f64, verify_f64", "guarantee": "canonicalize_f64 and verify_canon_f64 match frozen specs identically, canonicalization is idempotent, and -0.0 plus every non-canonical NaN payload are strictly rejected.", "kills": ["LM25"], "critique": "Round 2 de-circularized L31 against frozen spec_canonicalize_f64 / spec_verify_canon_f64 and added bit-exact IEEE-754 UInt64 proofs in L37 + mutant LM25.", "hasBend": true, "bendCode": "law L31_canon_float64_bijective_and_idempotent:\n  for +f: S.FloatKind\n  for +p: Nat\n  {((K.canonicalize_f64(f), K.verify_canon_f64(f)), (K.canonicalize_f64(K.canonicalize_f64(f)), (K.verify_canon_f64(S.FNegZero{}), K.verify_canon_f64(S.FNonCanonNaN{p})))) == ((S.spec_canonicalize_f64(f), S.spec_verify_canon_f64(f)), (K.canonicalize_f64(f), (False{}, False{}))) : (S.FloatKind & Bool) & (S.FloatKind & (Bool & Bool))}", "leanCode": "def L31_Prop : Prop :=\n  ∀ (f : FloatKind) (p : Nat),\n    canonicalizeF64 f = specCanonicalizeF64 f ∧\n    verifyCanonF64 f = specVerifyCanonF64 f ∧\n    canonicalizeF64 (canonicalizeF64 f) = canonicalizeF64 f ∧\n    verifyCanonF64 .fNegZero = false ∧\n    verifyCanonF64 (.fNonCanonNaN p) = false"}, {"id": "L32", "symbol": "L32_json_sentinel_bijectivity_and_fail_closed", "plane": "A", "title": "Lossless $map/$float/$bytes/$tensor JSON Sentinel Bijectivity", "rust": "crates/cowrie-core/src/canonical.rs · from_json, to_json", "guarantee": "Every SentinelVal round-trips losslessly through emit_sentinel_json -> parse_sentinel_json, while malformed or partial sentinel wrappers fail closed with None (F6).", "kills": ["F6"], "critique": "Covers all 4 reserved JSON sentinel families and enforces F6 fail-closed parsing.", "hasBend": true, "bendCode": "law L32_json_sentinel_bijectivity_and_fail_closed:\n  for +v: S.SentinelVal\n  for +r: Nat\n  for +c: Nat\n  for +a: Nat\n  for +dt: Nat\n  for +kk: Nat\n  for +p: Nat\n  {(K.parse_sentinel_json(K.emit_sentinel_json(v)), ((K.parse_sentinel_json(S.JBytesObj{False{}, r}), K.parse_sentinel_json(S.JFloatObj{False{}, c})), (K.parse_sentinel_json(S.JTensorObj{False{}, a, dt}), K.parse_sentinel_json(S.JMapWrap{False{}, kk, p})))) == (Some{v}, ((None{}, None{}), (None{}, None{}))) : Maybe<&2, S.SentinelVal> & ((Maybe<&2, S.SentinelVal> & Maybe<&2, S.SentinelVal>) & (Maybe<&2, S.SentinelVal> & Maybe<&2, S.SentinelVal>))}", "leanCode": "def L32_Prop : Prop :=\n  ∀ (v : SentinelVal) (r c a dt kk p : Nat),\n    parseSentinelJson (emitSentinelJson v) = some v ∧\n    parseSentinelJson (.jBytesObj false r) = none ∧\n    parseSentinelJson (.jFloatObj false c) = none ∧\n    parseSentinelJson (.jTensorObj false a dt) = none ∧\n    parseSentinelJson (.jMapWrap false kk p) = none"}, {"id": "L33", "symbol": "L33_resolved_frame_cid_repack_and_binding", "plane": "A", "title": "Universal resolved_frame_cid Repack Invariance & Tensor Binding", "rust": "crates/cowrie-core/src/shard.rs · resolved_frame_cid", "guarantee": "resolved_frame_cid matches frozen spec; appending extra tensors (ts ++ extra) never changes any valid resolved CID across arbitrary ref lists; any OOB ref at any position returns None; mutating frame CID, tensor byte_len, or tensor 4 MiB Merkle root changes the resolved CID.", "kills": ["F3"], "critique": "Round 2 generalized L33 from single-ref [0] to universal ref lists refs, arbitrary tensor prefix/suffix pre ++ [t] ++ post, and universal OOB at r_pre ++ (len+d) :: r_tail.", "hasBend": true, "bendCode": "law L33_resolved_frame_cid_repack_and_binding:\n  for +fcid: Nat\n  for +refs: List<&2, Nat>\n  for +r_pre: List<&2, Nat>\n  for +r_tail: List<&2, Nat>\n  for +ts: List<&2, S.TensorDesc>\n  for +pre: List<&2, S.TensorDesc>\n  for +post: List<&2, S.TensorDesc>\n  for +extra: List<&2, S.TensorDesc>\n  for +l: Nat\n  for +m: Nat\n  for +d: Nat\n  {((K.resolved_frame_cid(fcid, refs, ts), S.implies(S.rcid_is_some(K.resolved_frame_cid(fcid, refs, ts)), S.rcid_eq(K.resolved_frame_cid(fcid, refs, ts), K.resolved_frame_cid(fcid, refs, S.append_tdesc(ts, extra))))), ((K.resolved_frame_cid(fcid, S.append_nat(r_pre, S.nat_add(S.list_len_tdesc(ts), d) <> r_tail), ts), S.rcid_eq(K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)), K.resolved_frame_cid(1n+S.nat_add(fcid, d), [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)))), (S.rcid_eq(K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)), K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{1n+S.nat_add(l, d), m} <> post))), S.rcid_eq(K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)), K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, 1n+S.nat_add(m, d)} <> post)))))) == ((S.spec_resolved_frame_cid(fcid, refs, ts), True{}), ((None{}, False{}), (False{}, False{}))) : (Maybe<&2, S.ResolvedCid> & Bool) & ((Maybe<&2, S.ResolvedCid> & Bool) & (Bool & Bool))}", "leanCode": "def L33_Prop : Prop :=\n  ∀ (fcid l m d : Nat) (refs rPre rTail : List Nat) (ts pre post extra : List TensorDesc) (r : ResolvedCid),\n    resolvedFrameCid fcid refs ts = specResolvedFrameCid fcid refs ts ∧\n    (resolvedFrameCid fcid refs ts = some r → resolvedFrameCid fcid refs (ts ++ extra) = some r) ∧\n    resolvedFrameCid fcid (rPre ++ (ts.length + d) :: rTail) ts = none ∧\n    (∀ (t : ResolvedCid), resolvedFrameCid fcid refs ts = some t →\n      resolvedFrameCid fcid refs ts ≠ resolvedFrameCid (fcid + d + 1) refs ts) ∧\n    (resolvedFrameCid fcid (rPre ++ pre.length :: rTail) (pre ++ { byteLen := l, merkle4m := m } :: post) ≠\n      resolvedFrameCid fcid (rPre ++ pre.length :: rTail) (pre ++ { byteLen := l + d + 1, merkle4m := m } :: post) ∨\n      resolvedFrameCid fcid (rPre ++ pre.length :: rTail) (pre ++ { byteLen := l, merkle4m := m } :: post) = none) ∧\n    (resolvedFrameCid fcid [pre.length] (pre ++ { byteLen := l, merkle4m := m } :: post) ≠\n      resolvedFrameCid fcid [pre.length] (pre ++ { byteLen := l + d + 1, merkle4m := m } :: post)) ∧\n    (resolvedFrameCid fcid [pre.length] (pre ++ { byteLen := l, merkle4m := m } :: post) ≠\n      resolvedFrameCid fcid [pre.length] (pre ++ { byteLen := l, merkle4m := m + d + 1 } :: post))"}, {"id": "L12", "symbol": "L12_zonemap_no_false_neg", "plane": "CD", "title": "CWZM Single-Page Zero False-Negative Overlap", "rust": "crates/cowrie-core/src/zonemap.rs · ZoneMap::query_key_range", "guarantee": "zone_overlaps matches exact closed-interval overlap (lo <= max && min <= hi) — over signed Int in Lean — and any page containing a key k in [lo, hi] is guaranteed to overlap its built zone.", "kills": ["M04", "LM04", "F2", "F14"], "critique": "Pinned exact biconditional on zone_overlaps so const True{} cannot cheat the zero-false-negative implication.", "hasBend": true, "bendCode": "law L12_zonemap_no_false_neg:\n  for +mn: Nat\n  for +mx: Nat\n  for +k0: Nat\n  for +ks: List<&2, Nat>\n  for +lo: Nat\n  for +hi: Nat\n  {(K.zone_overlaps(S.Zone{mn, mx}, lo, hi), S.implies(S.spec_page_has_in_range(k0, ks, lo, hi), K.zone_overlaps(K.build_zone(k0, ks), lo, hi))) == (S.band(S.nat_le(lo, mx), S.nat_le(mn, hi)), True{}) : Bool & Bool}", "leanCode": "def L12_Prop : Prop :=\n  ∀ (mn mx k0 lo hi : Int) (ks : List Int),\n    zoneOverlaps { minK := mn, maxK := mx } lo hi = (decide (lo <= mx) && decide (mn <= hi)) ∧\n    (specPageHasInRange k0 ks lo hi = true → zoneOverlaps (buildZone k0 ks) lo hi = true)"}, {"id": "L23", "symbol": "L23_sorted_zonemap_early_break_exact", "plane": "CD", "title": "Multi-Page CWZM Binary-Skip & Early-Break Exact Equivalence", "rust": "crates/cowrie-core/src/zonemap.rs · ZoneMap::query_key_range", "guarantee": "For any monotonic disjoint zone list and lo <= hi, partition_point skipping (max < lo) + early-break (min > hi) returns the EXACT same page indices as a full linear scan; inverted queries hi < lo return [].", "kills": ["M04", "LM04", "R14", "F2", "F14", "F17"], "critique": "Round 2 added explicit inverted-range hi < lo -> [] conjunct, removed dead helper prune_sorted_zones_at, and Lean R14 proves the disjointness precondition is genuinely necessary.", "hasBend": true, "bendCode": "law L23_sorted_zonemap_early_break_exact:\n  for +zs: List<&2, S.Zone>\n  for +lo: Nat\n  for +hi: Nat\n  {(S.implies(S.band(S.nat_le(lo, hi), S.spec_zones_disjoint_from(zs, 0n)), S.nat_list_eq(K.query_key_range_pages(zs, lo, hi), S.spec_filter_zones_at(zs, 0n, lo, hi))), S.implies(S.nat_lt(hi, lo), S.nat_list_eq(K.query_key_range_pages(zs, lo, hi), Nil{}))) == (True{}, True{}) : Bool & Bool}", "leanCode": "def L23_Prop : Prop :=\n  ∀ (zs : List Zone) (lo hi : Int),\n    (lo <= hi → specZonesDisjoint zs = true →\n      queryKeyRangePages zs lo hi = specFilterZonesAt zs 0 lo hi) ∧\n    (hi < lo → queryKeyRangePages zs lo hi = [])"}, {"id": "L13", "symbol": "L13_merkle_domain_and_odd_safe", "plane": "CD", "title": "Universal RFC 6962 Merkle Flatten-Injectivity & 0x02/0x04 Domain Separation", "rust": "crates/cowrie-core/src/merkle.rs, shard.rs · merkle_root, shard_merkle_root", "guarantee": "Bend proves universal flatten_leaves(merkle_tree_digest(xs)) == flat_map_leaves(xs) across ALL lengths 0..inf (killing fuel truncation and CVE-2012-2459 odd-leaf duplication), plus exact 0x02/0x04 frame+tensor count and tree binding.", "kills": ["M22", "M23", "M30", "M31", "LM16", "LM17", "R8", "R9"], "critique": "Round 2 caught that finite 0..3 leaf checks missed fuel=2n truncation and dropped frame trees; replaced with universal all-lengths flatten_leaves + M30/M31!", "hasBend": true, "bendCode": "law L13_merkle_domain_and_odd_safe:\n  for +xs: List<&2, S.Digest>\n  for +f1: List<&2, S.Digest>\n  for +f2: List<&2, S.Digest>\n  for +t0: S.Digest\n  for +trest: List<&2, S.Digest>\n  for +a: Nat\n  for +b: Nat\n  for +c: Nat\n  {(((S.flatten_leaves(K.merkle_tree_digest(xs)), K.shard_merkle_root(f1, Nil{})), (K.shard_merkle_root(f2, t0 <> trest), S.spec_digest_eq(K.shard_merkle_root(f1, Nil{}), K.shard_merkle_root(f2, t0 <> trest)))), (S.spec_digest_eq(K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}, S.HLeaf00{c}]), K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}, S.HLeaf00{c}, S.HLeaf00{c}])), (K.merkle_tree_digest(Nil{}), (K.merkle_tree_digest([S.HLeaf00{a}]), K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}]))))) == (((S.flat_map_leaves(xs), S.HRoot02{S.list_len_dig(f1), K.merkle_tree_digest(f1)}), (S.HRoot04{S.list_len_dig(f2), K.merkle_tree_digest(f2), 1n+S.list_len_dig(trest), K.merkle_tree_digest(t0 <> trest)}, False{})), (False{}, (S.HEmpty{}, (S.HLeaf00{a}, S.HNode01{S.HLeaf00{a}, S.HLeaf00{b}})))) : ((List<&2, S.Digest> & S.Digest) & (S.Digest & Bool)) & (Bool & (S.Digest & (S.Digest & S.Digest)))}", "leanCode": "def L13_Prop : Prop :=\n  ∀ (f1 f2 : List Digest) (t0 : Digest) (trest : List Digest) (a b c : Nat),\n    shardMerkleRoot f1 [] = .hRoot02 f1.length (merkleTree f1) ∧\n    shardMerkleRoot f2 (t0 :: trest) =\n      .hRoot04 f2.length (merkleTree f2) (trest.length + 1) (merkleTree (t0 :: trest)) ∧\n    shardMerkleRoot f1 [] ≠ shardMerkleRoot f2 (t0 :: trest) ∧\n    merkleTree [.hLeaf00 a, .hLeaf00 b, .hLeaf00 c] ≠\n      merkleTree [.hLeaf00 a, .hLeaf00 b, .hLeaf00 c, .hLeaf00 c] ∧\n    merkleTree [] = .hEmpty ∧\n    merkleTree [.hLeaf00 a] = .hLeaf00 a ∧\n    merkleTree [.hLeaf00 a, .hLeaf00 b] = .hNode01 (.hLeaf00 a) (.hLeaf00 b)"}, {"id": "L34", "symbol": "L34_merkle_leaf_and_tensor_sensitivity", "plane": "CD", "title": "Merkle Leaf-Payload, Frame-Root & HTensor03 Commitment Sensitivity", "rust": "crates/cowrie-core/src/merkle.rs, shard.rs · shard_merkle_root", "guarantee": "Perturbing any leaf payload, any frame digest inside shard_merkle_root, or any tensor 4 MiB Merkle commitment strictly changes the resulting root digest.", "kills": ["M22", "M31", "LM16", "R8", "F2", "F3"], "critique": "Round 2 added direct shard_merkle_root frame sensitivity so dropping f_tree inside HRoot02/HRoot04 is unconditionally killed (M31).", "hasBend": true, "bendCode": "law L34_merkle_leaf_and_tensor_sensitivity:\n  for +a: Nat\n  for +b: Nat\n  for +d: Nat\n  for +bl: Nat\n  for +m4m: Nat\n  for +fs: List<&2, S.Digest>\n  {((S.spec_digest_eq(K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}]), K.merkle_tree_digest([S.HLeaf00{1n+S.nat_add(a, d)}, S.HLeaf00{b}])), S.spec_digest_eq(K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}]), K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{1n+S.nat_add(b, d)}]))), (S.spec_digest_eq(K.shard_merkle_root([S.HLeaf00{a}], Nil{}), K.shard_merkle_root([S.HLeaf00{1n+S.nat_add(a, d)}], Nil{})), S.spec_digest_eq(K.shard_merkle_root(fs, [S.HTensor03{bl, m4m}]), K.shard_merkle_root(fs, [S.HTensor03{bl, 1n+S.nat_add(m4m, d)}])))) == ((False{}, False{}), (False{}, False{})) : (Bool & Bool) & (Bool & Bool)}", "leanCode": "def L34_Prop : Prop :=\n  ∀ (a b d bl m4m : Nat) (fs : List Digest),\n    merkleTree [.hLeaf00 a, .hLeaf00 b] ≠ merkleTree [.hLeaf00 (a + d + 1), .hLeaf00 b] ∧\n    merkleTree [.hLeaf00 a, .hLeaf00 b] ≠ merkleTree [.hLeaf00 a, .hLeaf00 (b + d + 1)] ∧\n    shardMerkleRoot [.hLeaf00 a] [] ≠ shardMerkleRoot [.hLeaf00 (a + d + 1)] [] ∧\n    shardMerkleRoot fs [.hTensor03 bl m4m] ≠ shardMerkleRoot fs [.hTensor03 bl (m4m + d + 1)]"}, {"id": "L14", "symbol": "L14_wal_torn_vs_mid_tamper", "plane": "CD", "title": "Complete .cwwal Recovery: Torn-Tail vs Mid-Tamper, Gaps & Rollbacks", "rust": "crates/cowrie-core/src/wal.rs · Wal::recover", "guarantee": "wal_recover_mode matches frozen spec across arbitrary start_seq and both recover_torn modes: clean prefixes recover intact, final torn tail recovers iff recover_torn=true, mid-file corruption always fails closed, and ANY bad_seq != exp_seq (both rollback < and forward gap >) fails closed.", "kills": ["M05", "M33", "LM05", "LM24", "R16", "F5", "F16"], "critique": "Round 2 caught that L14 previously hardcoded start_seq=0 and only checked forward gaps (seq > exp), letting a seq <= exp rollback replay mutant survive; fixed + M33/LM24/R16.", "hasBend": true, "bendCode": "law L14_wal_torn_vs_mid_tamper:\n  for +recs: List<&2, S.WalRec>\n  for +prefix: List<&2, Nat>\n  for +start_seq: Nat\n  for +torn_seq: Nat\n  for +bad_seq: Nat\n  for +tp: Nat\n  for +bp: Nat\n  for +after: S.WalRec\n  for +more: List<&2, S.WalRec>\n  for +mode: Bool\n  {((K.wal_recover_mode(recs, start_seq, mode), K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, Nil{}), start_seq, mode)), ((K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, [S.WalRec{False{}, torn_seq, tp}]), start_seq, True{}), K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, [S.WalRec{False{}, torn_seq, tp}]), start_seq, False{})), (K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, S.WalRec{False{}, torn_seq, bp} <> (after <> more)), start_seq, mode), S.implies(S.bnot(S.nat_eq(bad_seq, S.nat_add(start_seq, S.list_len_nat(prefix)))), S.spec_wal_is_err(K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, [S.WalRec{True{}, bad_seq, tp}]), start_seq, mode)))))) == ((S.spec_wal_recover_mode(recs, start_seq, mode), S.WalOk{prefix}), ((S.WalOk{prefix}, S.WalErr{}), (S.WalErr{}, True{}))) : (S.WalResult & S.WalResult) & ((S.WalResult & S.WalResult) & (S.WalResult & Bool))}", "leanCode": "def L14_Prop : Prop :=\n  ∀ (recs : List WalRec) (pfx : List Nat) (startSeq tornSeq badSeq tp bp : Nat)\n    (after : WalRec) (more : List WalRec) (mode : Bool),\n    walRecoverMode recs startSeq mode = specWalRecoverMode recs startSeq mode ∧\n    walRecoverMode (specWalValidPrefix pfx startSeq []) startSeq mode = .walOk pfx ∧\n    walRecoverMode (specWalValidPrefix pfx startSeq [{ valid := false, seq := tornSeq, payload := tp }]) startSeq true = .walOk pfx ∧\n    walRecoverMode (specWalValidPrefix pfx startSeq [{ valid := false, seq := tornSeq, payload := tp }]) startSeq false = .walErr ∧\n    walRecoverMode (specWalValidPrefix pfx startSeq ({ valid := false, seq := tornSeq, payload := bp } :: after :: more)) startSeq mode = .walErr ∧\n    (badSeq ≠ startSeq + pfx.length →\n      walRecoverMode (specWalValidPrefix pfx startSeq [{ valid := true, seq := badSeq, payload := tp }]) startSeq mode = .walErr)"}, {"id": "L24", "symbol": "L24_wal_tombstone_reinsert_and_statepage_rt", "plane": "CD", "title": "Sequential WAL Tombstone/Re-Insert Replay & StatePage runtime_id", "rust": "crates/cowrie-core/src/wal.rs, shard.rs · replay_live, StatePage::verify", "guarantee": "WAL replay is a monoid homomorphism; tombstones revoke only their target CID (preserving every bystander b != c); OpFrame revives a CID with exact multiplicity 1 (deduplicated) while preserving bystanders; StatePage runtime_id check matches exact spec (empty file runtime_id fails closed when expected is non-empty).", "kills": ["M12", "M13", "M24", "LM18", "R10", "F5", "F7"], "critique": "Fixed F5 zombie tombstone re-insertion and F7 empty runtime_id bypass; killed M24 no-dedup smoking gun.", "hasBend": true, "bendCode": "law L24_wal_tombstone_reinsert_and_statepage_rt:\n  for +ops1: List<&2, S.WalOp>\n  for +ops2: List<&2, S.WalOp>\n  for +live: List<&2, Nat>\n  for +c: Nat\n  for +b: Nat\n  for +exp_rt: Maybe<&2, Nat>\n  for +file_rt: Maybe<&2, Nat>\n  {((K.wal_replay_live(S.append_ops(ops1, ops2), live), S.nat_mem(K.wal_replay_live(S.append_ops(ops1, [S.OpTomb{c}]), live), c)), ((S.implies(S.bnot(S.nat_eq(b, c)), S.bool_eq(S.nat_mem(K.wal_replay_live(S.append_ops(ops1, [S.OpTomb{c}]), live), b), S.nat_mem(K.wal_replay_live(ops1, live), b))), S.nat_count(K.wal_replay_live(S.append_ops(ops1, [S.OpFrame{c}]), live), c)), (S.implies(S.bnot(S.nat_eq(b, c)), S.bool_eq(S.nat_mem(K.wal_replay_live(S.append_ops(ops1, [S.OpFrame{c}]), live), b), S.nat_mem(K.wal_replay_live(ops1, live), b))), K.check_statepage_runtime(exp_rt, file_rt)))) == ((K.wal_replay_live(ops2, K.wal_replay_live(ops1, live)), False{}), ((True{}, 1n), (True{}, S.spec_sp_runtime(exp_rt, file_rt)))) : (List<&2, Nat> & Bool) & ((Bool & Nat) & (Bool & Bool))}", "leanCode": "def L24_Prop : Prop :=\n  ∀ (ops1 ops2 : List WalOp) (live : List Nat) (c b : Nat) (expRt fileRt : Option Nat),\n    walReplayLive (ops1 ++ ops2) live = walReplayLive ops2 (walReplayLive ops1 live) ∧\n    (c ∉ walReplayLive (ops1 ++ [.opTomb c]) live) ∧\n    (b ≠ c → (b ∈ walReplayLive (ops1 ++ [.opTomb c]) live ↔ b ∈ walReplayLive ops1 live)) ∧\n    (walReplayLive (ops1 ++ [.opFrame c]) live).count c = 1 ∧\n    (b ≠ c → (b ∈ walReplayLive (ops1 ++ [.opFrame c]) live ↔ b ∈ walReplayLive ops1 live)) ∧\n    checkStatepageRuntime expRt fileRt = specSpRuntime expRt fileRt"}, {"id": "L35", "symbol": "L35_live_ivf_compaction_crash_invariant", "plane": "CD", "title": "LiveIvfStore Crash-Safe .cwgen Compaction & CWAL v2 Watermark", "rust": "crates/cowrie-core/src/wal.rs · LiveIvfStore::open, compact_to_cwiv", "guarantee": "Pre-compaction state, crash-after-.cwgen-before-WAL-reset state, and post-WAL-reset state ALL recover the exact same logical vector set with multiplicity 1.", "kills": ["M25", "LM19", "R11", "F10", "F16"], "critique": "Directly formalizes F10 CWAL v2 watermark fix; paired with F16 forward-gap rejection and compaction flock preservation in wal.rs.", "hasBend": true, "bendCode": "law L35_live_ivf_compaction_crash_invariant:\n  for +base: List<&2, Nat>\n  for +comp_ids: List<&2, Nat>\n  for +post_ids: List<&2, Nat>\n  for +s0: Nat\n  {(K.live_ivf_recover(base, s0, S.ivf_make_seq_recs(S.append_nat(comp_ids, post_ids), s0)), (K.live_ivf_recover(S.append_nat(base, comp_ids), S.nat_add(s0, S.list_len_nat(comp_ids)), S.ivf_make_seq_recs(S.append_nat(comp_ids, post_ids), s0)), K.live_ivf_recover(S.append_nat(base, comp_ids), S.nat_add(s0, S.list_len_nat(comp_ids)), S.ivf_make_seq_recs(post_ids, S.nat_add(s0, S.list_len_nat(comp_ids)))))) == (S.append_nat(base, S.append_nat(comp_ids, post_ids)), (S.append_nat(base, S.append_nat(comp_ids, post_ids)), S.append_nat(base, S.append_nat(comp_ids, post_ids)))) : List<&2, Nat> & (List<&2, Nat> & List<&2, Nat>)}", "leanCode": "def L35_Prop : Prop :=\n  ∀ (base compIds postIds : List Nat) (s0 : Nat),\n    let exp := base ++ compIds ++ postIds\n    let w := s0 + compIds.length\n    liveIvfRecover base s0 (ivfMakeSeqRecs (compIds ++ postIds) s0) = exp ∧\n    liveIvfRecover (base ++ compIds) w (ivfMakeSeqRecs (compIds ++ postIds) s0) = exp ∧\n    liveIvfRecover (base ++ compIds) w (ivfMakeSeqRecs postIds w) = exp"}, {"id": "L36", "symbol": "L36_statepage_hmac_precedence", "plane": "CD", "title": "StatePage HMAC-First Error Precedence Across All 9 Branches", "rust": "crates/cowrie-core/src/shard.rs, ffi.rs · verify_statepage_bytes", "guarantee": "Exhaustively pins all 9 canonical outcomes over (has_key, hmac_flag, mac_valid, header_valid): key/flag mismatch or invalid MAC ALWAYS returns SpAuthMacMismatch before trusting header/body claims; unkeyed flag=0 with invalid header returns SpInvalidContract.", "kills": ["M26", "M29", "LM20", "R12", "F13", "F15"], "critique": "Round 2 caught that Bend L36 omitted the 9th branch (False, 0, mv, False) == SpInvalidContract; restored full 9-branch parity + M29 and fixed NULL-key FFI fail-open (F15).", "hasBend": true, "bendCode": "law L36_statepage_hmac_precedence:\n  for +k: Nat\n  for +mv: Bool\n  for +hv: Bool\n  {((K.statepage_parse_precedence(True{}, 1n, False{}, hv), K.statepage_parse_precedence(True{}, 0n, mv, hv)), ((K.statepage_parse_precedence(True{}, 2n+k, mv, hv), K.statepage_parse_precedence(False{}, 1n, mv, hv)), ((K.statepage_parse_precedence(True{}, 1n, True{}, True{}), K.statepage_parse_precedence(True{}, 1n, True{}, False{})), ((K.statepage_parse_precedence(False{}, 0n, mv, True{}), K.statepage_parse_precedence(False{}, 0n, mv, False{})), K.statepage_parse_precedence(False{}, 2n+k, mv, hv))))) == ((S.SpAuthMacMismatch{}, S.SpAuthMacMismatch{}), ((S.SpAuthMacMismatch{}, S.SpAuthMacMismatch{}), ((S.SpOk{}, S.SpInvalidContract{}), ((S.SpOk{}, S.SpInvalidContract{}), S.SpNonCanonicalFlags{})))) : (S.SpError & S.SpError) & ((S.SpError & S.SpError) & ((S.SpError & S.SpError) & ((S.SpError & S.SpError) & S.SpError)))}", "leanCode": "def L36_Prop : Prop :=\n  ∀ (k : Nat) (mv hv : Bool),\n    statepageParsePrecedence true 1 false hv = .spAuthMacMismatch ∧\n    statepageParsePrecedence true 0 mv hv = .spAuthMacMismatch ∧\n    statepageParsePrecedence true (k + 2) mv hv = .spAuthMacMismatch ∧\n    statepageParsePrecedence false 1 mv hv = .spAuthMacMismatch ∧\n    statepageParsePrecedence true 1 true true = .spOk ∧\n    statepageParsePrecedence true 1 true false = .spInvalidContract ∧\n    statepageParsePrecedence false 0 mv true = .spOk ∧\n    statepageParsePrecedence false 0 mv false = .spInvalidContract ∧\n    statepageParsePrecedence false (k + 2) mv hv = .spNonCanonicalFlags"}, {"id": "L37", "symbol": "L37_lean_u8_bitvec_and_i64_zigzag", "plane": "LEAN", "title": "Bit-Exact UInt8 Authority/Meta, Arithmetic Int64 ZigZag & IEEE-754 UInt64 Float64", "rust": "crates/cowrie-core/src/taint.rs, canonical.rs · byte bitmasks, zigzag_i64, canonicalize_f64", "guarantee": "Proves over actual fixed-width machine words (no unary Nat abstraction): (1) UInt8 0x84 taint mask, 0x80 sticky / 0x7F origin preservation, and isValidHeaderMetaByte; (2) exact 64-bit Int64 <-> UInt64 ZigZag bijection pinned to arithmetic specZigzag64 (incl. Int64.minValue) with ZERO Classical.choice; (3) exact 64-bit IEEE-754 UInt64 -0.0 / NaN bit canonicalization.", "kills": ["LM21", "LM22", "LM25", "LM26", "F12"], "critique": "Round 2 de-circularized all 3 components against frozen literal specs in Laws.lean and replaced Classical-tainted BitVec.toNat_not with constructive induction so the entire suite stays pure [propext, Quot.sound]!", "hasBend": false, "bendCode": "", "leanCode": "def L37_Prop : Prop :=\n  (∀ (a base epi flags : UInt8) (ps : List UInt8),\n    isTaintedByte a = specIsTaintedByte a ∧\n    propagateByte base ps = specPropagateByte base ps ∧\n    isValidHeaderMetaByte a epi flags = specIsValidHeaderMetaByte a epi flags ∧\n    specIsTaintedByte (propagateByte base ps) = (specIsTaintedByte base || ps.any specIsTaintedByte) ∧\n    (propagateByte base ps &&& 0x7F) = (base &&& 0x7F)) ∧\n  (∀ (i : Int64), zigzagEncode64 i = specZigzag64 i ∧ zigzagDecode64 (zigzagEncode64 i) = i) ∧\n  (∀ (u : UInt64), zigzagEncode64 (zigzagDecode64 u) = u) ∧\n  (∀ (b : UInt64),\n    canonicalizeF64Bits b = specCanonF64Bits b ∧\n    verifyCanonF64Bits b = specVerifyCanonF64Bits b ∧\n    verifyCanonF64Bits (canonicalizeF64Bits b) = true ∧\n    canonicalizeF64Bits (canonicalizeF64Bits b) = canonicalizeF64Bits b ∧\n    (verifyCanonF64Bits b = true ↔ canonicalizeF64Bits b = b) ∧\n    verifyCanonF64Bits 0x8000000000000000 = false)"}, {"id": "L38", "symbol": "L38_lean_merkle_universal_injective", "plane": "LEAN", "title": "Well-Founded Fuel-Free Universal RFC 6962 Merkle Structural Injectivity", "rust": "crates/cowrie-core/src/merkle.rs, shard.rs · merkle_root, shard_merkle_root", "guarantee": "Without any fuel parameter, proves via well-founded structural recursion that for ALL atomic-leaf lists xs, ys of ANY length 0..inf: merkleTree xs = merkleTree ys -> xs = ys, and shardMerkleRoot f1 t1 = shardMerkleRoot f2 t2 -> f1 = f2 /\\ t1 = t2.", "kills": ["LM16", "LM17", "R8", "R9"], "critique": "Eliminates any fuel-bound artifact; complements Bend's universal flatten_leaves proof in L13.", "hasBend": false, "bendCode": "", "leanCode": "def L38_Prop : Prop :=\n  (∀ (xs ys : List Digest),\n    (∀ d ∈ xs, isAtomicLeaf d) →\n    (∀ d ∈ ys, isAtomicLeaf d) →\n    merkleTree xs = merkleTree ys → xs = ys) ∧\n  (∀ (f1 t1 f2 t2 : List Digest),\n    (∀ d ∈ f1, isAtomicLeaf d) → (∀ d ∈ t1, isAtomicLeaf d) →\n    (∀ d ∈ f2, isAtomicLeaf d) → (∀ d ∈ t2, isAtomicLeaf d) →\n    shardMerkleRoot f1 t1 = shardMerkleRoot f2 t2 → f1 = f2 ∧ t1 = t2)"}, {"id": "L39", "symbol": "L39_lean_fence_declarative_infix_and_idempotent", "plane": "LEAN", "title": "Declarative List.Infix Forbidden Absence, Prefix Safety (F17), <=2x & Idempotence", "rust": "crates/cowrie-core/src/lens.rs · sanitize_r2_fences, query_frame_slice", "guarantee": "Without sharing ANY finite-state machine with the sanitizer, proves via Lean's declarative contiguous sublist predicate (<:+:) that NO prefix (sanitizeFences xs).take n EVER contains <<<, >>>, <|, or |>, zero spoof symbols survive, specStripSpoof xs is a List.Sublist, length <= 2x, and sanitizeFences is idempotent.", "kills": ["LM02", "LM13", "F1", "F9", "F17"], "critique": "Round 2 strengthened L39 to quantify over ALL prefixes .take n (directly justifying F17 cap truncation in query_frame_slice) and moved specStripSpoof into frozen Laws.lean.", "hasBend": false, "bendCode": "", "leanCode": "def L39_Prop : Prop :=\n  ∀ (xs : List Sym) (n : Nat),\n    ¬ ([.lt, .lt, .lt] <:+: (sanitizeFences xs).take n) ∧\n    ¬ ([.gt, .gt, .gt] <:+: (sanitizeFences xs).take n) ∧\n    ¬ ([.lt, .pipe] <:+: (sanitizeFences xs).take n) ∧\n    ¬ ([.pipe, .gt] <:+: (sanitizeFences xs).take n) ∧\n    (∀ s ∈ sanitizeFences xs, s ≠ .spoof) ∧\n    List.Sublist (specStripSpoof xs) (sanitizeFences xs) ∧\n    (sanitizeFences xs).length <= 2 * (specStripSpoof xs).length ∧\n    sanitizeFences (sanitizeFences xs) = sanitizeFences xs"}];
+  const BEND_RECEIPT = {
+  "suite": "cowrie_v1_2_formal_bend_verification",
+  "date": "2026-11-28",
+  "toolchain": "Bend 2.0.35 (`--verdict` Lean-proven BendTT kernel + `.mjs` codegen)",
+  "file_hashes_sha256": {
+    "SPEC.bend": "ecf430c2c7ef967c03ed59ab3161dd1fce8fd1f5c2879f1f204326dac9733228",
+    "CowrieKernel.bend": "06686b8596fc9b58d4a42ee18f595e4b03ecb61c5845d6ec2c19253132499cf6",
+    "LAWS.bend": "35eb3c0912b63fab19d84110e0786cf98da31ba617d43409b6addaf96ed1fa04",
+    "PROOF.bend": "14d9feedfd11599654c7142be2627459609934a0dd14a471a46f0a21407a092b"
+  },
+  "stage1_bendtt_kernel_verdict": {
+    "status": "ALL PROOFS CHECK",
+    "trials": 5,
+    "median_ms": 467.19,
+    "min_ms": 458.73
+  },
+  "stage2_bendtt_coverage_and_hygiene": {
+    "status": "PASS",
+    "laws_verified": 37,
+    "law_names": [
+      "L01_propagate_iff",
+      "L02_taint_irrevocable_hops",
+      "L03_sticky_reregister",
+      "L04_unknown_parent_fails_closed",
+      "L05_empty_args_fail_closed",
+      "L06a_wrong_action_token_rejected",
+      "L06b_partial_declass_blocks",
+      "L15_propagate_preserves_origin",
+      "L16_sticky_deep_and_clean_liveness",
+      "L17_gate_exact_iff_and_liveness",
+      "L18_expired_and_forged_sig_rejected",
+      "L19_nth_arg_taint_blocks",
+      "L25_ledger_record_exact_iff",
+      "L26_header_meta_and_owner_pubkey",
+      "L27_ed25519_action_code_and_mcp_classifier",
+      "L07_fence_no_triple",
+      "L08_fence_safe_identity",
+      "L20_fence_preserves_all_non_esc_symbols",
+      "L21_r2_structured_table_header_safe",
+      "L28_r2_compact_and_virtual_atlas_fail_closed",
+      "L29_r2_table_marker_injectivity",
+      "L30_lens_tier_bounds_and_extract_field",
+      "L09_canon_roundtrip",
+      "L10_verify_iff_decode",
+      "L11_canon_wire_unique",
+      "L22_map_keys_and_dict_all_used",
+      "L31_canon_float64_bijective_and_idempotent",
+      "L32_json_sentinel_bijectivity_and_fail_closed",
+      "L33_resolved_frame_cid_repack_and_binding",
+      "L12_zonemap_no_false_neg",
+      "L23_sorted_zonemap_early_break_exact",
+      "L13_merkle_domain_and_odd_safe",
+      "L34_merkle_leaf_and_tensor_sensitivity",
+      "L14_wal_torn_vs_mid_tamper",
+      "L24_wal_tombstone_reinsert_and_statepage_rt",
+      "L35_live_ivf_compaction_crash_invariant",
+      "L36_statepage_hmac_precedence"
+    ],
+    "spec_defs_verified": 111,
+    "kernel_defs_verified": 96,
+    "proof_defs_verified": 278,
+    "bendtt_bytes": 435837,
+    "unsafe_count": 0,
+    "hole_count": 0,
+    "template_count": 0
+  },
+  "stage3_planted_false_mutant_controls": {
+    "controls_tested": 34,
+    "controls_rejected": 34,
+    "details": {
+      "M01_empty_args_fail_open": "REJECTED (SOME PROOFS FAIL)",
+      "M02_four_bracket_fence_bypass_F1": "REJECTED (SOME PROOFS FAIL)",
+      "M03_non_canonical_int_accepted": "REJECTED (SOME PROOFS FAIL)",
+      "M04_zonemap_strict_lt_false_negative": "REJECTED (SOME PROOFS FAIL)",
+      "M05_wal_mid_tamper_silently_truncated": "REJECTED (SOME PROOFS FAIL)",
+      "M06_underspec_deny_all_gate": "REJECTED (SOME PROOFS FAIL)",
+      "M07_underspec_taint_all_ledger": "REJECTED (SOME PROOFS FAIL)",
+      "M08_underspec_head_only_ledger_lookup": "REJECTED (SOME PROOFS FAIL)",
+      "M09_underspec_wipe_string_fence_sanitizer": "REJECTED (SOME PROOFS FAIL)",
+      "M10_wrongspec_unsanitized_table_col_header_F4": "REJECTED (SOME PROOFS FAIL)",
+      "M11_wrongspec_tensor_ref_boundary_breakout_F8": "REJECTED (SOME PROOFS FAIL)",
+      "M12_wal_tombstone_wipes_bystanders_F5": "REJECTED (SOME PROOFS FAIL)",
+      "M13_statepage_empty_runtime_bypass_F7": "REJECTED (SOME PROOFS FAIL)",
+      "M14_smoking_gun_is_tainted_ignores_ext": "REJECTED (SOME PROOFS FAIL)",
+      "M15_smoking_gun_head_only_any_tainted": "REJECTED (SOME PROOFS FAIL)",
+      "M16_smoking_gun_noop_derive_chain": "REJECTED (SOME PROOFS FAIL)",
+      "M17_unknown_parent_fail_open_nonempty": "REJECTED (SOME PROOFS FAIL)",
+      "M18_credread_unprivileged_bypass": "REJECTED (SOME PROOFS FAIL)",
+      "M19_token_ignores_target_cid": "REJECTED (SOME PROOFS FAIL)",
+      "M20_r2_table_multicell_chatml_breakout_F9": "REJECTED (SOME PROOFS FAIL)",
+      "M21_r2_compact_allows_model_synth": "REJECTED (SOME PROOFS FAIL)",
+      "M22_smoking_gun_merkle_const_empty": "REJECTED (SOME PROOFS FAIL)",
+      "M23_smoking_gun_merkle_cve_2012_2459_dup_odd": "REJECTED (SOME PROOFS FAIL)",
+      "M24_smoking_gun_wal_opframe_no_dedup": "REJECTED (SOME PROOFS FAIL)",
+      "M25_live_ivf_ignores_watermark_F10": "REJECTED (SOME PROOFS FAIL)",
+      "M26_statepage_hmac_flag_precedence_bypass_F13": "REJECTED (SOME PROOFS FAIL)",
+      "M27_missing_owner_pubkey_allows_declass": "REJECTED (SOME PROOFS FAIL)",
+      "M28_table_cell_hidden_spoof_marker_F9": "REJECTED (SOME PROOFS FAIL)",
+      "M29_statepage_nokey_bad_hdr_accept": "REJECTED (SOME PROOFS FAIL)",
+      "M30_merkle_fuel_truncated_to_2n": "REJECTED (SOME PROOFS FAIL)",
+      "M31_shard_merkle_drops_frames": "REJECTED (SOME PROOFS FAIL)",
+      "M32_mcp_policy_override_fail_open": "REJECTED (SOME PROOFS FAIL)",
+      "M33_wal_rollback_seq_le_replay": "REJECTED (SOME PROOFS FAIL)",
+      "M34_l15_tcb_clobber_origin_bits": "REJECTED (SOME PROOFS FAIL)"
+    }
+  },
+  "stage4_non_bolt_on_differential_lockstep": {
+    "compiled_bend_mjs_bytes": 159890,
+    "lockstep": {
+      "differential_lockstep": "PASS",
+      "total_vectors": 2600,
+      "plane_d_taint_header_and_gate_vectors": 500,
+      "plane_b_mealy_r2_compact_and_extract_vectors": 540,
+      "plane_a_wire_f64_map_and_sentinel_vectors": 760,
+      "plane_cd_zonemap_merkle_wal_ivf_statepage_vectors": 800
+    },
+    "native_c_abi_lockstep": {
+      "cwzm_multipage_trials": 50,
+      "cwwal_replay_and_zero_tail_trials": 50
+    },
+    "rust_c_abi_catches_verified": {
+      "F1_four_bracket_fence_breakout_fixed": true,
+      "F2_cwzm_fence_merkle_authenticated": true,
+      "F3_cwrf_contiguous_partition_enforced": true,
+      "F4_r2_table_col_header_fence_injection_fixed": true,
+      "F5_wal_zombie_tombstone_reinsert_fixed": true,
+      "F6_partial_sentinel_map_fail_closed": true,
+      "F7_statepage_empty_runtime_id_bypass_fixed": true,
+      "F8_tensor_ref_space_gt_boundary_fixed": true,
+      "F9_r2_multicell_chatml_and_hidden_marker_spoof_fixed": true,
+      "F10_live_ivf_compaction_base_seq_watermark_fixed": true,
+      "F11_independent_oracle_dtype_5_to_8_aligned": true,
+      "F12_ffi_null_parent_auths_fails_closed": true,
+      "F13_statepage_hmac_first_precedence_and_flat_footer_fixed": true,
+      "F14_cwzm_page0_and_eof_padding_hardened": true
+    }
+  },
+  "verdict": "PASS"
+};
+  const LEAN_RECEIPT = {
+  "suite": "cowrie_v1_2_formal_lean4_verification",
+  "date": "2026-11-28",
+  "toolchain": "Lean (version 4.34.0, x86_64-unknown-linux-gnu, commit 293d5d0c0c3f3dded4688b3ccd6a33939ac5102b, Release) (`lake clean && lake build --wfail` + `leanchecker --fresh` + `Lean.collectAxioms` + native oracle)",
+  "file_hashes_sha256": {
+    "lean-toolchain": "8733782dc070a99b312039cda424f601b80f3be6f6f512627da5ba25adc27632",
+    "lakefile.toml": "ed2fbdb4afc97b2addf5685329960d53f07915b36a0deb8d13f6fa524ef4025a",
+    "Cowrie.lean": "a884e4e781ac75e712057f8934324210dda0165a1bbb3d10fda2ac56b64c8b1a",
+    "Main.lean": "532a770359a1fd70b3d896e5641ba24dca13438e5e78619ffdabd081db8b5d06",
+    "Cowrie/Trust.lean": "0e0f3d96fd0109cf64b9d319626805b659475499c1366902f222e91868ddfa25",
+    "Cowrie/Fence.lean": "7ae7c8d1a89bacc97e8b4636cf9eaf24c2d8a6abc328ba666aa39922b0dc13ba",
+    "Cowrie/Canonical.lean": "5ced270cf91d134f8cb99599eef4a6345260f7fa042df3c3493babda29fc2337",
+    "Cowrie/Storage.lean": "03c65412c5f8f09efa9ccbc4b47d0de146c8c36b8dd9711374da64ebbbc52a9d",
+    "Cowrie/Laws.lean": "4e557ecb691d987f43160488d72314d1b594b0647e256dd2aa4f5eb1449aa009",
+    "Cowrie/Proofs.lean": "f18d3a0a64fa0aefc855adaa49de4f01f6bc31d576a66a42ee447711b8eefd6c",
+    "Cowrie/Refutations.lean": "767596a99a8b7230972db150625c949bea8f0c465f7a60869e6db1b7aaf36cca",
+    "Cowrie/AxiomAudit.lean": "28a01d2b9b75e968e990eade635698d58a5c49f4ef8f60f81d596fc659486e23"
+  },
+  "stage1_lake_build": {
+    "status": "PASS",
+    "lean_version": "Lean (version 4.34.0, x86_64-unknown-linux-gnu, commit 293d5d0c0c3f3dded4688b3ccd6a33939ac5102b, Release)",
+    "clean_rebuild": true,
+    "build_ms": 4548.14,
+    "warnings_as_errors": true,
+    "external_dependencies": 0
+  },
+  "stage2_kernel_and_axiom_audit": {
+    "status": "PASS",
+    "laws_proved": 40,
+    "law_theorems": [
+      "L01_propagate_iff",
+      "L02_taint_irrevocable_hops",
+      "L03_sticky_reregister",
+      "L04_unknown_parent_fails_closed",
+      "L05_empty_args_fail_closed",
+      "L06a_wrong_action_token_rejected",
+      "L06b_partial_declass_blocks",
+      "L15_propagate_preserves_origin",
+      "L16_sticky_deep_and_clean_liveness",
+      "L17_gate_exact_iff_and_liveness",
+      "L18_expired_and_forged_sig_rejected",
+      "L19_nth_arg_taint_blocks",
+      "L25_ledger_record_exact_iff",
+      "L26_header_meta_and_owner_pubkey",
+      "L27_ed25519_action_code_and_mcp_classifier",
+      "L07_fence_no_triple",
+      "L08_fence_safe_identity",
+      "L20_fence_preserves_all_non_esc_symbols",
+      "L21_r2_structured_table_header_safe",
+      "L28_r2_compact_and_virtual_atlas_fail_closed",
+      "L29_r2_table_marker_injectivity",
+      "L30_lens_tier_bounds_and_extract_field",
+      "L09_canon_roundtrip",
+      "L10_verify_iff_decode",
+      "L11_canon_wire_unique",
+      "L22_map_keys_and_dict_all_used",
+      "L31_canon_float64_bijective_and_idempotent",
+      "L32_json_sentinel_bijectivity_and_fail_closed",
+      "L33_resolved_frame_cid_repack_and_binding",
+      "L12_zonemap_no_false_neg",
+      "L23_sorted_zonemap_early_break_exact",
+      "L13_merkle_domain_and_odd_safe",
+      "L34_merkle_leaf_and_tensor_sensitivity",
+      "L14_wal_torn_vs_mid_tamper",
+      "L24_wal_tombstone_reinsert_and_statepage_rt",
+      "L35_live_ivf_compaction_crash_invariant",
+      "L36_statepage_hmac_precedence",
+      "L37_lean_u8_bitvec_and_i64_zigzag",
+      "L38_lean_merkle_universal_injective",
+      "L39_lean_fence_declarative_infix_and_idempotent"
+    ],
+    "cowriespec_type_bound": true,
+    "semantic_refutations_proved": 16,
+    "semantic_refutations": [
+      "refute_M14_ignore_ext",
+      "refute_M15_head_only_anyTainted",
+      "refute_M16_noop_deriveChain",
+      "refute_M19_token_ignores_cid",
+      "refute_M20_F9_multicell_chatml_breakout",
+      "refute_M28_F9_hidden_cell_marker_spoof",
+      "refute_M21_r2_compact_allows_synth",
+      "refute_M22_merkle_const_empty",
+      "refute_M23_merkle_cve_2012_2459",
+      "refute_M24_wal_opframe_no_dedup",
+      "refute_M25_F10_live_ivf_watermark_ignored",
+      "refute_M26_F13_statepage_hmac_flag_precedence",
+      "refute_M27_missing_owner_pubkey",
+      "refute_L23_unsorted_zonemap_needs_disjoint_precondition",
+      "refute_M32_mcp_policy_override_bypass",
+      "refute_M33_wal_rollback_seq_le_replay"
+    ],
+    "axiom_audit_output": "AXIOM_AUDIT_PASS laws=40 refutations=16 axioms=[propext, Quot.sound]",
+    "allowed_axioms": [
+      "propext",
+      "Quot.sound"
+    ],
+    "axiom_audit_ms": 1680.8,
+    "leanchecker_fresh_status": "PASS",
+    "leanchecker_fresh_ms": 31996.76,
+    "forbidden_constructs_found": 0
+  },
+  "stage3_planted_false_mutant_controls": {
+    "controls_tested": 26,
+    "controls_rejected": 26,
+    "elapsed_s": 26.33,
+    "details": {
+      "LM01_empty_args_fail_open": "REJECTED (proof typecheck failed)",
+      "LM02_four_bracket_fence_bypass_F1": "REJECTED (proof typecheck failed)",
+      "LM03_non_canonical_int_accepted": "REJECTED (proof typecheck failed)",
+      "LM04_zonemap_strict_lt_false_negative": "REJECTED (proof typecheck failed)",
+      "LM05_wal_mid_tamper_silently_truncated": "REJECTED (proof typecheck failed)",
+      "LM06_smoking_gun_isTainted_ignores_ext": "REJECTED (proof typecheck failed)",
+      "LM07_smoking_gun_head_only_anyTainted": "REJECTED (proof typecheck failed)",
+      "LM08_smoking_gun_noop_deriveChain": "REJECTED (proof typecheck failed)",
+      "LM09_unknown_parent_fail_open": "REJECTED (proof typecheck failed)",
+      "LM10_credRead_unprivileged_bypass": "REJECTED (proof typecheck failed)",
+      "LM11_token_ignores_target_cid": "REJECTED (proof typecheck failed)",
+      "LM12_missing_owner_pubkey_allows_declass": "REJECTED (proof typecheck failed)",
+      "LM13_r2_table_multicell_chatml_breakout_F9": "REJECTED (proof typecheck failed)",
+      "LM14_r2_compact_allows_model_synth": "REJECTED (proof typecheck failed)",
+      "LM15_table_cell_hidden_spoof_marker_F9": "REJECTED (proof typecheck failed)",
+      "LM16_smoking_gun_merkle_const_empty": "REJECTED (proof typecheck failed)",
+      "LM17_smoking_gun_merkle_cve_2012_2459_dup_odd": "REJECTED (proof typecheck failed)",
+      "LM18_smoking_gun_wal_opframe_no_dedup": "REJECTED (proof typecheck failed)",
+      "LM19_live_ivf_ignores_watermark_F10": "REJECTED (proof typecheck failed)",
+      "LM20_statepage_hmac_flag_precedence_bypass_F13": "REJECTED (proof typecheck failed)",
+      "LM21_lean_uint8_propagate_clobbers_origin": "REJECTED (proof typecheck failed)",
+      "LM22_lean_i64_zigzag_drops_sign_xor": "REJECTED (proof typecheck failed)",
+      "LM23_mcp_policy_override_fail_open": "REJECTED (proof typecheck failed)",
+      "LM24_wal_rollback_seq_le_replay": "REJECTED (proof typecheck failed)",
+      "LM25_f64_bits_drops_nan_canon": "REJECTED (proof typecheck failed)",
+      "LM26_uint8_isTainted_ignores_ext": "REJECTED (proof typecheck failed)"
+    }
+  },
+  "stage4_three_way_differential_lockstep": {
+    "three_way_lockstep": "PASS",
+    "total_vectors": 2110,
+    "true_three_way_vectors": 1544,
+    "two_way_vectors": 566,
+    "lean_native_oracle_ms": 7.35,
+    "three_way_breakdown": {
+      "propagate": 300,
+      "header_meta_byte": 100,
+      "sanitize_6sym": 300,
+      "r2_compact": 84,
+      "wire_int": 300,
+      "f64_bits": 100,
+      "map_keys": 200,
+      "sp_precedence_all16": 160
+    },
+    "two_way_breakdown": {
+      "zigzag64_lean_wasm": 120,
+      "cwzm_disjoint_lean_bend": 200,
+      "ivf_watermark_lean_bend": 150,
+      "mcp_classify_lean_bend": 96
+    }
+  },
+  "verdict": "PASS"
+};
+
+  const PLANE_LABELS = {
+    D: "Plane D · Trust & MCP",
+    B: "Plane B · Fence & R2",
+    A: "Plane A · Wire & RCID",
+    CD: "Plane C–D · Storage",
+    LEAN: "Lean-Exclusive"
+  };
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function chipClass(tok) {
+    if (tok.startsWith("F")) return "chip-kill bug";
+    if (tok.startsWith("R")) return "chip-kill ref";
+    return "chip-kill";
+  }
+
+  const atlasEl = document.getElementById("lawAtlas");
+  const countEl = document.getElementById("lawCount");
+  const searchEl = document.getElementById("lawSearch");
+  let activePlane = "ALL";
+  const openIds = new Set(["L01", "L37"]);
+
+  function renderAtlas() {
+    const q = searchEl.value.trim().toLowerCase();
+    const filtered = LAWS.filter(law => {
+      if (activePlane !== "ALL" && law.plane !== activePlane) return false;
+      if (!q) return true;
+      const hay = [
+        law.id, law.symbol, law.title, law.rust, law.guarantee,
+        law.critique, law.kills.join(" "), law.bendCode, law.leanCode
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+
+    countEl.textContent = "Showing " + filtered.length + " of " + LAWS.length + " laws";
+    if (filtered.length === 0) {
+      atlasEl.innerHTML = '<div class="card-box" style="text-align:center;color:var(--muted)">No laws match the current filter.</div>';
+      return;
+    }
+
+    atlasEl.innerHTML = filtered.map(law => {
+      const isOpen = openIds.has(law.id);
+      const idCls = law.hasBend ? "law-id-tag" : "law-id-tag lean-only";
+      const proverPills = law.hasBend
+        ? '<span class="pill blue">Bend 2.0.35 &check;</span><span class="pill pass">Lean 4.34 &check;</span>'
+        : '<span class="pill pass">Lean 4.34 Exclusive &check;</span>';
+      const killsHtml = law.kills.map(k => '<span class="' + chipClass(k) + '">' + escHtml(k) + '</span>').join(" ");
+
+      const codePane = law.hasBend
+        ? `<div class="lab-grid-2">
+             <div>
+               <div class="law-code-head"><span>Bend 2.0.35 &middot; formal/LAWS.bend</span><span>BendTT</span></div>
+               <pre class="law-code-pre">${escHtml(law.bendCode)}</pre>
+             </div>
+             <div>
+               <div class="law-code-head"><span>Lean 4.34.0 &middot; Cowrie/Laws.lean</span><span>[propext, Quot.sound]</span></div>
+               <pre class="law-code-pre">${escHtml(law.leanCode)}</pre>
+             </div>
+           </div>`
+        : `<div>
+             <div class="law-code-head"><span>Lean 4.34.0 Exclusive &middot; Cowrie/Laws.lean</span><span>[propext, Quot.sound] &middot; leanchecker --fresh</span></div>
+             <pre class="law-code-pre">${escHtml(law.leanCode)}</pre>
+           </div>`;
+
+      return `<article class="law-card${isOpen ? " open" : ""}" data-id="${escHtml(law.id)}">
+        <div class="law-card-head" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}">
+          <div class="law-card-head-left">
+            <span class="${idCls}">${escHtml(law.id)}</span>
+            <span class="law-card-title">${escHtml(law.title)}</span>
+          </div>
+          <div class="law-card-badges">
+            <span class="pill warn">${escHtml(PLANE_LABELS[law.plane])}</span>
+            ${proverPills}
+            <span class="law-chevron">${isOpen ? "Hide Spec" : "View Bend / Lean"}</span>
+          </div>
+        </div>
+        <div class="law-card-summary">
+          <p class="law-guarantee">${escHtml(law.guarantee)}</p>
+          <div class="law-meta-strip">
+            <span><strong>Rust:</strong> <code>${escHtml(law.rust)}</code></span>
+            <span><strong>Symbol:</strong> <code>${escHtml(law.symbol)}</code></span>
+            <span><strong>Kills / Covers:</strong> ${killsHtml}</span>
+          </div>
+          <div class="law-critique-note"><strong>Adversarial Hardening:</strong> ${escHtml(law.critique)}</div>
+        </div>
+        <div class="law-code-drawer">${codePane}</div>
+      </article>`;
+    }).join("");
+
+    atlasEl.querySelectorAll(".law-card-head").forEach(head => {
+      const toggle = () => {
+        const card = head.closest(".law-card");
+        const id = card.dataset.id;
+        if (openIds.has(id)) openIds.delete(id); else openIds.add(id);
+        card.classList.toggle("open");
+        const nowOpen = card.classList.contains("open");
+        head.setAttribute("aria-expanded", nowOpen ? "true" : "false");
+        head.querySelector(".law-chevron").textContent = nowOpen ? "Hide Spec" : "View Bend / Lean";
+      };
+      head.addEventListener("click", toggle);
+      head.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+    });
+  }
+
+  document.querySelectorAll("#planeFilters .lab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activePlane = btn.dataset.plane;
+      document.querySelectorAll("#planeFilters .lab-btn").forEach(b => b.classList.toggle("active", b === btn));
+      renderAtlas();
+    });
+  });
+  searchEl.addEventListener("input", renderAtlas);
+  document.getElementById("expandAllBtn").addEventListener("click", () => {
+    LAWS.forEach(l => openIds.add(l.id));
+    renderAtlas();
+  });
+  document.getElementById("collapseAllBtn").addEventListener("click", () => {
+    openIds.clear();
+    renderAtlas();
+  });
+  renderAtlas();
+
+  // Bug ledger filter
+  document.querySelectorAll("#bugFilters .lab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const r = btn.dataset.round;
+      document.querySelectorAll("#bugFilters .lab-btn").forEach(b => b.classList.toggle("active", b === btn));
+      document.querySelectorAll("#bugTable tbody tr").forEach(tr => {
+        tr.style.display = (r === "all" || tr.dataset.round === r) ? "" : "none";
+      });
+    });
+  });
+
+  // Mutant / Refutation / Lockstep tabs
+  const MUT_META = {
+    bend: ["MUT_BEND", "[ 34 PLANTED-FALSE KERNEL MUTATIONS · ALL REJECTED BY BENDTT ]"],
+    lean: ["MUT_LEAN", "[ 26 PLANTED-FALSE KERNEL MUTATIONS · ALL REJECTED BY LEAN 4.34 ]"],
+    refute: ["REF_LEAN", "[ 16 CONSTRUCTIVE SEMANTIC REFUTATIONS · PROVED UNDER [propext, Quot.sound] ]"],
+    lockstep: ["LOCKSTEP", "[ EXECUTABLE DIFFERENTIAL LOCKSTEP · BEND .MJS × LEAN NATIVE × RUST WASM & C-ABI ]"]
+  };
+  document.querySelectorAll("#mutantTabs .lab-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const m = btn.dataset.mtab;
+      document.querySelectorAll("#mutantTabs .lab-btn").forEach(b => b.classList.toggle("active", b === btn));
+      ["bend", "lean", "refute", "lockstep"].forEach(k => {
+        document.getElementById("mtab-" + k).style.display = (k === m) ? "block" : "none";
+      });
+      document.getElementById("mutTag").textContent = MUT_META[m][0];
+      document.getElementById("mutSpec").textContent = MUT_META[m][1];
+    });
+  });
+
+  // Receipt JSON tabs & copy button
+  let activeReceipt = "bend";
+  const recViewer = document.getElementById("receiptViewer");
+  const recTag = document.getElementById("recTag");
+  const recSpec = document.getElementById("recSpec");
+  const copyStatus = document.getElementById("copyStatus");
+
+  function renderReceipt() {
+    const isBend = activeReceipt === "bend";
+    recViewer.textContent = JSON.stringify(isBend ? BEND_RECEIPT : LEAN_RECEIPT, null, 2);
+    recTag.textContent = isBend ? "REC_BEND" : "REC_LEAN";
+    recSpec.textContent = isBend
+      ? "[ receipts/receipt_v1_2_formal_bend.json · VERDICT: PASS ]"
+      : "[ receipts/receipt_v1_2_formal_lean.json · VERDICT: PASS ]";
+  }
+  document.querySelectorAll("#receiptTabs .lab-btn[data-rtab]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      activeReceipt = btn.dataset.rtab;
+      document.querySelectorAll("#receiptTabs .lab-btn[data-rtab]").forEach(b => b.classList.toggle("active", b === btn));
+      copyStatus.textContent = "";
+      renderReceipt();
+    });
+  });
+  document.getElementById("copyReceiptBtn").addEventListener("click", () => {
+    const txt = recViewer.textContent;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(() => {
+        copyStatus.textContent = "Copied!";
+        setTimeout(() => { copyStatus.textContent = ""; }, 2000);
+      });
+    }
+  });
+  renderReceipt();
+})();
+</script>
+</body>
+</html>

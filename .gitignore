@@ -9,3 +9,4 @@ __pycache__/
 *.o
 wasm/cowrie_core.wasm
 wasm/*.tgz
+formal/lean/.lake/

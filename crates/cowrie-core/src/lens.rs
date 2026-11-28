@@ -4,7 +4,7 @@
 use std::collections::{BTreeSet, HashMap};
 use crate::canonical::{decode_frame_strict, dtype_to_str, value_to_compact_json, DecodedFrame, Value};
 use crate::sha256::{content_address, to_hex};
-use crate::trust::{authority_label, is_tainted, AUTH_SYS_POLICY, AUTH_UNTRUSTED_EXT, AUTH_VERIFIED_TOOL};
+use crate::trust::{authority_label, is_tainted, AUTH_SYS_POLICY, AUTH_VERIFIED_TOOL};
 use crate::CowrieError;
 
 const ALPHA26: &[u8; 26] = b"abcdefghijklmnopqrstuvwxyz";
@@ -48,11 +48,16 @@ fn is_hidden_or_control_spoof(ch: char) -> bool {
             | 0x000E..=0x001F
             | 0x007F..=0x009F
             | 0x00AD
+            | 0x034F
+            | 0x061C
+            | 0x180E
             | 0x200B..=0x200F
             | 0x2028..=0x202E
             | 0x2060..=0x206F
+            | 0xFE00..=0xFE0F
             | 0xFEFF
             | 0xE0000..=0xE007F
+            | 0xE0100..=0xE01EF
     )
 }
 
@@ -297,13 +302,24 @@ fn cell_escape(v: &Value) -> String {
             }
         }
         Value::Str(s) => {
-            if s.is_empty() {
+            let has_spoof = s.chars().any(is_hidden_or_control_spoof);
+            let cleaned: String = if has_spoof {
+                s.chars().filter(|&c| !is_hidden_or_control_spoof(c)).collect()
+            } else {
+                String::new()
+            };
+            let eff: &str = if has_spoof {
+                cleaned.as_str()
+            } else {
+                s.as_str()
+            };
+            if eff.is_empty() {
                 "\"\"".to_string()
-            } else if s == "null" || s == "<missing>" || s.starts_with('"') {
-                sanitize_r2_fences(&value_to_compact_json(v))
+            } else if eff == "null" || eff == "<missing>" || eff.starts_with('"') {
+                sanitize_r2_fences(&value_to_compact_json(&Value::Str(eff.to_string())))
             } else {
                 sanitize_r2_fences(
-                    &s.replace('\\', "\\\\")
+                    &eff.replace('\\', "\\\\")
                         .replace('|', "\\|")
                         .replace('\r', "\\r")
                         .replace('\n', "\\n"),
@@ -342,7 +358,9 @@ fn render_r2_body(frame: &DecodedFrame, out: &mut String) {
                                     })
                                     .collect();
                                 out.push_str("  ");
-                                out.push_str(&cells.join("|"));
+                                // [FORMAL-F9] Re-sanitize joined row so adjacent cells ending in `<`
+                                // or starting with `>` cannot synthesize `<|` / `|>` across `|`.
+                                out.push_str(&sanitize_r2_fences(&cells.join("|")));
                                 out.push('\n');
                             }
                         }
@@ -685,7 +703,9 @@ pub fn project_virtual_atlas(frame_bytes: &[u8], frame: &DecodedFrame, max_chars
     let cid_short = &to_hex(&cid)[4..16];
     let handle = alpha_handle(&cid);
     let auth_str = authority_label(frame.authority);
-    let untrusted = is_tainted(frame.authority) || (frame.authority & AUTH_UNTRUSTED_EXT) != 0;
+    let clean_trusted = !is_tainted(frame.authority)
+        && (frame.authority == AUTH_SYS_POLICY || frame.authority == AUTH_VERIFIED_TOOL);
+    let untrusted = !clean_trusted;
     let cap = max_chars.clamp(400, 4096);
 
     let mut lines: Vec<String> = Vec::new();
@@ -841,17 +861,34 @@ pub fn query_frame_slice(
             }
             let slim_j = value_to_compact_json(&Value::Map(scalars));
             if grep.is_none() {
-                if raw_j.chars().count() <= cap {
-                    return Ok(sanitize_r2_fences(&raw_j));
+                if offset == 0 && raw_j.chars().count() <= cap {
+                    let san = sanitize_r2_fences(&raw_j);
+                    if san.chars().count() <= cap {
+                        return Ok(san);
+                    }
                 }
-                let mut out = truncate_utf8_chars(&slim_j, cap).to_string();
+                let (window, total_slim) = slice_utf8_chars(&slim_j, offset, cap);
+                let mut out = window.to_string();
                 if !nested_keys.is_empty() && out.chars().count() + 80 < cap {
-                    out.push_str(&format!(
+                    let rem = cap.saturating_sub(out.chars().count());
+                    let note = format!(
                         "\n[nested keys omitted for cap: {:?}; fetch with sub-pointer]",
                         nested_keys
-                    ));
+                    );
+                    out.push_str(truncate_utf8_chars(&note, rem));
+                } else if offset.saturating_add(cap) < total_slim && out.chars().count() + 48 < cap {
+                    let rem = cap.saturating_sub(out.chars().count());
+                    let note = format!(
+                        "\n...[truncated {}..{} of {} chars]",
+                        offset,
+                        offset.saturating_add(window.chars().count()),
+                        total_slim
+                    );
+                    out.push_str(truncate_utf8_chars(&note, rem));
                 }
-                return Ok(sanitize_r2_fences(&out));
+                // [FORMAL-F17] Cap AFTER sanitize_r2_fences (prefix-closed fence safety proved in L39).
+                let san = sanitize_r2_fences(&out);
+                return Ok(truncate_utf8_chars(&san, cap).to_string());
             } else if let Some(q) = grep {
                 let norm_slim = slim_j.replace("\\\"", "\"").replace("\\'", "'");
                 let q_lit = unescape_grep_literal(q);
@@ -860,9 +897,12 @@ pub fn query_frame_slice(
                 {
                     let mut out = truncate_utf8_chars(&slim_j, cap).to_string();
                     if !nested_keys.is_empty() && out.chars().count() + 60 < cap {
-                        out.push_str(&format!("\n[nested keys omitted: {:?}]", nested_keys));
+                        let rem = cap.saturating_sub(out.chars().count());
+                        let note = format!("\n[nested keys omitted: {:?}]", nested_keys);
+                        out.push_str(truncate_utf8_chars(&note, rem));
                     }
-                    return Ok(sanitize_r2_fences(&out));
+                    let san = sanitize_r2_fences(&out);
+                    return Ok(truncate_utf8_chars(&san, cap).to_string());
                 }
             }
         }
@@ -898,9 +938,10 @@ pub fn query_frame_slice(
         let mut used = 0usize;
         for (i, line) in sliced {
             let formatted = format!("L{}: {}", i, line);
+            let sep_cost = if out.is_empty() { 0 } else { 1 };
             let f_chars = formatted.chars().count();
-            if used + f_chars > cap {
-                let rem = cap.saturating_sub(used);
+            if used.saturating_add(sep_cost).saturating_add(f_chars) > cap {
+                let rem = cap.saturating_sub(used.saturating_add(sep_cost));
                 if rem > 16 {
                     if !out.is_empty() {
                         out.push('\n');
@@ -917,7 +958,8 @@ pub fn query_frame_slice(
             out.push_str(&formatted);
             used += f_chars;
         }
-        return Ok(sanitize_r2_fences(&out));
+        let san = sanitize_r2_fences(&out);
+        return Ok(truncate_utf8_chars(&san, cap).to_string());
     }
 
     // Rule 3 & 4: Bounded-wildcard multi-match `grep` with giant-line windowing + quote/backslash fallback.
@@ -993,19 +1035,27 @@ pub fn query_frame_slice(
         } else {
             matches.join("\n---\n")
         };
-        return Ok(sanitize_r2_fences(&out));
+        let san = sanitize_r2_fences(&out);
+        return Ok(truncate_utf8_chars(&san, cap).to_string());
     }
 
     // Plain char-bounded pagination slice
     let (window, total_chars) = slice_utf8_chars(text_view, offset, cap);
     let mut out = window.to_string();
-    if offset + cap < total_chars {
-        out.push_str(&format!(
+    if offset.saturating_add(cap) < total_chars {
+        let note = format!(
             "\n...[truncated {}..{} of {} chars]",
             offset,
-            offset + window.chars().count(),
+            offset.saturating_add(window.chars().count()),
             total_chars
-        ));
+        );
+        let note_len = note.chars().count();
+        if cap > note_len {
+            let trimmed = truncate_utf8_chars(&out, cap - note_len).to_string();
+            out = trimmed;
+            out.push_str(&note);
+        }
     }
-    Ok(sanitize_r2_fences(&out))
+    let san = sanitize_r2_fences(&out);
+    Ok(truncate_utf8_chars(&san, cap).to_string())
 }

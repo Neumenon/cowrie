@@ -32,15 +32,15 @@ TAG_UINT = 0x09
 TAG_TENSOR_REF = 0x0A
 
 DTYPE_BYTES = {
-    0: 4,  # f32
-    1: 2,  # f16
-    2: 2,  # bf16
-    3: 1,  # i8
-    4: 1,  # u8
-    5: 8,  # i64
-    6: 8,  # f64
-    7: 1,  # q4 (packed 2/byte -> ceil(elems/2))
-    8: 1,  # q8
+    0: 4,   # f32
+    1: 2,   # f16
+    2: 2,   # bf16
+    3: 1,   # i8
+    4: 1,   # u8
+    5: 18,  # q4_0 (18 bytes per 32-element block)
+    6: 34,  # q8_0 (34 bytes per 32-element block)
+    7: 4,   # i32
+    8: 8,   # f64
 }
 
 
@@ -59,9 +59,7 @@ def _decode_uvarint_strict(buf: bytes, pos: int) -> tuple[int, int]:
             raise OracleError("ERR_TRUNCATED")
         b = buf[pos]
         pos += 1
-        if shift == 63 and b > 1:
-            raise OracleError("ERR_NON_CANONICAL_VARINT")
-        if shift > 63:
+        if shift >= 64 or (shift == 63 and (b & 0x7F) > 1):
             raise OracleError("ERR_NON_CANONICAL_VARINT")
         val |= (b & 0x7F) << shift
         if (b & 0x80) == 0:
@@ -74,15 +72,20 @@ def _decode_uvarint_strict(buf: bytes, pos: int) -> tuple[int, int]:
 def _checked_tensor_min_bytes(dtype: int, dims: list[int]) -> int:
     if dtype not in DTYPE_BYTES or len(dims) > 8:
         raise OracleError("ERR_INVALID_CONTRACT")
+    u64_max = (1 << 64) - 1
     elems = 1
     for d in dims:
         elems *= d
-        if elems > (1 << 64) - 1:
+        if elems > u64_max:
             raise OracleError("ERR_ALLOC_LIMIT")
-    if dtype == 7:  # q4
-        return (elems + 1) // 2
-    out = elems * DTYPE_BYTES[dtype]
-    if out > (1 << 64) - 1:
+    if dtype in (5, 6):  # q4_0 (18B/32) or q8_0 (34B/32)
+        if elems + 31 > u64_max:
+            raise OracleError("ERR_ALLOC_LIMIT")
+        blocks = (elems + 31) // 32
+        out = blocks * DTYPE_BYTES[dtype]
+    else:
+        out = elems * DTYPE_BYTES[dtype]
+    if out > u64_max:
         raise OracleError("ERR_ALLOC_LIMIT")
     return out
 
@@ -229,7 +232,7 @@ def verify_and_decode_cowr(buf: bytes) -> dict[str, Any]:
                     raise OracleError("ERR_UNSORTED_MAP_KEYS")
                 prev_idx = ki
                 used[ki] = True
-                charge(key_lens[ki] + 16)
+                charge(key_lens[ki] + 32)
                 val, cur_pos = dec(cur_pos, depth + 1)
                 out[keys[ki]] = val
             return out, cur_pos
@@ -242,19 +245,19 @@ def verify_and_decode_cowr(buf: bytes) -> dict[str, Any]:
             dtype = buf[cur_pos]
             ndim = buf[cur_pos + 1]
             cur_pos += 2
-            if dtype not in DTYPE_BYTES or ndim > 8:
-                raise OracleError("ERR_INVALID_CONTRACT")
+            if ndim > 8:
+                raise OracleError("ERR_ALLOC_LIMIT")
             dims = []
             for _ in range(ndim):
                 d, cur_pos = _decode_uvarint_strict(buf, cur_pos)
                 dims.append(d)
             _checked_tensor_min_bytes(dtype, dims)
             slen, cur_pos = _decode_uvarint_strict(buf, cur_pos)
-            if slen == 0 or slen > 256:
-                raise OracleError("ERR_INVALID_CONTRACT")
             if slen > n - cur_pos:
                 raise OracleError("ERR_TRUNCATED")
-            charge(slen)
+            if slen == 0 or slen > 256:
+                raise OracleError("ERR_INVALID_CONTRACT")
+            charge(ndim * 8 + slen)
             try:
                 space = buf[cur_pos : cur_pos + slen].decode("utf-8")
             except UnicodeDecodeError as exc:
@@ -291,4 +294,49 @@ if __name__ == "__main__":
             raise AssertionError(f"Expected {neg['expected_err']} for {neg['id']}")
         except OracleError as e:
             assert e.code == neg["expected_err"], f"{neg['id']}: got {e.code}, expected {neg['expected_err']}"
-    print("INDEPENDENT PYTHON COWR v1 ORACLE PASS (150 valid + 20 negative/DoS)")
+    # [FORMAL-F18] Exercise TAG_TENSOR_REF (0x0A) across all valid dtypes 0..=8 (incl. q4_0/q8_0),
+    # plus invalid dtype=9, ndim=9 -> ERR_ALLOC_LIMIT, and u64 element overflow.
+    def _enc_uvarint(val: int) -> bytes:
+        out = bytearray()
+        while True:
+            b = val & 0x7F
+            val >>= 7
+            if val:
+                out.append(b | 0x80)
+            else:
+                out.append(b)
+                return bytes(out)
+
+    def _build_tensor_ref_frame(dtype: int, dims: list[int], space: bytes = b"emb") -> bytes:
+        # COWR v1 header (8B: magic + ver + auth + epi + flags) + dict_count=0 (1B) + TAG_TENSOR_REF (0x0A)
+        body = bytearray(b"COWR\x01\x01\x01\x00")
+        body.append(0x00)  # dict_count = 0
+        body.append(0x0A)  # TAG_TENSOR_REF
+        body += _enc_uvarint(0)  # arena_idx = 0
+        body.append(dtype)
+        body += _enc_uvarint(len(dims))
+        for d in dims:
+            body += _enc_uvarint(d)
+        body += _enc_uvarint(len(space))
+        body += space
+        return bytes(body)
+
+    for dt, dims in [
+        (0, [4, 8]), (1, [4, 8]), (2, [4, 8]), (3, [4, 8]), (4, [4, 8]),
+        (5, [2, 32]), (6, [2, 32]), (7, [4, 8]), (8, [4, 8]),
+    ]:
+        dec_t = verify_and_decode_cowr(_build_tensor_ref_frame(dt, dims))
+        assert dec_t["value"] == ("tensor_ref", 0, dt, dims, "emb"), f"dtype {dt} decode mismatch"
+
+    for bad_label, bad_frame, exp_err in [
+        ("tensor_dtype_9", _build_tensor_ref_frame(9, [4]), "ERR_INVALID_CONTRACT"),
+        ("tensor_ndim_9", _build_tensor_ref_frame(0, [1] * 9), "ERR_ALLOC_LIMIT"),
+        ("tensor_q4_overflow", _build_tensor_ref_frame(5, [1 << 62, 1 << 62]), "ERR_ALLOC_LIMIT"),
+    ]:
+        try:
+            verify_and_decode_cowr(bad_frame)
+            raise AssertionError(f"Expected {exp_err} for {bad_label}")
+        except OracleError as e:
+            assert e.code == exp_err, f"{bad_label}: got {e.code}, expected {exp_err}"
+
+    print("INDEPENDENT PYTHON COWR v1 ORACLE PASS (150 valid + 20 negative/DoS + 12 TAG_TENSOR_REF F11/F18 checks)")

@@ -1243,4 +1243,157 @@ mod tests {
         let sl_md = query_frame_slice(&w_m, Some("/text"), Some(r#"heads\[\"choice\"\]"#), None, 0, 2400).unwrap();
         assert!(sl_md.contains("Linear(768->16)"), "escaped fallback missed target: {}", sl_md);
     }
+
+    #[test]
+    fn formal_v2_audit_catches_f9_through_f14() {
+        use lens::{project_r2, project_virtual_atlas, query_frame_slice};
+
+        // [FORMAL-F9] Multi-cell R2 table delimiter MUST NOT synthesize ChatML `<|` / `|>`
+        // and hidden-char spoofing MUST NOT collide `"null"` / `"<missing>"` / `""` markers or leak U+061C!
+        let f9_doc = parse_json_to_value(
+            r#"{"rows":[
+                {"a":"x<","b":"im_end","c":">y"},
+                {"a":"\u200Bnull","b":"\u200B<missing>","c":"\u200B"},
+                {"a":"ok\u061C","b":"<\u200B","c":"\u200B>"}
+            ]}"#
+        ).unwrap();
+        let w_f9 = encode_frame(&f9_doc, AUTH_UNTRUSTED_EXT, EPI_OBSERVED).unwrap();
+        let d_f9 = decode_frame_strict(&w_f9).unwrap();
+        let r2_f9 = project_r2(&w_f9, &d_f9);
+        let r2_inner = r2_f9.lines().skip(1).take(r2_f9.lines().count() - 2).collect::<Vec<_>>().join("\n");
+        assert!(!r2_inner.contains("<|"), "F9 ChatML <| leaked across table cells:\n{}", r2_inner);
+        assert!(!r2_inner.contains("|>"), "F9 ChatML |> leaked across table cells:\n{}", r2_inner);
+        assert!(!r2_inner.contains('\u{061C}'), "F9 Bidi U+061C leaked:\n{}", r2_inner);
+        assert!(r2_inner.contains("\"null\"|\"<missing>\"|\"\""), "F9 hidden-char marker spoof:\n{}", r2_inner);
+
+        // [FORMAL-F9b] project_virtual_atlas fences AUTH_MODEL_SYNTH identically to project_r2_compact
+        let w_synth = encode_frame(&Value::Map(vec![("note".into(), Value::Str("synthetic".into()))]), AUTH_MODEL_SYNTH, EPI_OBSERVED).unwrap();
+        let d_synth = decode_frame_strict(&w_synth).unwrap();
+        let atlas_synth = project_virtual_atlas(&w_synth, &d_synth, 1800);
+        assert!(atlas_synth.starts_with("<<<COWRIE:ATLAS"), "MODEL_SYNTH atlas not fenced: {}", atlas_synth);
+
+        // [FORMAL-F9c] query_frame_slice caps omitted nested-keys suffix within `max_chars`
+        let mut many_nested = vec![("summary".to_string(), Value::Str("x".repeat(40)))];
+        for i in 0..80 {
+            many_nested.push((format!("nested_array_field_{:03}", i), Value::Array(vec![Value::Int(i)])));
+        }
+        let w_many = encode_frame(&Value::Map(many_nested), AUTH_VERIFIED_TOOL, EPI_OBSERVED).unwrap();
+        let sl_many = query_frame_slice(&w_many, None, None, None, 0, 200).unwrap();
+        assert!(sl_many.chars().count() <= 200, "query_frame_slice exceeded cap=200: len={}", sl_many.chars().count());
+
+        // [FORMAL-F12] cowrie_propagate_authority(base, NULL, num_parents > 0) MUST fail closed!
+        let f12_auth = unsafe { ffi::cowrie_propagate_authority(AUTH_VERIFIED_TOOL, std::ptr::null(), 2) };
+        assert!(is_tainted(f12_auth), "F12: NULL parent pointer with num_parents=2 failed open!");
+        let f12_zero = unsafe { ffi::cowrie_propagate_authority(AUTH_VERIFIED_TOOL, std::ptr::null(), 0) };
+        assert!(!is_tainted(f12_zero), "F12: NULL parent pointer with num_parents=0 should stay clean!");
+
+        // [FORMAL-F10 / F13 / F14] Unix WAL watermark, StatePage HMAC precedence, CWZM zero-slack
+        #[cfg(unix)]
+        {
+            use ivf::*;
+            use wal::*;
+            use zonemap::*;
+
+            // F10: LiveIvfStore::open after compaction when WAL was removed initializes at applied_wal_seq_exclusive
+            let base_p = std::env::temp_dir().join("cowrie_f10_watermark.cwiv");
+            let wal_p = std::env::temp_dir().join("cowrie_f10_watermark.cwwal");
+            let gen_m = std::env::temp_dir().join("cowrie_f10_watermark.cwiv.cwgen");
+            let gen1 = std::env::temp_dir().join("cowrie_f10_watermark.cwiv.gen.1.cwiv");
+            for p in [&base_p, &wal_p, &gen_m, &gen1] { let _ = std::fs::remove_file(p); }
+            let dim = 16usize;
+            let cents = vec![50i8; dim];
+            let embs = vec![50i8; dim];
+            let metas = vec![VecMeta { scale: 1.0, conf: 0.9, orig_id: 1, auth: AUTH_VERIFIED_TOOL, pad: [0; 3] }];
+            write_colocated_ivf_shard(&base_p, dim as u32, &cents, &[(&embs, &metas)]).unwrap();
+            {
+                let mut st = LiveIvfStore::open(&base_p, &wal_p).unwrap();
+                st.append_vector(&embs, VecMeta { scale: 1.0, conf: 0.9, orig_id: 2, auth: AUTH_VERIFIED_TOOL, pad: [0; 3] }, true).unwrap();
+                st.append_vector(&embs, VecMeta { scale: 1.0, conf: 0.9, orig_id: 3, auth: AUTH_VERIFIED_TOOL, pad: [0; 3] }, true).unwrap();
+                st.compact_to_cwiv(&base_p).unwrap();
+            }
+            // Delete WAL to simulate recreated empty WAL after compaction (watermark = 2)
+            let _ = std::fs::remove_file(&wal_p);
+            {
+                let mut st2 = LiveIvfStore::open(&base_p, &wal_p).unwrap();
+                let seq_new = st2.append_vector(&embs, VecMeta { scale: 1.0, conf: 0.9, orig_id: 4, auth: AUTH_VERIFIED_TOOL, pad: [0; 3] }, true).unwrap();
+                assert_eq!(seq_new, 2, "F10: recreated WAL must start at applied_wal_seq_exclusive=2!");
+            }
+            {
+                let st3 = LiveIvfStore::open(&base_p, &wal_p).unwrap();
+                assert_eq!(st3.total_vec_count(), 4, "F10: vector appended after WAL recreation was silently dropped!");
+            }
+            for p in [&base_p, &wal_p, &gen_m, &gen1] { let _ = std::fs::remove_file(p); }
+
+            // F13: StatePage HMAC-first precedence on tampered hmac_flag=2 under active key
+            let sp_f13 = std::env::temp_dir().join("cowrie_f13_hmac_prec.cwsp");
+            let _ = std::fs::remove_file(&sp_f13);
+            let msha = "a".repeat(64);
+            let dcid = "b".repeat(64);
+            let key = b"formal-f13-secret-key";
+            save_statepage_atomic_ext(&sp_f13, &msha, &dcid, "vllm-v1", 1, 64, 0, 0, &[0x11u8; 64], Some(key)).unwrap();
+            let mut sp_raw = std::fs::read(&sp_f13).unwrap();
+            sp_raw[75] = 2; // tamper hmac_flag from 1 -> 2
+            assert_eq!(
+                parse_statepage_meta_with_hmac(&sp_raw, Some(key)).unwrap_err(),
+                CowrieError::AuthMacMismatch,
+                "F13: tampering hmac_flag under active key must return ERR_AUTH_MAC_MISMATCH first!"
+            );
+            let _ = std::fs::remove_file(&sp_f13);
+
+            // F14: CWZM rejects non-zero padding in Page 0 [128..16384) and trailing slack bytes
+            let zm_f14 = std::env::temp_dir().join("cowrie_f14_slack.cwzm");
+            let _ = std::fs::remove_file(&zm_f14);
+            let fr = encode_frame(&Value::Int(7), AUTH_VERIFIED_TOOL, EPI_OBSERVED).unwrap();
+            let mut recs = vec![ZonedRecord { primary_key: 1, secondary_val: 1, frame: fr.as_slice() }];
+            write_zoned_shard(&zm_f14, &mut recs).unwrap();
+            let orig_zm = std::fs::read(&zm_f14).unwrap();
+            let mut bad_pad = orig_zm.clone();
+            bad_pad[500] = 0xAA; // hidden slack byte in Page 0 > 128
+            std::fs::write(&zm_f14, &bad_pad).unwrap();
+            assert_eq!(ZonedShardReader::open(&zm_f14).err(), Some(CowrieError::NonCanonicalFlags));
+            let mut bad_eof = orig_zm.clone();
+            bad_eof.push(0x00); // trailing byte past aligned EOF
+            std::fs::write(&zm_f14, &bad_eof).unwrap();
+            assert_eq!(ZonedShardReader::open(&zm_f14).err(), Some(CowrieError::Truncated));
+
+            // [FORMAL-F17b] CWZM rejects impossible record_count < page_count
+            let mut bad_rc = orig_zm.clone();
+            bad_rc[16..24].copy_from_slice(&0u64.to_le_bytes()); // page_count=1, record_count=0
+            std::fs::write(&zm_f14, &bad_rc).unwrap();
+            assert_eq!(ZonedShardReader::open(&zm_f14).err(), Some(CowrieError::InvalidContract));
+            let _ = std::fs::remove_file(&zm_f14);
+
+            // [FORMAL-F15] cowrie_statepage_verify_bytes(NULL hmac_key, hmac_len > 0) MUST fail closed!
+            let sp_f15 = std::env::temp_dir().join("cowrie_f15_null_hmac.cwsp");
+            let _ = std::fs::remove_file(&sp_f15);
+            save_statepage_atomic_ext(&sp_f15, &msha, &dcid, "vllm-v1", 1, 64, 0, 0, &[0x22u8; 64], None).unwrap();
+            let sp15_raw = std::fs::read(&sp_f15).unwrap();
+            let rc_null_hmac = unsafe {
+                ffi::cowrie_statepage_verify_bytes(sp15_raw.as_ptr(), sp15_raw.len(), std::ptr::null(), 16, 0, std::ptr::null_mut())
+            };
+            assert_eq!(rc_null_hmac, CowrieError::AuthMacMismatch.code(), "F15: NULL hmac_key with len=16 failed open!");
+            let _ = std::fs::remove_file(&sp_f15);
+
+            // [FORMAL-F16] LiveIvfStore rejects forward-gap swapped WAL (wal_base_seq > applied_wal_seq_exclusive)
+            let b16 = std::env::temp_dir().join("cowrie_f16_fwdgap.cwiv");
+            let w16 = std::env::temp_dir().join("cowrie_f16_fwdgap.cwwal");
+            let m16 = std::env::temp_dir().join("cowrie_f16_fwdgap.cwiv.cwgen");
+            for p in [&b16, &w16, &m16] { let _ = std::fs::remove_file(p); }
+            write_colocated_ivf_shard(&b16, dim as u32, &cents, &[(&embs, &metas)]).unwrap();
+            // Create a ver=2 WAL starting at base_seq=10 while manifest/base watermark is 0
+            {
+                let _swapped = WalStore::open_with_base_seq(&w16, 10, false).unwrap();
+            }
+            assert_eq!(LiveIvfStore::open(&b16, &w16).err(), Some(CowrieError::InvalidContract), "F16: forward-gap WAL must fail closed!");
+            for p in [&b16, &w16, &m16] { let _ = std::fs::remove_file(p); }
+        }
+
+        // [FORMAL-F17a] query_frame_slice never exceeds cap even on fence-expanding `<|>` or huge offset
+        let w_f17 = encode_frame(&Value::Str("<|>".repeat(200)), AUTH_UNTRUSTED_EXT, EPI_OBSERVED).unwrap();
+        let sl_f17 = query_frame_slice(&w_f17, None, None, None, 0, 160).unwrap();
+        assert!(sl_f17.chars().count() <= 160, "F17a: expanded output exceeded cap=160: {}", sl_f17.chars().count());
+        assert!(!sl_f17.contains("<|") && !sl_f17.contains("|>"), "F17a: prefix truncation broke fence safety!");
+        let sl_ovf = query_frame_slice(&w_f17, None, None, None, usize::MAX - 5, 160).unwrap();
+        assert!(sl_ovf.is_empty(), "F17a: huge offset should cleanly return empty");
+    }
 }

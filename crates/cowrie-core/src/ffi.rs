@@ -562,8 +562,12 @@ pub unsafe extern "C" fn cowrie_statepage_verify_bytes(
         if data.is_null() && len > 0 {
             return CowrieError::Truncated.code();
         }
+        // [FORMAL-F15] Fail closed if caller passes NULL hmac_key with non-zero hmac_len.
+        if hmac_key.is_null() && hmac_len > 0 {
+            return CowrieError::AuthMacMismatch.code();
+        }
         let slice = if len == 0 { &[] } else { std::slice::from_raw_parts(data, len) };
-        let key_opt = if !hmac_key.is_null() && hmac_len > 0 {
+        let key_opt = if hmac_len > 0 {
             Some(std::slice::from_raw_parts(hmac_key, hmac_len))
         } else {
             None
@@ -1206,7 +1210,7 @@ pub unsafe extern "C" fn cowrie_wal_len(handle: *const CowrieWalHandle) -> usize
 #[no_mangle]
 pub unsafe extern "C" fn cowrie_wal_live_len(handle: *const CowrieWalHandle) -> usize {
     if handle.is_null() { return 0; }
-    (*handle).inner.live_frames().len()
+    catch_unwind(AssertUnwindSafe(|| (*handle).inner.live_frames().len())).unwrap_or(0)
 }
 
 /// Copy the `idx`-th live (non-tombstoned) canonical frame from the WAL into `out_buf` (free with `cowrie_buf_free`).

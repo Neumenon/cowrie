@@ -239,7 +239,7 @@ impl ZonedShardReader {
         if flen < PAGE_ALIGN as u64 {
             return Err(CowrieError::Truncated);
         }
-        let mut hdr = [0u8; 128];
+        let mut hdr = [0u8; PAGE_ALIGN];
         file.read_exact_at(&mut hdr, 0).map_err(|_| CowrieError::Truncated)?;
         if &hdr[0..4] != ZONEMAP_MAGIC {
             return Err(CowrieError::BadMagic);
@@ -248,7 +248,7 @@ impl ZonedShardReader {
         if ver != 1 {
             return Err(CowrieError::UnsupportedVer);
         }
-        if hdr[12..16] != [0, 0, 0, 0] || hdr[82..128].iter().any(|&b| b != 0) {
+        if hdr[12..16] != [0, 0, 0, 0] || hdr[82..PAGE_ALIGN].iter().any(|&b| b != 0) {
             return Err(CowrieError::NonCanonicalFlags);
         }
         let page_count = u32::from_le_bytes(hdr[8..12].try_into().unwrap()) as usize;
@@ -256,6 +256,10 @@ impl ZonedShardReader {
             return Err(CowrieError::AllocLimit);
         }
         let record_count = u64::from_le_bytes(hdr[16..24].try_into().unwrap());
+        // [FORMAL-F17] Reject impossible record_count vs page_count header combinations.
+        if (page_count == 0 && record_count != 0) || record_count < page_count as u64 {
+            return Err(CowrieError::InvalidContract);
+        }
         let pages_off = u64::from_le_bytes(hdr[24..32].try_into().unwrap());
         let zonemap_off = u64::from_le_bytes(hdr[32..40].try_into().unwrap());
         let zm_raw_bytes_u64 = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
@@ -263,8 +267,7 @@ impl ZonedShardReader {
         let mut merkle_root = [0u8; 34];
         merkle_root.copy_from_slice(&hdr[48..82]);
 
-        if pages_off < PAGE_ALIGN as u64
-            || pages_off % (PAGE_ALIGN as u64) != 0
+        if pages_off != PAGE_ALIGN as u64
             || zonemap_off % (PAGE_ALIGN as u64) != 0
         {
             return Err(CowrieError::UnalignedArena);
@@ -273,20 +276,24 @@ impl ZonedShardReader {
             .checked_mul(PAGE_ALIGN as u64)
             .ok_or(CowrieError::AllocLimit)?;
         let pages_end = pages_off.checked_add(pages_bytes).ok_or(CowrieError::Truncated)?;
-        if pages_end > zonemap_off || pages_end > flen {
-            return Err(CowrieError::Truncated);
+        if pages_end != zonemap_off || pages_end > flen {
+            return Err(CowrieError::InvalidContract);
         }
         let exp_zm = page_count.checked_mul(ZONE_ENTRY_BYTES).ok_or(CowrieError::AllocLimit)?;
-        if zm_raw_bytes != exp_zm
-            || zonemap_off.checked_add(zm_raw_bytes_u64).map_or(true, |e| e > flen)
-        {
+        let exp_zm_padded = checked_align_16kb(exp_zm.max(1))?;
+        let exp_total = zonemap_off
+            .checked_add(exp_zm_padded as u64)
+            .ok_or(CowrieError::Truncated)?;
+        if zm_raw_bytes != exp_zm || exp_total != flen {
             return Err(CowrieError::Truncated);
         }
 
-        let mut zm_raw = vec![0u8; zm_raw_bytes];
-        if zm_raw_bytes > 0 {
-            file.read_exact_at(&mut zm_raw, zonemap_off).map_err(|_| CowrieError::Truncated)?;
+        let mut zm_buf = vec![0u8; exp_zm_padded];
+        file.read_exact_at(&mut zm_buf, zonemap_off).map_err(|_| CowrieError::Truncated)?;
+        if zm_buf[zm_raw_bytes..].iter().any(|&b| b != 0) {
+            return Err(CowrieError::NonZeroPad);
         }
+        let zm_raw = &zm_buf[..zm_raw_bytes];
         let mut zones: Vec<PageZoneEntry> = Vec::with_capacity(page_count);
         let mut zone_leaves = Vec::with_capacity(page_count);
         for p in 0..page_count {

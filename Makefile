@@ -3,7 +3,7 @@ BUILD_DIR        ?= /tmp/cowrie-build
 WHEEL_DIR        ?= /tmp/cowrie-dist
 LLAMA_ROOT       ?= /home/omen/prism-llama.cpp
 
-.PHONY: build wasm formal test conformance connectors adversarial wheel adapter bench clean
+.PHONY: build wasm formal formal-bend formal-lean test conformance connectors adversarial wheel adapter bench clean
 
 build:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo build --release
@@ -27,8 +27,13 @@ wheel: build
 	mkdir -p $(WHEEL_DIR) $(BUILD_DIR)/pybuild
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) python3 setup.py egg_info --egg-base $(BUILD_DIR)/pybuild build --build-base $(BUILD_DIR)/pybuild bdist_wheel --dist-dir $(WHEEL_DIR) --bdist-dir $(BUILD_DIR)/bdist
 
-formal: build wasm
+formal-bend: build wasm
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) COWRIE_LIB_PATH=$(CARGO_TARGET_DIR)/release/libcowrie_core.so python3 formal/verify_formal.py
+
+formal-lean: formal-bend
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) python3 formal/lean/verify_lean.py
+
+formal: formal-bend formal-lean
 
 test:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo test --release

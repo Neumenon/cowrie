@@ -1,274 +1,426 @@
-# LAWS.bend — Complete, Biconditional & End-to-End Formal Laws for Cowrie v1.2
+# LAWS.bend — 37 Non-Circular, Biconditional & End-to-End Formal Laws for Cowrie v1.2
 #
-# Audited against BOTH fail-open bugs AND underspecification traps ("deny-all",
-# "taint-all", "wipe-string", "drop-backslash", "head-only lookup/parents",
-# "table-header & TensorRef-boundary fence bypass", "zombie/wipe tombstones",
-# and "empty runtime_id bypass"):
-#   - 26 machine-checked laws across Planes A, B, and D (`L01`..`L25`, with `L06a`+`L06b`)
-#   - Checked by `bend PROOF.bend --verdict` (Bend 2.0.35 + Lean-proven BendTT kernel)
+# Audited by TWO rounds of multi-agent adversarial critique against BOTH fail-open bugs AND
+# vacuity/circularity/underspecification/TCB-leak traps:
+#   - ALL frozen specification predicates live strictly in `SPEC.bend` (ZERO mutable `K.` helpers in laws!).
+#   - 26 original laws (`L01`..`L25`, with `L06a`+`L06b`) de-circularized & universally tightened.
+#   - 11 new laws (`L26`..`L36`) covering Cowrie v1.2 growth & audit catches `F9`..`F18`.
+#   - Universal RFC 6962 `flatten_leaves` Merkle injectivity across ALL lengths `0..∞` (`L13`).
+#   - Checked by `bend formal/PROOF.bend --verdict` (Bend 2.0.35 + Lean-proven BendTT kernel).
 
 import Base
+import ./SPEC.bend as S
 import ./CowrieKernel.bend as K
 
-def sym_eq(a: K.Sym, b: K.Sym) -> Bool:
-  match a b:
-    case K.Lt{} K.Lt{}:
-      True{}
-    case K.Gt{} K.Gt{}:
-      True{}
-    case K.Esc{} K.Esc{}:
-      True{}
-    case K.Other{} K.Other{}:
-      True{}
-    case _ _:
-      False{}
-
-def sym_list_eq(xs: List<&2, K.Sym>, ys: List<&2, K.Sym>) -> Bool:
-  match xs ys:
-    case Nil{} Nil{}:
-      True{}
-    case Con{hx, tx} Con{hy, ty}:
-      K.band(sym_eq(hx, hy), sym_list_eq(tx, ty))
-    case _ _:
-      False{}
-
-def wire_int_eq(a: K.WireInt, b: K.WireInt) -> Bool:
-  match a b:
-    case K.WFix{x} K.WFix{y}:
-      K.nat_eq(x, y)
-    case K.WTagIntPos{x} K.WTagIntPos{y}:
-      K.nat_eq(x, y)
-    case K.WTagIntNeg{x} K.WTagIntNeg{y}:
-      K.nat_eq(x, y)
-    case K.WTagUint{x} K.WTagUint{y}:
-      K.nat_eq(x, y)
-    case _ _:
-      False{}
-
-def decoded_reencodes_identically(+lim: Nat, +ulim: Nat, +w: K.WireInt, dec: Maybe<&2, K.LogicalInt>) -> Bool:
+def decoded_reencodes_identically(+lim: Nat, +ulim: Nat, +w: S.WireInt, dec: Maybe<&2, S.LogicalInt>) -> Bool:
   match dec:
     case None{}:
       True{}
     case Some{v}:
-      wire_int_eq(K.encode_canon_int(lim, ulim, v), w)
+      S.wire_int_eq(K.encode_canon_int(lim, ulim, v), w)
 
-# -----------------------------------------------------------------------------
-# GROUP 1: PLANE D CAUSAL TAINT, DEEP STICKY LEDGER & BICONDITIONAL ED25519 GATE
-# -----------------------------------------------------------------------------
+def opt_val_bind_extract(opt: Maybe<&2, S.ValTree>, p2: List<&2, S.PathSeg>) -> Maybe<&2, S.ValTree>:
+  match opt:
+    case None{}:
+      None{}
+    case Some{u}:
+      K.extract_field(u, p2)
 
+# =============================================================================
+# GROUP 1: PLANE D CAUSAL TAINT, DEEP STICKY LEDGER, HEADER META, ED25519 & MCP
+# =============================================================================
+
+# L01: Exact non-circular `is_tainted` (ext | tainted), `propagate` biconditional, AND bit-7 `tainted` pinning!
 law L01_propagate_iff:
-  for +base: K.Auth
-  for +ps: List<&2, K.Auth>
-  {K.is_tainted(K.propagate(base, ps)) == K.bor(K.is_tainted(base), K.any_tainted(ps)) : Bool}
+  for +c: Nat
+  for +e: Bool
+  for +t: Bool
+  for +base: S.Auth
+  for +ps: List<&2, S.Auth>
+  {(K.is_tainted(S.Auth{c, e, t}), (K.is_tainted(K.propagate(base, ps)), S.spec_auth_tainted_bit(K.propagate(base, ps)))) == (S.bor(e, t), (S.bor(S.spec_tainted(base), S.spec_any_tainted(ps)), S.bor(S.spec_tainted(base), S.spec_any_tainted(ps)))) : Bool & (Bool & Bool)}
 
+# L02: Exact biconditional `derive_chain`: tainted iff root OR ANY intermediate hop is tainted (kills no-op!).
 law L02_taint_irrevocable_hops:
-  for +hops: List<&2, K.Auth>
-  for +root: K.Auth
-  {K.is_tainted(K.derive_chain(hops, K.set_tainted(root))) == True{} : Bool}
+  for +hops: List<&2, S.Auth>
+  for +root: S.Auth
+  {K.is_tainted(K.derive_chain(hops, root)) == S.bor(S.spec_tainted(root), S.spec_any_tainted(hops)) : Bool}
 
+# L03: Sticky re-registration holds for BOTH `ext=True, t=False` (`UNTRUSTED_EXT`) AND `t=True` (`BIT_TAINTED`).
 law L03_sticky_reregister:
   for +cid: Nat
-  for +old: K.Auth
-  for +rest: List<&2, K.LedgerNode>
-  for +base: K.Auth
+  for +oc: Nat
+  for +old: S.Auth
+  for +rest: List<&2, S.LedgerNode>
+  for +base: S.Auth
   for +ps: List<&2, Nat>
-  {K.is_tainted(K.ledger_record(K.LNode{cid, K.set_tainted(old)} <> rest, cid, base, ps)) == True{} : Bool}
+  {(K.is_tainted(K.ledger_record(S.LNode{cid, S.Auth{oc, True{}, False{}}} <> rest, cid, base, ps)), K.is_tainted(K.ledger_record(S.LNode{cid, S.spec_set_tainted(old)} <> rest, cid, base, ps))) == (True{}, True{}) : Bool & Bool}
 
+# L04: Unknown parent at ANY index fails closed on ARBITRARY ledgers (empty OR non-empty!).
 law L04_unknown_parent_fails_closed:
+  for +lg: List<&2, S.LedgerNode>
   for +cid: Nat
-  for +base: K.Auth
+  for +base: S.Auth
+  for +p_pre: List<&2, Nat>
   for +unk: Nat
-  for +more_ps: List<&2, Nat>
-  {K.is_tainted(K.ledger_record(Nil{}, cid, base, unk <> more_ps)) == True{} : Bool}
+  for +p_tail: List<&2, Nat>
+  {S.implies(S.bnot(S.spec_ledger_has_cid(lg, unk)), K.is_tainted(K.ledger_record(lg, cid, base, S.append_nat(p_pre, unk <> p_tail)))) == True{} : Bool}
 
+# L05: `is_privileged` matches frozen SPEC across all 5 actions, AND empty args fail closed on every privileged action.
 law L05_empty_args_fail_closed:
-  for +act: K.Action
-  for +lg: List<&2, K.LedgerNode>
-  for +toks: List<&2, K.DeclassToken>
+  for +act: S.Action
+  for +lg: List<&2, S.LedgerNode>
+  for +toks: List<&2, S.DeclassToken>
+  for +has_pk: Bool
   for +now: Nat
-  {K.implies(K.is_privileged(act), K.bnot(K.check_gate_signed(lg, act, Nil{}, toks, now))) == True{} : Bool}
+  {(K.is_privileged(act), S.implies(S.spec_is_privileged(act), S.bnot(K.check_gate_signed_pk(lg, act, Nil{}, toks, has_pk, now)))) == (S.spec_is_privileged(act), True{}) : Bool & Bool}
 
+# L06a: Wrong-action token rejected across ALL mismatched action pairs `(a1 != a2)` and BOTH `ext`/`tainted`!
 law L06a_wrong_action_token_rejected:
+  for +a1: S.Action
+  for +a2: S.Action
   for +cid: Nat
-  for +old: K.Auth
+  for +oc: Nat
+  for +oe: Bool
+  for +ot: Bool
   for +expiry: Nat
   for +now: Nat
-  {K.check_gate_signed([K.LNode{cid, K.set_tainted(old)}], K.FsWrite{}, [cid], [K.Tok{cid, K.ShellExec{}, expiry, True{}}], now) == False{} : Bool}
+  {S.implies(S.band(S.spec_is_privileged(a1), S.band(S.bor(oe, ot), S.bnot(S.spec_action_eq(a1, a2)))), S.bnot(K.check_gate_signed([S.LNode{cid, S.Auth{oc, oe, ot}}], a1, [cid], [S.Tok{cid, a2, expiry, True{}}], now))) == True{} : Bool}
 
+# L06b: Token for `c1` NEVER authorizes a distinct tainted `c2 != c1` (neither alone nor paired `[c1, c2]`)!
 law L06b_partial_declass_blocks:
-  for +lg: List<&2, K.LedgerNode>
+  for +act: S.Action
   for +c1: Nat
   for +c2: Nat
-  for +toks: List<&2, K.DeclassToken>
+  for +o1: S.Auth
+  for +oc2: Nat
+  for +oe2: Bool
+  for +ot2: Bool
+  for +exp: Nat
   for +now: Nat
-  {K.implies(K.bnot(K.arg_authorized(c2, lg, K.ShellExec{}, toks, now)), K.bnot(K.check_gate_signed(lg, K.ShellExec{}, [c1, c2], toks, now))) == True{} : Bool}
+  {S.implies(S.band(S.spec_is_privileged(act), S.band(S.bnot(S.nat_eq(c1, c2)), S.bor(oe2, ot2))), S.band(S.bnot(K.check_gate_signed([S.LNode{c1, S.spec_set_tainted(o1)}, S.LNode{c2, S.Auth{oc2, oe2, ot2}}], act, [c1, c2], [S.Tok{c1, act, exp, True{}}], now)), S.bnot(K.check_gate_signed([S.LNode{c1, S.spec_set_tainted(o1)}, S.LNode{c2, S.Auth{oc2, oe2, ot2}}], act, [c2], [S.Tok{c1, act, exp, True{}}], now)))) == True{} : Bool}
 
-# NEW S1-1: `propagate` preserves clean origin bits and `ext` flag identically (never corrupts provenance).
+# L15: BOTH `propagate` AND `ledger_record` preserve `clean_bits` and `ext` identically (frozen `S.spec_auth_*` TCB!).
 law L15_propagate_preserves_origin:
-  for +base: K.Auth
-  for +ps: List<&2, K.Auth>
-  {(K.auth_clean_bits(K.propagate(base, ps)), K.auth_ext_bit(K.propagate(base, ps))) == (K.auth_clean_bits(base), K.auth_ext_bit(base)) : Nat & Bool}
-
-# NEW S1-2: Sticky taint holds at ARBITRARY depth behind any non-matching ledger prefix (kills head-only lookup),
-# AND clean derivations stay untainted `False` (kills trivial "taint-everything" implementations!).
-law L16_sticky_deep_and_clean_liveness:
-  for +prefix: List<&2, K.LedgerNode>
+  for +base: S.Auth
+  for +ps: List<&2, S.Auth>
+  for +lg: List<&2, S.LedgerNode>
   for +cid: Nat
-  for +old: K.Auth
-  for +rest: List<&2, K.LedgerNode>
-  for +base: K.Auth
-  for +ps: List<&2, Nat>
-  for +pc: Nat
-  for +bc: Nat
-  for +k: Nat
-  {(K.implies(K.bnot(K.ledger_has_cid(prefix, cid)), K.is_tainted(K.ledger_record(K.append_lg(prefix, K.LNode{cid, K.set_tainted(old)} <> rest), cid, base, ps))), K.is_tainted(K.ledger_record([K.LNode{0n, K.Auth{pc, False{}, False{}}}], 1n+k, K.Auth{bc, False{}, False{}}, [0n]))) == (True{}, False{}) : Bool & Bool}
+  for +pids: List<&2, Nat>
+  {((S.spec_auth_clean_bits(K.propagate(base, ps)), S.spec_auth_ext_bit(K.propagate(base, ps))), (S.spec_auth_clean_bits(K.ledger_record(lg, cid, base, pids)), S.spec_auth_ext_bit(K.ledger_record(lg, cid, base, pids)))) == ((S.spec_auth_clean_bits(base), S.spec_auth_ext_bit(base)), (S.spec_auth_clean_bits(base), S.spec_auth_ext_bit(base))) : (Nat & Bool) & (Nat & Bool)}
 
-# NEW S1-3: Exact BICONDITIONAL (`==`) characterization of `check_gate_signed` + LIVENESS on clean & validly-signed calls
-# (kills trivial "deny-all" `return False{}` implementations!).
+# L16: Deep sticky taint behind arbitrary prefix (including `ext=True`) AND universal clean-derivation liveness!
+law L16_sticky_deep_and_clean_liveness:
+  for +prefix: List<&2, S.LedgerNode>
+  for +cid: Nat
+  for +oc: Nat
+  for +oe: Bool
+  for +ot: Bool
+  for +rest: List<&2, S.LedgerNode>
+  for +base: S.Auth
+  for +ps: List<&2, Nat>
+  for +lg: List<&2, S.LedgerNode>
+  for +bc: Nat
+  for +clean_ps: List<&2, Nat>
+  {(S.implies(S.band(S.bnot(S.spec_ledger_has_cid(prefix, cid)), S.bor(oe, ot)), K.is_tainted(K.ledger_record(S.append_lg(prefix, S.LNode{cid, S.Auth{oc, oe, ot}} <> rest), cid, base, ps))), S.implies(S.band(S.bnot(S.spec_existing_tainted(S.spec_ledger_lookup(lg, cid))), S.bnot(S.spec_parents_tainted(clean_ps, lg))), S.bnot(K.is_tainted(K.ledger_record(lg, cid, S.Auth{bc, False{}, False{}}, clean_ps))))) == (True{}, True{}) : Bool & Bool}
+
+# L17: Exact NON-CIRCULAR biconditional of BOTH `check_gate_signed_pk` AND 5-arg `check_gate_signed` + deep-token liveness!
 law L17_gate_exact_iff_and_liveness:
-  for +lg: List<&2, K.LedgerNode>
-  for +act: K.Action
+  for +lg: List<&2, S.LedgerNode>
+  for +act: S.Action
   for +args: List<&2, Nat>
-  for +toks: List<&2, K.DeclassToken>
+  for +toks: List<&2, S.DeclassToken>
+  for +has_pk: Bool
   for +now: Nat
   for +cid: Nat
-  for +cb: Nat
-  for +old: K.Auth
-  for +exp: Nat
-  {(K.bool_eq(K.check_gate_signed(lg, act, args, toks, now), K.bor(K.bnot(K.is_privileged(act)), K.band(K.is_nonempty_nat(args), K.all_args_authorized(args, lg, act, toks, now)))), (K.check_gate_signed([K.LNode{cid, K.Auth{cb, False{}, False{}}}], K.ShellExec{}, [cid], Nil{}, 0n), K.check_gate_signed([K.LNode{cid, K.set_tainted(old)}], K.ShellExec{}, [cid], [K.Tok{cid, K.ShellExec{}, exp, True{}}], exp))) == (True{}, (True{}, True{})) : Bool & (Bool & Bool)}
+  for +old: S.Auth
+  for +tpre: List<&2, S.DeclassToken>
+  for +ttail: List<&2, S.DeclassToken>
+  for +d: Nat
+  {((K.check_gate_signed_pk(lg, act, args, toks, has_pk, now), K.check_gate_signed(lg, act, args, toks, now)), (K.check_gate_signed_pk(lg, S.ReadOnly{}, Nil{}, Nil{}, False{}, now), K.check_gate_signed_pk([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], S.append_toks(tpre, S.Tok{cid, act, S.nat_add(now, d), True{}} <> ttail), True{}, now))) == ((S.spec_gate(lg, act, args, toks, has_pk, now), S.spec_gate(lg, act, args, toks, True{}, now)), (True{}, True{})) : (Bool & Bool) & (Bool & Bool)}
 
-# NEW S1-4: Expired Ed25519 tokens (`now = 1n+exp`) AND invalid signatures (`sig_valid = False`) ALWAYS block.
+# L18: Expired tokens (`now = 1+exp+d` for ALL `d`), invalid signatures at ALL `now`, and missing `owner_pubkey` ALL block!
 law L18_expired_and_forged_sig_rejected:
+  for +act: S.Action
   for +cid: Nat
-  for +old: K.Auth
+  for +old: S.Auth
   for +exp: Nat
-  {(K.check_gate_signed([K.LNode{cid, K.set_tainted(old)}], K.ShellExec{}, [cid], [K.Tok{cid, K.ShellExec{}, exp, True{}}], 1n+exp), K.check_gate_signed([K.LNode{cid, K.set_tainted(old)}], K.ShellExec{}, [cid], [K.Tok{cid, K.ShellExec{}, exp, False{}}], 0n)) == (False{}, False{}) : Bool & Bool}
+  for +d: Nat
+  for +now: Nat
+  {S.implies(S.spec_is_privileged(act), S.band(S.bnot(K.check_gate_signed([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], [S.Tok{cid, act, exp, True{}}], 1n+S.nat_add(exp, d))), S.band(S.bnot(K.check_gate_signed([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], [S.Tok{cid, act, exp, False{}}], now)), S.bnot(K.check_gate_signed_pk([S.LNode{cid, S.spec_set_tainted(old)}], act, [cid], [S.Tok{cid, act, S.nat_add(now, d), True{}}], False{}, now))))) == True{} : Bool}
 
-# NEW S1-5: An unapproved tainted `evil_cid` at ANY index `k` (behind an arbitrary prefix of clean/approved args) ALWAYS blocks.
+# L19: Unauthorized/unknown/tainted `evil_cid` at ANY index blocks on EVERY privileged action (non-circular `S.spec_arg_ok`).
 law L19_nth_arg_taint_blocks:
+  for +act: S.Action
   for +prefix: List<&2, Nat>
   for +evil_cid: Nat
   for +tail: List<&2, Nat>
-  for +lg: List<&2, K.LedgerNode>
-  for +toks: List<&2, K.DeclassToken>
+  for +lg: List<&2, S.LedgerNode>
+  for +toks: List<&2, S.DeclassToken>
+  for +has_pk: Bool
   for +now: Nat
-  {K.implies(K.bnot(K.arg_authorized(evil_cid, lg, K.ShellExec{}, toks, now)), K.bnot(K.check_gate_signed(lg, K.ShellExec{}, K.append_nat(prefix, evil_cid <> tail), toks, now))) == True{} : Bool}
+  {S.implies(S.band(S.spec_is_privileged(act), S.bnot(S.spec_arg_ok(evil_cid, lg, act, toks, has_pk, now))), S.bnot(K.check_gate_signed_pk(lg, act, S.append_nat(prefix, evil_cid <> tail), toks, has_pk, now))) == True{} : Bool}
 
-# NEW S1-6: Exact biconditional (`==`) characterization of `ledger_record` + deep parent fail-closed at ANY index in `ps`!
+# L25: Exact NON-CIRCULAR biconditional of `ledger_record` (incl. bit-7 `tainted` pinning!) + deep bad-parent fail-closed!
 law L25_ledger_record_exact_iff:
-  for +lg: List<&2, K.LedgerNode>
+  for +lg: List<&2, S.LedgerNode>
   for +cid: Nat
-  for +base: K.Auth
+  for +base: S.Auth
   for +ps: List<&2, Nat>
-  for +p_prefix: List<&2, Nat>
+  for +p_pre: List<&2, Nat>
   for +bad_p: Nat
   for +p_tail: List<&2, Nat>
-  {(K.bool_eq(K.is_tainted(K.ledger_record(lg, cid, base, ps)), K.bor(K.is_tainted(base), K.bor(K.existing_tainted(K.ledger_lookup(lg, cid)), K.parents_tainted(ps, lg)))), K.implies(K.opt_auth_tainted(K.ledger_lookup(lg, bad_p)), K.is_tainted(K.ledger_record(lg, cid, base, K.append_nat(p_prefix, bad_p <> p_tail))))) == (True{}, True{}) : Bool & Bool}
+  {((K.is_tainted(K.ledger_record(lg, cid, base, ps)), S.spec_auth_tainted_bit(K.ledger_record(lg, cid, base, ps))), S.implies(S.spec_opt_tainted(S.spec_ledger_lookup(lg, bad_p)), K.is_tainted(K.ledger_record(lg, cid, base, S.append_nat(p_pre, bad_p <> p_tail))))) == ((S.bor(S.spec_tainted(base), S.bor(S.spec_existing_tainted(S.spec_ledger_lookup(lg, cid)), S.spec_parents_tainted(ps, lg))), S.bor(S.spec_tainted(base), S.bor(S.spec_existing_tainted(S.spec_ledger_lookup(lg, cid)), S.spec_parents_tainted(ps, lg)))), True{}) : (Bool & Bool) & Bool}
 
-# -----------------------------------------------------------------------------
-# GROUP 2: PLANE B CONTENT-PRESERVING FENCE SANITIZER & STRUCTURED R2 TABLE LAWS
-# -----------------------------------------------------------------------------
+# L26 (NEW): Plane A/D `is_valid_header_meta` exact biconditional against `SPEC` + explicit boundary rejections.
+law L26_header_meta_and_owner_pubkey:
+  for +low4: Nat
+  for +res3: Nat
+  for +epi: Nat
+  for +flags: Nat
+  for +r: Nat
+  for +e: Nat
+  for +f: Nat
+  {((K.is_valid_header_meta(low4, res3, epi, flags), K.is_valid_header_meta(0n, 0n, 1n, 0n)), ((K.is_valid_header_meta(16n+r, 0n, 1n, 0n), K.is_valid_header_meta(2n, 1n+r, 1n, 0n)), ((K.is_valid_header_meta(2n, 0n, 0n, 0n), K.is_valid_header_meta(2n, 0n, 4n+e, 0n)), (K.is_valid_header_meta(2n, 0n, 1n, 1n+f), (K.is_valid_header_meta(1n, 0n, 1n, 0n), K.is_valid_header_meta(15n, 0n, 3n, 0n)))))) == ((S.spec_valid_header_meta(low4, res3, epi, flags), False{}), ((False{}, False{}), ((False{}, False{}), (False{}, (True{}, True{}))))) : (Bool & Bool) & ((Bool & Bool) & ((Bool & Bool) & (Bool & (Bool & Bool))))}
 
+# L27 (NEW): Exact Ed25519 action-code bijection (`0..=4`, >=5 rejected) + FULL 6-arg biconditional MCP tool classifier!
+law L27_ed25519_action_code_and_mcp_classifier:
+  for +a: S.Action
+  for +b: S.Action
+  for +k: Nat
+  for +pol: Maybe<&2, S.Action>
+  for +verb: Maybe<&2, S.Action>
+  for +allow_ro: Bool
+  for +builtin_ro: Bool
+  for +trust_ann: Bool
+  for +hint: Bool
+  {(((K.action_to_code(a), K.action_from_code(K.action_to_code(a))), S.implies(S.bnot(S.spec_action_eq(a, b)), S.bnot(S.nat_eq(K.action_to_code(a), K.action_to_code(b))))), ((K.action_from_code(5n+k), K.classify_mcp_tool(pol, verb, allow_ro, builtin_ro, trust_ann, hint)), (S.spec_is_privileged(K.classify_mcp_tool(None{}, None{}, False{}, False{}, False{}, hint)), S.spec_action_eq(K.classify_mcp_tool(pol, verb, allow_ro, builtin_ro, False{}, hint), K.classify_mcp_tool(pol, verb, allow_ro, builtin_ro, False{}, False{}))))) == (((S.spec_action_to_code(a), Some{a}), True{}), ((None{}, S.spec_classify_mcp_tool(pol, verb, allow_ro, builtin_ro, trust_ann, hint)), (True{}, True{}))) : ((Nat & Maybe<&2, S.Action>) & Bool) & ((Maybe<&2, S.Action> & S.Action) & (Bool & Bool))}
+
+# =============================================================================
+# GROUP 2: PLANE B 6-SYMBOL MEALY SANITIZER, MULTI-CELL R2 (`F9`), R2-COMPACT & EXTRACT
+# =============================================================================
+
+# L07: Full 6-symbol Mealy sanitizer eliminates `<<<`, `>>>`, `<|`, `|>`, AND all `Hidden{}` (frozen `S.has_forbidden`).
 law L07_fence_no_triple:
-  for +xs: List<&2, K.Sym>
-  {K.has_triple_angle(K.sanitize_fences(xs)) == False{} : Bool}
+  for +xs: List<&2, S.Sym>
+  {S.has_forbidden(K.sanitize_fences(xs)) == False{} : Bool}
 
+# L08: Identity on every input already free of `<<<`, `>>>`, `<|`, `|>`, and `Hidden{}`.
 law L08_fence_safe_identity:
-  for +xs: List<&2, K.Sym>
-  {K.implies(K.bnot(K.has_triple_angle(xs)), sym_list_eq(K.sanitize_fences(xs), xs)) == True{} : Bool}
+  for +xs: List<&2, S.Sym>
+  {S.implies(S.bnot(S.has_forbidden(xs)), S.sym_list_eq(K.sanitize_fences(xs), xs)) == True{} : Bool}
 
-# NEW S2-1: Content preservation on ALL inputs (including attacks!) — `strip_esc(sanitize_fences(xs)) == strip_esc(xs)`
-# AND `count_esc(xs) <= count_esc(sanitize_fences(xs))` (kills both wipe-string AND backslash-deletion mutants!).
+# L20: True content & original-escape preservation: `strip_esc` matches `strip_hidden` AND `strip_hidden(xs)`
+# is an order-preserving SUBSEQUENCE of `sanitize_fences(xs)` (kills both wipe-string & drop-orig-esc!).
 law L20_fence_preserves_all_non_esc_symbols:
-  for +xs: List<&2, K.Sym>
-  {(K.strip_esc(K.sanitize_fences(xs)), K.nat_le(K.count_esc(xs), K.count_esc(K.sanitize_fences(xs)))) == (K.strip_esc(xs), True{}) : List<&2, K.Sym> & Bool}
+  for +xs: List<&2, S.Sym>
+  {(S.strip_esc(K.sanitize_fences(xs)), S.sym_subseq(S.strip_hidden(xs), K.sanitize_fences(xs))) == (S.strip_esc(S.strip_hidden(xs)), True{}) : List<&2, S.Sym> & Bool}
 
-# NEW S2-2: Structured `R2` rendering over `Map` scalars, hoisted `Table` column headers (`F4`), AND `TensorRef`
-# `<T:...@space>` boundaries (`F8`) NEVER emits `<<<`/`>>>` AND preserves `key`, `col_hdr`, and `cell` non-esc content!
+# L21: Structured `R2` rendering over `R2Scalar`, multi-cell `R2Table` joined by `Pipe{}` (`F4`+`F9`), and `R2TensorRef` (`F8`)
+# NEVER emits `<<<`/`>>>`/`<|`/`|>`/`Hidden{}` AND preserves non-esc/non-hidden content across ALL 3 variants!
 law L21_r2_structured_table_header_safe:
-  for +field: K.R2Field
-  for +tk: List<&2, K.Sym>
-  for +tcol: List<&2, K.Sym>
-  for +tcell: List<&2, K.Sym>
-  {(K.has_triple_angle(K.render_r2_field(field)), K.strip_esc(K.render_r2_field(K.R2Table{tk, tcol, tcell}))) == (False{}, K.append_sym(K.strip_esc(tk), K.Other{} <> K.append_sym(K.strip_esc(tcol), K.Other{} <> K.strip_esc(tcell)))) : Bool & List<&2, K.Sym>}
+  for +field: S.R2Field
+  for +sk: List<&2, S.Sym>
+  for +sv: List<&2, S.Sym>
+  for +tk: List<&2, S.Sym>
+  for +tcol: List<&2, S.Sym>
+  for +tc1: List<&2, S.Sym>
+  for +tc2: List<&2, S.Sym>
+  for +rk: List<&2, S.Sym>
+  for +rsp: List<&2, S.Sym>
+  {((S.has_forbidden(K.render_r2_field(field)), S.strip_esc(K.render_r2_field(S.R2Scalar{sk, sv}))), (S.strip_esc(K.render_r2_field(S.R2Table{tk, tcol, tc1, tc2})), S.strip_esc(K.render_r2_field(S.R2TensorRef{rk, rsp})))) == ((False{}, S.append_sym(S.strip_esc(S.strip_hidden(sk)), S.Other{} <> S.strip_esc(S.strip_hidden(sv)))), (S.append_sym(S.strip_esc(S.strip_hidden(tk)), S.Other{} <> S.append_sym(S.strip_esc(S.strip_hidden(tcol)), S.Other{} <> S.append_sym(S.strip_esc(S.strip_hidden(tc1)), S.Pipe{} <> S.strip_esc(S.strip_hidden(tc2))))), S.append_sym(S.strip_esc(S.strip_hidden(rk)), S.Other{} <> (S.Lt{} <> (S.Other{} <> S.append_sym(S.strip_esc(S.strip_hidden(rsp)), [S.Gt{}])))))) : (Bool & List<&2, S.Sym>) & (List<&2, S.Sym> & List<&2, S.Sym>)}
 
-# -----------------------------------------------------------------------------
-# GROUP 3: PLANE A CANONICAL WIRE BIJECTIVITY + MAP SORTING & `UnusedDictKey`
-# -----------------------------------------------------------------------------
+# L28 (NEW): `R2-Compact` & `project_virtual_atlas` fail closed to `FullMealyFence` on `0`, `UNTRUSTED_EXT`, `MODEL_SYNTH`,
+# `BIT_TAINTED`, and mixed authorities; compact ONLY for clean `SYS_POLICY`/`VERIFIED_TOOL`; truncation preserves safety!
+law L28_r2_compact_and_virtual_atlas_fail_closed:
+  for +a: S.Auth
+  for +c: Nat
+  for +t: Bool
+  for +e: Bool
+  for +k: Nat
+  for +n: Nat
+  for +xs: List<&2, S.Sym>
+  {((K.r2_compact_mode(S.Auth{1n, False{}, False{}}), K.r2_compact_mode(S.Auth{2n, False{}, False{}})), ((K.r2_compact_mode(S.Auth{0n, e, t}), K.r2_compact_mode(S.Auth{c, True{}, t})), ((K.r2_compact_mode(S.Auth{c, e, True{}}), K.r2_compact_mode(S.Auth{3n+k, e, t})), (K.virtual_atlas_mode(a), S.has_forbidden(S.take_sym(n, K.sanitize_fences(xs))))))) == ((S.CompactHeader{}, S.CompactHeader{}), ((S.FullMealyFence{}, S.FullMealyFence{}), ((S.FullMealyFence{}, S.FullMealyFence{}), (K.r2_compact_mode(a), False{})))) : (S.LensMode & S.LensMode) & ((S.LensMode & S.LensMode) & ((S.LensMode & S.LensMode) & (S.LensMode & Bool)))}
 
+# L29 (NEW): Universal R2 table cell marker injectivity, universal `Hidden{}` spoof invariance (`F9`),
+# universal empty/null/missing marker classification, AND full visible-content preservation across ALL `raw`!
+law L29_r2_table_marker_injectivity:
+  for +c: S.TableCell
+  for +raw: List<&2, S.Sym>
+  {((S.cell_tag_has_forbidden(K.encode_table_cell(c)), S.cell_tag_eq(K.encode_table_cell(S.CellNull{}), K.encode_table_cell(S.CellStr{raw}))), ((S.cell_tag_eq(K.encode_table_cell(S.CellMissing{}), K.encode_table_cell(S.CellStr{raw})), S.cell_tag_eq(K.encode_table_cell(S.CellNull{}), K.encode_table_cell(S.CellMissing{}))), ((K.encode_table_cell(S.CellStr{raw}), S.strip_esc(S.cell_tag_content(K.encode_table_cell(S.CellStr{raw})))), (S.sym_subseq(S.strip_hidden(raw), S.cell_tag_content(K.encode_table_cell(S.CellStr{raw}))), ((S.implies(S.sym_list_eq(S.strip_hidden(raw), Nil{}), S.cell_tag_eq(K.encode_table_cell(S.CellStr{raw}), S.OutEmptyQuoted{})), S.implies(S.sym_list_eq(S.strip_hidden(raw), [S.Other{}]), S.cell_tag_eq(K.encode_table_cell(S.CellStr{raw}), S.OutQuotedStr{[S.Other{}]}))), S.implies(S.sym_list_eq(S.strip_hidden(raw), [S.Lt{}, S.Other{}, S.Gt{}]), S.cell_tag_eq(K.encode_table_cell(S.CellStr{raw}), S.OutQuotedStr{[S.Lt{}, S.Other{}, S.Gt{}]}))))))) == ((False{}, False{}), ((False{}, False{}), ((K.encode_table_cell(S.CellStr{S.strip_hidden(raw)}), S.strip_esc(S.strip_hidden(raw))), (True{}, ((True{}, True{}), True{}))))) : (Bool & Bool) & ((Bool & Bool) & ((S.CellTag & List<&2, S.Sym>) & (Bool & ((Bool & Bool) & Bool))))}
+
+# L30 (NEW): Strict lens tier bounds (`0..=3`, `>=4` rejected) + universal `extract_field`
+# (exact frozen spec, empty path, path composition, deep map lookup, arbitrary array indexing, OOB & type mismatch fail-closed)!
+law L30_lens_tier_bounds_and_extract_field:
+  for +t: Nat
+  for +k: Nat
+  for +idx: Nat
+  for +v: S.ValTree
+  for +pre_m: List<&2, S.MapEntry>
+  for +post_m: List<&2, S.MapEntry>
+  for +pre_a: List<&2, S.ValTree>
+  for +post_a: List<&2, S.ValTree>
+  for +a: Nat
+  for +seg: S.PathSeg
+  for +p1: List<&2, S.PathSeg>
+  for +p2: List<&2, S.PathSeg>
+  {(((K.is_valid_lens_tier(t), K.is_valid_lens_tier(4n+k)), (K.extract_field(v, p1), (K.extract_field(v, Nil{}), K.extract_field(v, S.append_path(p1, p2))))), ((S.implies(S.bnot(S.spec_map_has_key(pre_m, k)), S.spec_maybe_val_is_atom(K.extract_field(S.VMap{S.append_map(pre_m, S.MEntry{k, S.VAtom{a}} <> post_m)}, [S.PKey{k}]), a)), K.extract_field(S.VArr{S.append_val(pre_a, v <> post_a)}, [S.PIdx{S.list_len_val(pre_a)}])), ((K.extract_field(S.VArr{pre_a}, [S.PIdx{S.nat_add(S.list_len_val(pre_a), k)}]), K.extract_field(S.VMap{pre_m}, [S.PIdx{idx}])), (K.extract_field(S.VArr{pre_a}, [S.PKey{k}]), K.extract_field(S.VAtom{a}, seg <> p1))))) == (((S.nat_le(t, 3n), False{}), (S.spec_extract_field(v, p1), (Some{v}, opt_val_bind_extract(K.extract_field(v, p1), p2)))), ((True{}, Some{v}), ((None{}, None{}), (None{}, None{})))) : ((Bool & Bool) & (Maybe<&2, S.ValTree> & (Maybe<&2, S.ValTree> & Maybe<&2, S.ValTree>))) & ((Bool & Maybe<&2, S.ValTree>) & ((Maybe<&2, S.ValTree> & Maybe<&2, S.ValTree>) & (Maybe<&2, S.ValTree> & Maybe<&2, S.ValTree>)))}
+
+# =============================================================================
+# GROUP 3: PLANE A CANONICAL WIRE, FLOAT64, MAP/DICT, SENTINELS & RESOLVED CID
+# =============================================================================
+
+# L09: Canonical integer round-trip identity.
 law L09_canon_roundtrip:
   for +lim: Nat
   for +ulim: Nat
-  for +v: K.LogicalInt
-  {K.decode_canon_int(lim, ulim, K.encode_canon_int(lim, ulim, v)) == Some{v} : Maybe<&2, K.LogicalInt>}
+  for +v: S.LogicalInt
+  {K.decode_canon_int(lim, ulim, K.encode_canon_int(lim, ulim, v)) == Some{v} : Maybe<&2, S.LogicalInt>}
 
+# L10: Zero-alloc verifier matches BOTH frozen `S.spec_valid_wire` (pinning `lim`/`ulim`) AND `decode_canon_int`.
 law L10_verify_iff_decode:
   for +lim: Nat
   for +ulim: Nat
-  for +w: K.WireInt
-  {K.verify_canon_int_zero_alloc(lim, ulim, w) == K.is_some_int(K.decode_canon_int(lim, ulim, w)) : Bool}
+  for +w: S.WireInt
+  {(K.verify_canon_int_zero_alloc(lim, ulim, w), K.verify_canon_int_zero_alloc(lim, ulim, w)) == (S.spec_valid_wire(lim, ulim, w), S.spec_is_some_int(K.decode_canon_int(lim, ulim, w))) : Bool & Bool}
 
+# L11: Canonical wire uniqueness (every accepted wire int re-encodes identically).
 law L11_canon_wire_unique:
   for +lim: Nat
   for +ulim: Nat
-  for +w: K.WireInt
+  for +w: S.WireInt
   {decoded_reencodes_identically(lim, ulim, w, K.decode_canon_int(lim, ulim, w)) == True{} : Bool}
 
-# NEW S3: Deep Plane A Map out-of-range dict index rejection + deep duplicate/unsorted adjacent key rejection
-# + universal `UnusedDictKey` rejection for ANY missing key `m < nkeys` + clean liveness!
+# L22: Exact NON-CIRCULAR biconditional of `verify_map_keys` & `all_dict_keys_used` against frozen `SPEC.bend`,
+# plus deep OOB, deep duplicate/unsorted, and universal missing-key rejection!
 law L22_map_keys_and_dict_all_used:
   for +nkeys: Nat
+  for +ks: List<&2, Nat>
   for +prefix: List<&2, Nat>
   for +b: Nat
   for +d: Nat
   for +tail: List<&2, Nat>
   for +m: Nat
   for +refs: List<&2, Nat>
-  {((K.verify_map_keys(nkeys, K.append_nat(prefix, K.nat_add(nkeys, d) <> tail)), K.verify_map_keys(nkeys, K.append_nat(prefix, K.nat_add(b, d) <> (b <> tail)))), (K.implies(K.nat_lt(m, nkeys), K.implies(K.bnot(K.list_contains_nat(refs, m)), K.bnot(K.all_dict_keys_used(nkeys, refs)))), (K.verify_map_keys(2n, [0n, 1n]), K.all_dict_keys_used(2n, [1n, 0n])))) == ((False{}, False{}), (True{}, (True{}, True{}))) : (Bool & Bool) & (Bool & (Bool & Bool))}
+  {((K.verify_map_keys(nkeys, ks), K.all_dict_keys_used(nkeys, refs)), ((K.verify_map_keys(nkeys, S.append_nat(prefix, S.nat_add(nkeys, d) <> tail)), K.verify_map_keys(nkeys, S.append_nat(prefix, S.nat_add(b, d) <> (b <> tail)))), S.implies(S.nat_lt(m, nkeys), S.implies(S.bnot(S.nat_mem(refs, m)), S.bnot(K.all_dict_keys_used(nkeys, refs)))))) == ((S.spec_strictly_asc_from(ks, 0n, nkeys), S.spec_all_lt_in(nkeys, refs)), ((False{}, False{}), True{})) : (Bool & Bool) & ((Bool & Bool) & Bool)}
 
-# -----------------------------------------------------------------------------
-# GROUP 4: `CWZM` EARLY-BREAK EQUIVALENCE, MERKLE, `.cwwal` RE-INSERT & `CWSP`
-# -----------------------------------------------------------------------------
+# L31 (NEW): De-circularized Canonical `Float64`: exact match against frozen `S.spec_canonicalize_f64` &
+# `S.spec_verify_canon_f64`, idempotence, AND strict rejection of `-0.0` and non-canonical NaNs!
+law L31_canon_float64_bijective_and_idempotent:
+  for +f: S.FloatKind
+  for +p: Nat
+  {((K.canonicalize_f64(f), K.verify_canon_f64(f)), (K.canonicalize_f64(K.canonicalize_f64(f)), (K.verify_canon_f64(S.FNegZero{}), K.verify_canon_f64(S.FNonCanonNaN{p})))) == ((S.spec_canonicalize_f64(f), S.spec_verify_canon_f64(f)), (K.canonicalize_f64(f), (False{}, False{}))) : (S.FloatKind & Bool) & (S.FloatKind & (Bool & Bool))}
 
+# L32 (NEW): Lossless `$map`/`$float`/`$bytes`/`$tensor` JSON sentinel round-trip + malformed sentinel fail-closed (`F6`).
+law L32_json_sentinel_bijectivity_and_fail_closed:
+  for +v: S.SentinelVal
+  for +r: Nat
+  for +c: Nat
+  for +a: Nat
+  for +dt: Nat
+  for +kk: Nat
+  for +p: Nat
+  {(K.parse_sentinel_json(K.emit_sentinel_json(v)), ((K.parse_sentinel_json(S.JBytesObj{False{}, r}), K.parse_sentinel_json(S.JFloatObj{False{}, c})), (K.parse_sentinel_json(S.JTensorObj{False{}, a, dt}), K.parse_sentinel_json(S.JMapWrap{False{}, kk, p})))) == (Some{v}, ((None{}, None{}), (None{}, None{}))) : Maybe<&2, S.SentinelVal> & ((Maybe<&2, S.SentinelVal> & Maybe<&2, S.SentinelVal>) & (Maybe<&2, S.SentinelVal> & Maybe<&2, S.SentinelVal>))}
+
+# L33 (NEW): Universal `resolved_frame_cid`: exact frozen spec, universal repack invariance (`ts ++ extra`),
+# universal OOB rejection at ANY position `r_pre ++ (len ts + d) :: r_tail`, and arbitrary-index tensor binding!
+law L33_resolved_frame_cid_repack_and_binding:
+  for +fcid: Nat
+  for +refs: List<&2, Nat>
+  for +r_pre: List<&2, Nat>
+  for +r_tail: List<&2, Nat>
+  for +ts: List<&2, S.TensorDesc>
+  for +pre: List<&2, S.TensorDesc>
+  for +post: List<&2, S.TensorDesc>
+  for +extra: List<&2, S.TensorDesc>
+  for +l: Nat
+  for +m: Nat
+  for +d: Nat
+  {((K.resolved_frame_cid(fcid, refs, ts), S.implies(S.rcid_is_some(K.resolved_frame_cid(fcid, refs, ts)), S.rcid_eq(K.resolved_frame_cid(fcid, refs, ts), K.resolved_frame_cid(fcid, refs, S.append_tdesc(ts, extra))))), ((K.resolved_frame_cid(fcid, S.append_nat(r_pre, S.nat_add(S.list_len_tdesc(ts), d) <> r_tail), ts), S.rcid_eq(K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)), K.resolved_frame_cid(1n+S.nat_add(fcid, d), [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)))), (S.rcid_eq(K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)), K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{1n+S.nat_add(l, d), m} <> post))), S.rcid_eq(K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, m} <> post)), K.resolved_frame_cid(fcid, [S.list_len_tdesc(pre)], S.append_tdesc(pre, S.TDesc{l, 1n+S.nat_add(m, d)} <> post)))))) == ((S.spec_resolved_frame_cid(fcid, refs, ts), True{}), ((None{}, False{}), (False{}, False{}))) : (Maybe<&2, S.ResolvedCid> & Bool) & ((Maybe<&2, S.ResolvedCid> & Bool) & (Bool & Bool))}
+
+# =============================================================================
+# GROUP 4: `CWZM` BINARY-SKIP, UNIVERSAL MERKLE, COMPLETE `.cwwal`, `LiveIvfStore` & `CWSP`
+# =============================================================================
+
+# L12: Exact `zone_overlaps` biconditional (kills `const True{}`!) + single-page zero false-negative + `min <= max`.
 law L12_zonemap_no_false_neg:
+  for +mn: Nat
+  for +mx: Nat
   for +k0: Nat
   for +ks: List<&2, Nat>
   for +lo: Nat
   for +hi: Nat
-  {K.implies(K.page_has_in_range(k0, ks, lo, hi), K.zone_overlaps(K.build_zone(k0, ks), lo, hi)) == True{} : Bool}
+  {(K.zone_overlaps(S.Zone{mn, mx}, lo, hi), S.implies(S.spec_page_has_in_range(k0, ks, lo, hi), K.zone_overlaps(K.build_zone(k0, ks), lo, hi))) == (S.band(S.nat_le(lo, mx), S.nat_le(mn, hi)), True{}) : Bool & Bool}
 
-# NEW S4: Multi-page `CWZM` early-break pruning (`if z.min_key > hi { break; }`) returns the EXACT SAME page list
-# as full linear filtering whenever `zones_min_sorted` holds (proving both 0 false negatives and 0 extra pages!).
+# L23: Multi-page `CWZM` `partition_point`-skip (`max_k < lo`) + early-break (`min_k > hi`) matches frozen
+# `S.spec_filter_zones_at` EXACTLY when `lo <= hi` & disjoint monotonic, AND returns `Nil{}` when `hi < lo`!
 law L23_sorted_zonemap_early_break_exact:
-  for +zs: List<&2, K.Zone>
+  for +zs: List<&2, S.Zone>
   for +lo: Nat
   for +hi: Nat
-  {K.implies(K.zones_min_sorted(zs, 0n), K.nat_list_eq(K.prune_sorted_zones_at(zs, 0n, lo, hi), K.filter_all_zones_at(zs, 0n, lo, hi))) == True{} : Bool}
+  {(S.implies(S.band(S.nat_le(lo, hi), S.spec_zones_disjoint_from(zs, 0n)), S.nat_list_eq(K.query_key_range_pages(zs, lo, hi), S.spec_filter_zones_at(zs, 0n, lo, hi))), S.implies(S.nat_lt(hi, lo), S.nat_list_eq(K.query_key_range_pages(zs, lo, hi), Nil{}))) == (True{}, True{}) : Bool & Bool}
 
+# L13: UNIVERSAL RFC 6962 `flatten_leaves(merkle_tree_digest(xs)) == flat_map_leaves(xs)` across ALL lengths `0..∞`
+# (kills `fuel=2n` truncation & CVE-2012-2459!), PLUS exact `shard_merkle_root` `0x02`/`0x04` count+tree binding!
 law L13_merkle_domain_and_odd_safe:
-  for +f1: List<&2, K.Digest>
-  for +f2: List<&2, K.Digest>
-  for +t0: K.Digest
-  for +trest: List<&2, K.Digest>
-  for +a: K.Digest
-  for +b: K.Digest
-  for +c: K.Digest
-  {K.bor(K.digest_eq(K.shard_merkle_root(f1, Nil{}), K.shard_merkle_root(f2, t0 <> trest)), K.digest_eq(K.shard_merkle_root([a, b, c], Nil{}), K.shard_merkle_root([a, b, c, c], Nil{}))) == False{} : Bool}
+  for +xs: List<&2, S.Digest>
+  for +f1: List<&2, S.Digest>
+  for +f2: List<&2, S.Digest>
+  for +t0: S.Digest
+  for +trest: List<&2, S.Digest>
+  for +a: Nat
+  for +b: Nat
+  for +c: Nat
+  {(((S.flatten_leaves(K.merkle_tree_digest(xs)), K.shard_merkle_root(f1, Nil{})), (K.shard_merkle_root(f2, t0 <> trest), S.spec_digest_eq(K.shard_merkle_root(f1, Nil{}), K.shard_merkle_root(f2, t0 <> trest)))), (S.spec_digest_eq(K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}, S.HLeaf00{c}]), K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}, S.HLeaf00{c}, S.HLeaf00{c}])), (K.merkle_tree_digest(Nil{}), (K.merkle_tree_digest([S.HLeaf00{a}]), K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}]))))) == (((S.flat_map_leaves(xs), S.HRoot02{S.list_len_dig(f1), K.merkle_tree_digest(f1)}), (S.HRoot04{S.list_len_dig(f2), K.merkle_tree_digest(f2), 1n+S.list_len_dig(trest), K.merkle_tree_digest(t0 <> trest)}, False{})), (False{}, (S.HEmpty{}, (S.HLeaf00{a}, S.HNode01{S.HLeaf00{a}, S.HLeaf00{b}})))) : ((List<&2, S.Digest> & S.Digest) & (S.Digest & Bool)) & (Bool & (S.Digest & (S.Digest & S.Digest)))}
 
+# L34 (NEW): Merkle leaf-payload sensitivity (incl. frame binding inside `shard_merkle_root`) & `HTensor03` binding!
+law L34_merkle_leaf_and_tensor_sensitivity:
+  for +a: Nat
+  for +b: Nat
+  for +d: Nat
+  for +bl: Nat
+  for +m4m: Nat
+  for +fs: List<&2, S.Digest>
+  {((S.spec_digest_eq(K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}]), K.merkle_tree_digest([S.HLeaf00{1n+S.nat_add(a, d)}, S.HLeaf00{b}])), S.spec_digest_eq(K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{b}]), K.merkle_tree_digest([S.HLeaf00{a}, S.HLeaf00{1n+S.nat_add(b, d)}]))), (S.spec_digest_eq(K.shard_merkle_root([S.HLeaf00{a}], Nil{}), K.shard_merkle_root([S.HLeaf00{1n+S.nat_add(a, d)}], Nil{})), S.spec_digest_eq(K.shard_merkle_root(fs, [S.HTensor03{bl, m4m}]), K.shard_merkle_root(fs, [S.HTensor03{bl, 1n+S.nat_add(m4m, d)}])))) == ((False{}, False{}), (False{}, False{})) : (Bool & Bool) & (Bool & Bool)}
+
+# L14: Complete `.cwwal` recovery: exact biconditional against frozen `S.spec_wal_recover_mode`
+# (covering BOTH rollback `bad_seq < exp_seq` AND forward gap `bad_seq > exp_seq`, arbitrary `torn_seq`, both modes)!
 law L14_wal_torn_vs_mid_tamper:
+  for +recs: List<&2, S.WalRec>
   for +prefix: List<&2, Nat>
-  for +torn_payload: Nat
-  for +bad_payload: Nat
-  for +after: K.WalRec
-  for +more: List<&2, K.WalRec>
-  {(K.wal_recover(K.append_valid_prefix(prefix, [K.WalRec{False{}, torn_payload}])), K.wal_recover(K.append_valid_prefix(prefix, K.WalRec{False{}, bad_payload} <> (after <> more)))) == (K.WalOk{prefix}, K.WalErr{}) : K.WalResult & K.WalResult}
+  for +start_seq: Nat
+  for +torn_seq: Nat
+  for +bad_seq: Nat
+  for +tp: Nat
+  for +bp: Nat
+  for +after: S.WalRec
+  for +more: List<&2, S.WalRec>
+  for +mode: Bool
+  {((K.wal_recover_mode(recs, start_seq, mode), K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, Nil{}), start_seq, mode)), ((K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, [S.WalRec{False{}, torn_seq, tp}]), start_seq, True{}), K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, [S.WalRec{False{}, torn_seq, tp}]), start_seq, False{})), (K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, S.WalRec{False{}, torn_seq, bp} <> (after <> more)), start_seq, mode), S.implies(S.bnot(S.nat_eq(bad_seq, S.nat_add(start_seq, S.list_len_nat(prefix)))), S.spec_wal_is_err(K.wal_recover_mode(S.spec_wal_valid_prefix(prefix, start_seq, [S.WalRec{True{}, bad_seq, tp}]), start_seq, mode)))))) == ((S.spec_wal_recover_mode(recs, start_seq, mode), S.WalOk{prefix}), ((S.WalOk{prefix}, S.WalErr{}), (S.WalErr{}, True{}))) : (S.WalResult & S.WalResult) & ((S.WalResult & S.WalResult) & (S.WalResult & Bool))}
 
-# NEW S5 & S6: `.cwwal` sequential tombstone revokes target WITHOUT wiping bystander (`[0n]`) AND allows subsequent
-# re-insertion (`[cid]`, killing global-HashSet zombie tombstones `F5`), AND `StatePage` `expected_runtime_id`
-# rejects empty/mismatched `runtime_id` (`F7`) while allowing matching/unspecified `runtime_id`!
+# L24: Universally quantified sequential WAL replay (homomorphism, tombstone revokes target & keeps ANY bystander `b != c`,
+# frame revives with EXACT count `1n` & keeps ANY bystander `b != c`) + exact biconditional `StatePage` `runtime_id`!
 law L24_wal_tombstone_reinsert_and_statepage_rt:
-  for +cid: Nat
-  for +rt: Nat
-  for +k: Nat
+  for +ops1: List<&2, S.WalOp>
+  for +ops2: List<&2, S.WalOp>
+  for +live: List<&2, Nat>
+  for +c: Nat
+  for +b: Nat
+  for +exp_rt: Maybe<&2, Nat>
   for +file_rt: Maybe<&2, Nat>
-  {((K.wal_replay_live([K.OpFrame{0n}, K.OpFrame{1n+k}, K.OpTomb{1n+k}], Nil{}), K.wal_replay_live([K.OpFrame{cid}, K.OpTomb{cid}, K.OpFrame{cid}], Nil{})), (K.check_statepage_runtime(Some{rt}, None{}), (K.check_statepage_runtime(Some{0n}, Some{1n+k}), (K.check_statepage_runtime(Some{rt}, Some{rt}), K.check_statepage_runtime(None{}, file_rt))))) == (([0n], [cid]), (False{}, (False{}, (True{}, True{})))) : (List<&2, Nat> & List<&2, Nat>) & (Bool & (Bool & (Bool & Bool)))}
+  {((K.wal_replay_live(S.append_ops(ops1, ops2), live), S.nat_mem(K.wal_replay_live(S.append_ops(ops1, [S.OpTomb{c}]), live), c)), ((S.implies(S.bnot(S.nat_eq(b, c)), S.bool_eq(S.nat_mem(K.wal_replay_live(S.append_ops(ops1, [S.OpTomb{c}]), live), b), S.nat_mem(K.wal_replay_live(ops1, live), b))), S.nat_count(K.wal_replay_live(S.append_ops(ops1, [S.OpFrame{c}]), live), c)), (S.implies(S.bnot(S.nat_eq(b, c)), S.bool_eq(S.nat_mem(K.wal_replay_live(S.append_ops(ops1, [S.OpFrame{c}]), live), b), S.nat_mem(K.wal_replay_live(ops1, live), b))), K.check_statepage_runtime(exp_rt, file_rt)))) == ((K.wal_replay_live(ops2, K.wal_replay_live(ops1, live)), False{}), ((True{}, 1n), (True{}, S.spec_sp_runtime(exp_rt, file_rt)))) : (List<&2, Nat> & Bool) & ((Bool & Nat) & (Bool & Bool))}
+
+# L35 (NEW): `LiveIvfStore` crash-safe `.cwgen` generation compaction & `CWAL v2` watermark (`F10`):
+# Pre-compaction, crash-after-`.cwgen`-before-WAL-reset, and post-WAL-reset ALL yield exact multiplicity 1!
+law L35_live_ivf_compaction_crash_invariant:
+  for +base: List<&2, Nat>
+  for +comp_ids: List<&2, Nat>
+  for +post_ids: List<&2, Nat>
+  for +s0: Nat
+  {(K.live_ivf_recover(base, s0, S.ivf_make_seq_recs(S.append_nat(comp_ids, post_ids), s0)), (K.live_ivf_recover(S.append_nat(base, comp_ids), S.nat_add(s0, S.list_len_nat(comp_ids)), S.ivf_make_seq_recs(S.append_nat(comp_ids, post_ids), s0)), K.live_ivf_recover(S.append_nat(base, comp_ids), S.nat_add(s0, S.list_len_nat(comp_ids)), S.ivf_make_seq_recs(post_ids, S.nat_add(s0, S.list_len_nat(comp_ids)))))) == (S.append_nat(base, S.append_nat(comp_ids, post_ids)), (S.append_nat(base, S.append_nat(comp_ids, post_ids)), S.append_nat(base, S.append_nat(comp_ids, post_ids)))) : List<&2, Nat> & (List<&2, Nat> & List<&2, Nat>)}
+
+# L36 (NEW): `StatePage` HMAC-first error precedence (`F13`) — ALL 9 exhaustive branches (incl. `(False, 0, mv, False) == SpInvalidContract`)!
+law L36_statepage_hmac_precedence:
+  for +k: Nat
+  for +mv: Bool
+  for +hv: Bool
+  {((K.statepage_parse_precedence(True{}, 1n, False{}, hv), K.statepage_parse_precedence(True{}, 0n, mv, hv)), ((K.statepage_parse_precedence(True{}, 2n+k, mv, hv), K.statepage_parse_precedence(False{}, 1n, mv, hv)), ((K.statepage_parse_precedence(True{}, 1n, True{}, True{}), K.statepage_parse_precedence(True{}, 1n, True{}, False{})), ((K.statepage_parse_precedence(False{}, 0n, mv, True{}), K.statepage_parse_precedence(False{}, 0n, mv, False{})), K.statepage_parse_precedence(False{}, 2n+k, mv, hv))))) == ((S.SpAuthMacMismatch{}, S.SpAuthMacMismatch{}), ((S.SpAuthMacMismatch{}, S.SpAuthMacMismatch{}), ((S.SpOk{}, S.SpInvalidContract{}), ((S.SpOk{}, S.SpInvalidContract{}), S.SpNonCanonicalFlags{})))) : (S.SpError & S.SpError) & ((S.SpError & S.SpError) & ((S.SpError & S.SpError) & ((S.SpError & S.SpError) & S.SpError)))}

@@ -1,0 +1,16 @@
+name = "cowrie-formal"
+version = "1.2.0"
+defaultTargets = ["Cowrie", "cowrie-lean-oracle"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+warningAsError = true
+
+[[lean_lib]]
+name = "Cowrie"
+roots = ["Cowrie"]
+
+[[lean_exe]]
+name = "cowrie-lean-oracle"
+root = "Main"

@@ -756,38 +756,40 @@ pub fn parse_statepage_meta_with_hmac(
     hdr_snap.copy_from_slice(&buf[0..340]);
 
     let hmac_flag = hdr_snap[75];
-    if hmac_flag > HMAC_FLAG_PRESENT {
-        return Err(CowrieError::NonCanonicalFlags);
-    }
-    let hmac_present = hmac_flag == HMAC_FLAG_PRESENT;
-
-    // Verify HMAC-SHA256 FIRST (before parsing untrusted offsets/fields).
     let env_key = if explicit_hmac_key.is_none() { env_hmac_key() } else { None };
     let active_key: Option<&[u8]> = explicit_hmac_key.or(env_key.as_deref());
-    match (active_key, hmac_present) {
-        (Some(k), true) => {
+
+    // [FORMAL-F13] Verify HMAC-SHA256 STRICTLY FIRST (even before checking `hmac_flag > 1` or
+    // semantic header fields) whenever an HMAC key is active or `hmac_flag == 1`.
+    let hmac_present = match (active_key, hmac_flag) {
+        (Some(k), HMAC_FLAG_PRESENT) => {
             let expected_mac = hmac_sha256(k, &hdr_snap[0..308]);
             let stored_mac: &[u8; 32] = hdr_snap[308..340].try_into().unwrap();
             if !ct_eq_32(&expected_mac, stored_mac) {
                 return Err(CowrieError::AuthMacMismatch);
             }
+            true
         }
-        (Some(_), false) | (None, true) => {
+        (Some(_), _) | (None, HMAC_FLAG_PRESENT) => {
             return Err(CowrieError::AuthMacMismatch);
         }
-        (None, false) => {
+        (None, 0) => {
             if hdr_snap[308..340].iter().any(|&b| b != 0) {
                 return Err(CowrieError::NonZeroPad);
             }
+            false
         }
-    }
+        (None, _) => {
+            return Err(CowrieError::NonCanonicalFlags);
+        }
+    };
 
     // Parse 64-byte CWRF shard header from the verified stack snapshot + EOF trailer.
     let mut hdr_and_trailer = [0u8; 76];
     hdr_and_trailer[0..64].copy_from_slice(&hdr_snap[0..64]);
     hdr_and_trailer[64..76].copy_from_slice(&buf[buf.len() - 12..]);
     let hdr = parse_shard_header(&hdr_and_trailer)?;
-    if (hdr.flags & FLAG_STATEPAGE) == 0
+    if hdr.flags != FLAG_STATEPAGE
         || hdr.frame_count != 0
         || hdr.tensor_count != 1
         || hdr.plane_a_off != 64
@@ -939,6 +941,12 @@ pub fn verify_statepage_bytes(
         let got_sha = if meta.hash_mode == HASH_MODE_PARALLEL_MERKLE_4M {
             to_hex(&sha256_parallel_merkle(st))
         } else {
+            // [FORMAL-F13] Even in flat SHA-256 mode, verify Plane D footer `f_merkle` matches payload.
+            let pad_end = checked_align_16kb(end).map_err(|_| CowrieError::Truncated)?;
+            let f_merkle: &[u8; 32] = buf[pad_end + 16..pad_end + 48].try_into().unwrap();
+            if sha256_parallel_merkle(st) != *f_merkle {
+                return Err(CowrieError::StatePageHashMismatch);
+            }
             to_hex(&sha256(st))
         };
         if got_sha != meta.state_sha {
@@ -1121,6 +1129,15 @@ impl MappedStatePage {
             let got_sha = if meta.hash_mode == HASH_MODE_PARALLEL_MERKLE_4M {
                 to_hex(&sha256_parallel_merkle(st))
             } else {
+                let pad_end = checked_align_16kb(so + sl).map_err(|e| {
+                    unsafe { sys::munmap(raw, len) };
+                    e
+                })?;
+                let f_merkle: &[u8; 32] = slice[pad_end + 16..pad_end + 48].try_into().unwrap();
+                if sha256_parallel_merkle(st) != *f_merkle {
+                    unsafe { sys::munmap(raw, len) };
+                    return Err(CowrieError::StatePageHashMismatch);
+                }
                 to_hex(&sha256(st))
             };
             if got_sha != meta.state_sha {

@@ -396,7 +396,7 @@ impl WalStore {
                 record_hash: got_hash,
                 cid,
             });
-            seq_exp += 1;
+            seq_exp = seq_exp.checked_add(1).ok_or(CowrieError::AllocLimit)?;
             pos = rec_end;
         }
 
@@ -426,6 +426,8 @@ impl WalStore {
     ) -> Result<u64, CowrieError> {
         let plen = u32::try_from(payload.len()).map_err(|_| CowrieError::AllocLimit)?;
         let seq = self.next_seq;
+        // [FORMAL-F16] Check sequence overflow BEFORE writing to disk so u64::MAX never bricks the WAL.
+        let next_seq = self.next_seq.checked_add(1).ok_or(CowrieError::AllocLimit)?;
         let mut rec = Vec::with_capacity(84 + payload.len());
         rec.extend_from_slice(WAL_REC_MAGIC);
         rec.push(kind);
@@ -449,7 +451,7 @@ impl WalStore {
         }
 
         self.head_hash = rec_hash;
-        self.next_seq += 1;
+        self.next_seq = next_seq;
         self.entries.push(WalEntry {
             seq,
             kind,
@@ -581,7 +583,14 @@ impl LiveIvfStore {
                 (rdr, 0, 0)
             };
 
-        let wal = WalStore::open(wal_path, true)?;
+        // [FORMAL-F10/F16] Initialize any new/empty WAL at the manifest's `applied_wal_seq_exclusive`
+        // watermark and reject BOTH stale/rewound WALs (`next_seq < applied`) AND forward-gap/swapped
+        // WALs (`wal_base_seq > applied`) that would silently drop committed delta sequences.
+        let wal = WalStore::open_with_base_seq(wal_path, applied_wal_seq_exclusive, true)?;
+        let wal_base_seq = wal.next_seq.saturating_sub(wal.entries.len() as u64);
+        if wal.next_seq < applied_wal_seq_exclusive || wal_base_seq > applied_wal_seq_exclusive {
+            return Err(CowrieError::InvalidContract);
+        }
         let dim = base.dim;
         let mut delta_embs = Vec::new();
         let mut delta_meta = Vec::new();
@@ -786,15 +795,17 @@ impl LiveIvfStore {
             return Ok(total);
         }
 
-        // Atomically replace WAL with fresh empty `ver=2` genesis starting at `applied_wal_seq_exclusive`.
+        // [FORMAL-F16] Atomically replace WAL with fresh empty `ver=2` genesis starting at
+        // `applied_wal_seq_exclusive` while holding the exclusive `flock` across `rename()`.
         let tmp_wal_path = unique_wal_tmp_path(&self.wal.path, "reset");
-        let new_wal = WalStore::open_with_base_seq(&tmp_wal_path, applied_wal_seq_exclusive, false)?;
-        drop(new_wal);
+        let mut new_wal = WalStore::open_with_base_seq(&tmp_wal_path, applied_wal_seq_exclusive, false)?;
         if fs::rename(&tmp_wal_path, &self.wal.path).is_err() {
+            drop(new_wal);
             let _ = fs::remove_file(&tmp_wal_path);
             return Err(CowrieError::IoError);
         }
         fsync_parent_dir(&self.wal.path);
+        new_wal.path = self.wal.path.clone();
 
         // Best-effort publish active `out_cwiv_path` alias (hardlink/copy + atomic rename) for standalone readers.
         let alias_tmp = unique_wal_tmp_path(out_cwiv_path, "alias");
@@ -809,12 +820,11 @@ impl LiveIvfStore {
         }
 
         let reopened_base = ColocatedIvfReader::open(&new_gen_path)?;
-        let reopened_wal = WalStore::open(&self.wal.path, true)?;
         self.base = reopened_base;
         self.base_path = out_cwiv_path.to_path_buf();
         self.gen_id = new_gen_id;
         self.applied_wal_seq_exclusive = applied_wal_seq_exclusive;
-        self.wal = reopened_wal;
+        self.wal = new_wal;
         self.delta_embs.clear();
         self.delta_meta.clear();
 
