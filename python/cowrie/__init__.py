@@ -1,8 +1,10 @@
-"""Python ctypes binding over the single audited Rust `libcowrie_core.so` (v1.2)."""
+"""Python ctypes binding over the single audited Rust `libcowrie_core` shared library (v1.2)."""
 
 import ctypes
 import json
 import os
+import stat
+import sys
 from pathlib import Path
 from typing import List, Sequence
 
@@ -23,6 +25,35 @@ ACTION_CODES = {
     "fs_write": 3,
     "net_exfil": 4,
 }
+
+_U64_MAX = (1 << 64) - 1
+
+
+def _lib_filename() -> str:
+    if sys.platform == "darwin":
+        return "libcowrie_core.dylib"
+    if sys.platform == "win32":
+        return "cowrie_core.dll"
+    return "libcowrie_core.so"
+
+
+def _is_safe_shared_lib(path: Path, require_owner_check: bool = False) -> bool:
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISREG(st.st_mode):
+        return False
+    if require_owner_check and hasattr(os, "geteuid"):
+        euid = os.geteuid()
+        egid = os.getegid()
+        if st.st_uid not in (euid, 0):
+            return False
+        if (st.st_mode & 0o002) != 0:
+            return False
+        if (st.st_mode & 0o020) != 0 and st.st_gid != egid:
+            return False
+    return True
 
 
 class CowrieBuf(ctypes.Structure):
@@ -50,17 +81,29 @@ class CowrieError(Exception):
 
 
 def _find_lib() -> str:
-    env = os.environ.get("COWRIE_LIB")
-    if env and os.path.exists(env):
-        return env
-    candidates = [
-        "/tmp/cowrie-cargo-target/release/libcowrie_core.so",
-        "/tmp/cowrie-cargo-target/debug/libcowrie_core.so",
+    for var in ("COWRIE_LIB", "COWRIE_LIB_PATH"):
+        env = os.environ.get(var)
+        if env and os.path.exists(env):
+            return env
+    lib_name = _lib_filename()
+    pkg_dir = Path(__file__).resolve().parent
+    trusted_candidates = [
+        pkg_dir / lib_name,
+        Path.home() / ".local" / "lib" / lib_name,
+        Path("/usr/local/lib") / lib_name,
     ]
-    for c in candidates:
-        if os.path.exists(c):
-            return c
-    raise FileNotFoundError("libcowrie_core.so not found; set COWRIE_LIB or build with cargo")
+    for c in trusted_candidates:
+        if _is_safe_shared_lib(c, require_owner_check=False):
+            return str(c)
+    # Scratch cargo target fallback: strictly verify ownership and non-world-writable mode (CWE-426 guard).
+    cargo_target = Path(os.environ.get("CARGO_TARGET_DIR", "/tmp/cowrie-cargo-target"))
+    for profile in ("release", "debug"):
+        cand = cargo_target / profile / lib_name
+        if _is_safe_shared_lib(cand, require_owner_check=True):
+            return str(cand)
+    raise FileNotFoundError(
+        f"{lib_name} not found; set COWRIE_LIB (or COWRIE_LIB_PATH) or build with `make build`"
+    )
 
 
 _LIB = ctypes.CDLL(_find_lib())
@@ -88,8 +131,26 @@ _LIB.cowrie_project_lens.argtypes = [
 ]
 _LIB.cowrie_project_lens.restype = ctypes.c_int
 
+_LIB.cowrie_project_r2_compact.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)
+]
+_LIB.cowrie_project_r2_compact.restype = ctypes.c_int
+
+_LIB.cowrie_extract_field.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)
+]
+_LIB.cowrie_extract_field.restype = ctypes.c_int
+
+_LIB.cowrie_shard_pack_single.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)]
+_LIB.cowrie_shard_pack_single.restype = ctypes.c_int
+
 _LIB.cowrie_shard_verify.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_char_p]
 _LIB.cowrie_shard_verify.restype = ctypes.c_int
+
+_LIB.cowrie_shard_resolved_frame_cid.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.c_size_t, ctypes.c_char_p
+]
+_LIB.cowrie_shard_resolved_frame_cid.restype = ctypes.c_int
 
 _LIB.cowrie_propagate_authority.argtypes = [ctypes.c_uint8, ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
 _LIB.cowrie_propagate_authority.restype = ctypes.c_uint8
@@ -120,6 +181,12 @@ _LIB.cowrie_statepage_open_full.argtypes = [
     ctypes.POINTER(ctypes.c_void_p),
 ]
 _LIB.cowrie_statepage_open_full.restype = ctypes.c_int
+_LIB.cowrie_statepage_open_strict.argtypes = [
+    ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
+    ctypes.c_int, ctypes.c_int, ctypes.c_uint8,
+    ctypes.POINTER(ctypes.c_void_p),
+]
+_LIB.cowrie_statepage_open_strict.restype = ctypes.c_int
 _LIB.cowrie_statepage_data.argtypes = [ctypes.c_void_p]
 _LIB.cowrie_statepage_data.restype = ctypes.c_void_p
 _LIB.cowrie_statepage_len.argtypes = [ctypes.c_void_p]
@@ -134,6 +201,12 @@ _LIB.cowrie_statepage_hmac_verified.argtypes = [ctypes.c_void_p]
 _LIB.cowrie_statepage_hmac_verified.restype = ctypes.c_uint8
 _LIB.cowrie_statepage_hash_mode.argtypes = [ctypes.c_void_p]
 _LIB.cowrie_statepage_hash_mode.restype = ctypes.c_uint8
+_LIB.cowrie_statepage_model_sha.argtypes = [ctypes.c_void_p]
+_LIB.cowrie_statepage_model_sha.restype = ctypes.c_char_p
+_LIB.cowrie_statepage_doc_cid.argtypes = [ctypes.c_void_p]
+_LIB.cowrie_statepage_doc_cid.restype = ctypes.c_char_p
+_LIB.cowrie_statepage_state_sha.argtypes = [ctypes.c_void_p]
+_LIB.cowrie_statepage_state_sha.restype = ctypes.c_char_p
 _LIB.cowrie_statepage_close.argtypes = [ctypes.c_void_p]
 
 _LIB.cowrie_ivf_open.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p)]
@@ -179,6 +252,8 @@ _LIB.cowrie_wal_len.argtypes = [ctypes.c_void_p]
 _LIB.cowrie_wal_len.restype = ctypes.c_size_t
 _LIB.cowrie_wal_live_len.argtypes = [ctypes.c_void_p]
 _LIB.cowrie_wal_live_len.restype = ctypes.c_size_t
+_LIB.cowrie_wal_live_frame_at.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)]
+_LIB.cowrie_wal_live_frame_at.restype = ctypes.c_int
 _LIB.cowrie_wal_compact_shard.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
 _LIB.cowrie_wal_compact_shard.restype = ctypes.c_int
 _LIB.cowrie_wal_close.argtypes = [ctypes.c_void_p]
@@ -256,14 +331,27 @@ def save_statepage(
     runtime_id: str = "",
     layout_ver: int = 0,
 ):
-    if isinstance(state_bytes, (bytes, bytearray)):
+    keepalive = None
+    if isinstance(state_bytes, bytes):
         nbytes = len(state_bytes)
-        ptr = ctypes.cast(ctypes.c_char_p(bytes(state_bytes)) if isinstance(state_bytes, bytes) else (ctypes.c_char * nbytes).from_buffer(state_bytes), ctypes.c_void_p)
+        keepalive = state_bytes
+        ptr = ctypes.cast(ctypes.c_char_p(keepalive), ctypes.c_void_p) if nbytes > 0 else ctypes.c_void_p(0)
+    elif isinstance(state_bytes, bytearray):
+        nbytes = len(state_bytes)
+        keepalive = (ctypes.c_uint8 * nbytes).from_buffer(state_bytes) if nbytes > 0 else None
+        ptr = ctypes.cast(keepalive, ctypes.c_void_p) if keepalive is not None else ctypes.c_void_p(0)
     else:
         mv = memoryview(state_bytes)
         nbytes = mv.nbytes
-        c_buf = (ctypes.c_uint8 * nbytes).from_buffer(mv)
-        ptr = ctypes.cast(c_buf, ctypes.c_void_p)
+        if nbytes == 0:
+            ptr = ctypes.c_void_p(0)
+        elif not mv.readonly and mv.c_contiguous:
+            keepalive = (ctypes.c_uint8 * nbytes).from_buffer(mv)
+            ptr = ctypes.cast(keepalive, ctypes.c_void_p)
+        else:
+            raw_copy = mv.tobytes()
+            keepalive = raw_copy
+            ptr = ctypes.cast(ctypes.c_char_p(keepalive), ctypes.c_void_p)
     rc = _LIB.cowrie_statepage_save_ext(
         path.encode("utf-8"),
         model_sha.encode("ascii"),
@@ -280,7 +368,7 @@ def save_statepage(
 
 
 class MappedStatePageView:
-    """Zero-copy `mmap` handle over a verified 16 KB `.state.cowrie` shard (compatible with `torch.frombuffer`)."""
+    """Zero-copy read-only `mmap` handle over a verified 16 KB `.state.cowrie` shard."""
 
     def __init__(
         self,
@@ -290,11 +378,13 @@ class MappedStatePageView:
         expected_kv_quant: int = -1,
         expected_ssm_dtype: int = -1,
         verify_hash: bool = True,
+        expected_doc_cid: str = "",
     ):
         self._h = ctypes.c_void_p()
-        rc = _LIB.cowrie_statepage_open_full(
+        rc = _LIB.cowrie_statepage_open_strict(
             path.encode("utf-8"),
             expected_model_sha.encode("ascii") if expected_model_sha else None,
+            expected_doc_cid.encode("ascii") if expected_doc_cid else None,
             expected_runtime_id.encode("ascii") if expected_runtime_id else None,
             expected_kv_quant,
             expected_ssm_dtype,
@@ -308,12 +398,17 @@ class MappedStatePageView:
         self.ssm_dtype = int(_LIB.cowrie_statepage_ssm_dtype(self._h))
         self.hmac_verified = bool(_LIB.cowrie_statepage_hmac_verified(self._h))
         self.hash_mode = int(_LIB.cowrie_statepage_hash_mode(self._h))
+        self.model_sha = _LIB.cowrie_statepage_model_sha(self._h).decode("ascii")
+        self.doc_cid = _LIB.cowrie_statepage_doc_cid(self._h).decode("ascii")
+        self.state_sha = _LIB.cowrie_statepage_state_sha(self._h).decode("ascii")
         addr = _LIB.cowrie_statepage_data(self._h)
         self._carr = (ctypes.c_uint8 * self.state_len).from_address(addr)
 
     @property
     def buffer(self):
-        return memoryview(self._carr)
+        if self._carr is None:
+            raise ValueError("MappedStatePageView is closed")
+        return memoryview(self._carr).toreadonly()
 
     def close(self):
         if getattr(self, "_h", None) and self._h.value:
@@ -338,6 +433,7 @@ def verify_statepage_file(
     verify_hash: bool = True,
     expected_runtime_id: str = "",
     expected_ssm_dtype: int = -1,
+    expected_doc_cid: str = "",
 ):
     with MappedStatePageView(
         path,
@@ -346,6 +442,7 @@ def verify_statepage_file(
         expected_kv_quant=expected_kv_quant,
         expected_ssm_dtype=expected_ssm_dtype,
         verify_hash=verify_hash,
+        expected_doc_cid=expected_doc_cid,
     ) as mp:
         return {
             "state_len": mp.state_len,
@@ -354,26 +451,49 @@ def verify_statepage_file(
             "ssm_dtype": mp.ssm_dtype,
             "hmac_verified": mp.hmac_verified,
             "hash_mode": mp.hash_mode,
+            "model_sha": mp.model_sha,
+            "doc_cid": mp.doc_cid,
+            "state_sha": mp.state_sha,
         }
 
 
+def _validate_action_and_u64(action: str, *timestamps: int) -> int:
+    if action not in ACTION_CODES:
+        raise ValueError(f"Unknown Cowrie action: {action!r}")
+    for ts in timestamps:
+        if not isinstance(ts, int) or isinstance(ts, bool) or ts < 0 or ts > _U64_MAX:
+            raise ValueError(f"Timestamp out of uint64 range: {ts!r}")
+    return ACTION_CODES[action]
+
+
 def ed25519_pubkey(seed_32: bytes) -> bytes:
-    assert len(seed_32) == 32
+    if not isinstance(seed_32, (bytes, bytearray)) or len(seed_32) != 32:
+        raise ValueError("seed_32 must be exactly 32 bytes")
     out = ctypes.create_string_buffer(32)
-    _check(_LIB.cowrie_ed25519_pubkey(seed_32, out))
+    _check(_LIB.cowrie_ed25519_pubkey(bytes(seed_32), out))
     return out.raw
 
 
 def sign_declassification(seed_32: bytes, target_cid_34: bytes, action: str, expiry_unix: int) -> bytes:
-    assert len(seed_32) == 32 and len(target_cid_34) == 34
+    if not isinstance(seed_32, (bytes, bytearray)) or len(seed_32) != 32:
+        raise ValueError("seed_32 must be exactly 32 bytes")
+    if not isinstance(target_cid_34, (bytes, bytearray)) or len(target_cid_34) != 34:
+        raise ValueError("target_cid_34 must be exactly 34 bytes")
+    act_code = _validate_action_and_u64(action, expiry_unix)
     out = ctypes.create_string_buffer(64)
-    _check(_LIB.cowrie_declassify_sign(seed_32, target_cid_34, ACTION_CODES[action], expiry_unix, out))
+    _check(_LIB.cowrie_declassify_sign(bytes(seed_32), bytes(target_cid_34), act_code, expiry_unix, out))
     return out.raw
 
 
 def verify_declassification(pubkey_32: bytes, target_cid_34: bytes, action: str, expiry_unix: int, sig_64: bytes, now_unix: int) -> bool:
-    assert len(pubkey_32) == 32 and len(target_cid_34) == 34 and len(sig_64) == 64
-    rc = _LIB.cowrie_declassify_verify(pubkey_32, target_cid_34, ACTION_CODES[action], expiry_unix, sig_64, now_unix)
+    if not isinstance(pubkey_32, (bytes, bytearray)) or len(pubkey_32) != 32:
+        raise ValueError("pubkey_32 must be exactly 32 bytes")
+    if not isinstance(target_cid_34, (bytes, bytearray)) or len(target_cid_34) != 34:
+        raise ValueError("target_cid_34 must be exactly 34 bytes")
+    if not isinstance(sig_64, (bytes, bytearray)) or len(sig_64) != 64:
+        raise ValueError("sig_64 must be exactly 64 bytes")
+    act_code = _validate_action_and_u64(action, expiry_unix, now_unix)
+    rc = _LIB.cowrie_declassify_verify(bytes(pubkey_32), bytes(target_cid_34), act_code, expiry_unix, bytes(sig_64), now_unix)
     return rc == 0
 
 
@@ -391,13 +511,23 @@ class Wal:
         return int(seq.value), cid.raw
 
     def append_tombstone(self, cid_34: bytes, fsync: bool = False) -> int:
-        assert len(cid_34) == 34
+        if not isinstance(cid_34, (bytes, bytearray)) or len(cid_34) != 34:
+            raise ValueError("cid_34 must be exactly 34 bytes")
         seq = ctypes.c_uint64(0)
-        _check(_LIB.cowrie_wal_append_tombstone(self._h, cid_34, 1 if fsync else 0, ctypes.byref(seq)))
+        _check(_LIB.cowrie_wal_append_tombstone(self._h, bytes(cid_34), 1 if fsync else 0, ctypes.byref(seq)))
         return int(seq.value)
 
     def live_len(self) -> int:
         return int(_LIB.cowrie_wal_live_len(self._h))
+
+    def live_frames(self) -> List[bytes]:
+        n = self.live_len()
+        out_list: List[bytes] = []
+        for i in range(n):
+            buf = CowrieBuf()
+            _check(_LIB.cowrie_wal_live_frame_at(self._h, i, ctypes.byref(buf)))
+            out_list.append(_take_buf(buf))
+        return out_list
 
     def __len__(self) -> int:
         return int(_LIB.cowrie_wal_len(self._h))
@@ -546,16 +676,35 @@ def decode_to_json(frame: bytes) -> str:
 
 
 def project_lens(frame: bytes, tier: str = "r2", tensor_count: int = 0) -> str:
-    tmap = {"r0": 0, "r1": 1, "r2": 2}
+    tmap = {"r0": 0, "r1": 1, "r2": 2, "r3": 3}
+    if tier not in tmap:
+        raise ValueError(f"Unknown Cowrie lens tier: {tier!r} (expected r0, r1, r2, or r3)")
     out = CowrieBuf()
     rc = _LIB.cowrie_project_lens(frame, len(frame), tmap[tier], tensor_count, ctypes.byref(out))
     _check(rc)
     return _take_buf(out).decode("utf-8")
 
 
+def project_r2_compact(frame: bytes) -> str:
+    """Trust-tiered R2-Compact lens (B2-a): compact single-line header for clean verified/policy frames, full Mealy fence otherwise."""
+    out = CowrieBuf()
+    rc = _LIB.cowrie_project_r2_compact(frame, len(frame), ctypes.byref(out))
+    _check(rc)
+    return _take_buf(out).decode("utf-8")
+
+
+def extract_field(frame: bytes, path: str) -> str:
+    """Strictly verify a COWR frame and extract the exact value at `path` (`/a/0/b` or `a[0].b`) as lossless JSON."""
+    if not isinstance(path, str):
+        raise ValueError("path must be str")
+    pb = path.encode("utf-8")
+    out = CowrieBuf()
+    rc = _LIB.cowrie_extract_field(frame, len(frame), pb, len(pb), ctypes.byref(out))
+    _check(rc)
+    return _take_buf(out).decode("utf-8")
+
+
 def pack_single_shard(frame: bytes) -> bytes:
-    _LIB.cowrie_shard_pack_single.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(CowrieBuf)]
-    _LIB.cowrie_shard_pack_single.restype = ctypes.c_int32
     out = CowrieBuf()
     rc = _LIB.cowrie_shard_pack_single(frame, len(frame), ctypes.byref(out))
     _check(rc)
@@ -567,6 +716,16 @@ def verify_shard(shard: bytes) -> bytes:
     rc = _LIB.cowrie_shard_verify(shard, len(shard), root)
     _check(rc)
     return root.raw
+
+
+def resolved_frame_cid(shard: bytes, frame_idx: int = 0) -> bytes:
+    """Compute the repack-stable 34-byte resolved CID committing to frame descriptor + referenced Plane C tensors."""
+    if not isinstance(frame_idx, int) or frame_idx < 0:
+        raise ValueError("frame_idx must be a non-negative int")
+    cid = ctypes.create_string_buffer(34)
+    rc = _LIB.cowrie_shard_resolved_frame_cid(shard, len(shard), frame_idx, cid)
+    _check(rc)
+    return cid.raw
 
 
 def propagate_authority(base_auth: int, parent_auths) -> int:

@@ -27,6 +27,7 @@ typedef struct {
   int           (*sp_save_ext)(const char*, const char*, const char*, const char*, uint16_t, uint32_t, uint8_t, uint8_t, const uint8_t*, size_t);
   int           (*sp_open_checked)(const char*, const char*, int, uint8_t, CowrieStatePageHandle**);
   int           (*sp_open_full)(const char*, const char*, const char*, int, int, uint8_t, CowrieStatePageHandle**);
+  int           (*sp_open_strict)(const char*, const char*, const char*, const char*, int, int, uint8_t, CowrieStatePageHandle**);
   const uint8_t* (*sp_data)(const CowrieStatePageHandle*);
   size_t        (*sp_len)(const CowrieStatePageHandle*);
   void          (*sp_close)(CowrieStatePageHandle*);
@@ -77,16 +78,18 @@ static bool cowrie_init_api(void) {
   if (cowrie_api.loaded != 0) {
     return cowrie_api.loaded > 0;
   }
-  const char* cands[5] = {
+  const char* cands[7] = {
     getenv("COWRIE_LIB"),
+    getenv("COWRIE_LIB_PATH"),
     "/tmp/cowrie-cargo-target/release/libcowrie_core.so",
+    "/tmp/cowrie-cargo-target/release/libcowrie_core.dylib",
     "/home/omen/.local/lib/libcowrie_core.so",
     "libcowrie_core.so",
     NULL
   };
   void* dl = NULL;
-  for (int i = 0; cands[i] != NULL; i += 1) {
-    if (cands[i][0] == 0) continue;
+  for (int i = 0; i < 6; i += 1) {
+    if (!cands[i] || cands[i][0] == 0) continue;
     dl = dlopen(cands[i], RTLD_LAZY | RTLD_LOCAL);
     if (dl != NULL) break;
   }
@@ -104,6 +107,7 @@ static bool cowrie_init_api(void) {
   cowrie_api.sp_save_ext     = (int (*)(const char*, const char*, const char*, const char*, uint16_t, uint32_t, uint8_t, uint8_t, const uint8_t*, size_t))dlsym(dl, "cowrie_statepage_save_ext");
   cowrie_api.sp_open_checked = (int (*)(const char*, const char*, int, uint8_t, CowrieStatePageHandle**))dlsym(dl, "cowrie_statepage_open_checked");
   cowrie_api.sp_open_full    = (int (*)(const char*, const char*, const char*, int, int, uint8_t, CowrieStatePageHandle**))dlsym(dl, "cowrie_statepage_open_full");
+  cowrie_api.sp_open_strict  = (int (*)(const char*, const char*, const char*, const char*, int, int, uint8_t, CowrieStatePageHandle**))dlsym(dl, "cowrie_statepage_open_strict");
   cowrie_api.sp_data         = (const uint8_t* (*)(const CowrieStatePageHandle*))dlsym(dl, "cowrie_statepage_data");
   cowrie_api.sp_len          = (size_t (*)(const CowrieStatePageHandle*))dlsym(dl, "cowrie_statepage_len");
   cowrie_api.sp_close        = (void (*)(CowrieStatePageHandle*))dlsym(dl, "cowrie_statepage_close");
@@ -187,9 +191,11 @@ static unsigned cowrie_pfx_try_load(const u32* ids, u32 n) {
     }
     double t0 = cowrie_now_ms();
     CowrieStatePageHandle* h = NULL;
-    int rc = cowrie_api.sp_open_full
-        ? cowrie_api.sp_open_full(path, msha, LLB_COWRIE_RUNTIME_ID, kvq, 2 /* F32 SSM */, 1, &h)
-        : cowrie_api.sp_open_checked(path, msha, kvq, 1, &h);
+    int rc = cowrie_api.sp_open_strict
+        ? cowrie_api.sp_open_strict(path, msha, psha, LLB_COWRIE_RUNTIME_ID, kvq, 2 /* F32 SSM */, 1, &h)
+        : cowrie_api.sp_open_full
+            ? cowrie_api.sp_open_full(path, msha, LLB_COWRIE_RUNTIME_ID, kvq, 2 /* F32 SSM */, 1, &h)
+            : cowrie_api.sp_open_checked(path, msha, kvq, 1, &h);
     if (rc != 0) {
       fprintf(stderr, "cowrie: rejected %s: %s (rc=%d)\n", path, cowrie_api.err_name(rc), rc);
       if (K == pfx_C) break;
@@ -204,7 +210,14 @@ static unsigned cowrie_pfx_try_load(const u32* ids, u32 n) {
     }
     EurekaStateHdr hdr;
     memcpy(&hdr, data, sizeof hdr);
-    if (memcmp(hdr.magic, "EUSP", 4) != 0 || hdr.version != 1 || hdr.pos != K) {
+    if (memcmp(hdr.magic, "EUSP", 4) != 0 || hdr.version != 1 || hdr.pos != K
+        || hdr.nl != cowrie_nl || hdr.kv_type != llb_kv_type) {
+      cowrie_api.sp_close(h);
+      if (K == pfx_C) break;
+      continue;
+    }
+    size_t meta_min = sizeof(EurekaStateHdr) + (size_t)K * sizeof(u32) + hdr.nl + (size_t)hdr.nl * sizeof(u32);
+    if (dlen < meta_min) {
       cowrie_api.sp_close(h);
       if (K == pfx_C) break;
       continue;
@@ -218,11 +231,20 @@ static unsigned cowrie_pfx_try_load(const u32* ids, u32 n) {
     cowrie_arm_h = h;
     cowrie_arm_K = K;
     cowrie_arm_t0 = t0;
-    cowrie_arm_layer_off = sizeof(EurekaStateHdr) + (size_t)K * sizeof(u32) + hdr.nl + (size_t)hdr.nl * sizeof(u32);
+    cowrie_arm_layer_off = meta_min;
     snprintf(cowrie_arm_path, sizeof cowrie_arm_path, "%s", path);
     return K;
   }
   return 0;
+}
+
+static void cowrie_disarm_restore(const char* reason) {
+  fprintf(stderr, "cowrie: %s — disarming StatePage restore and falling back cleanly\n", reason);
+  if (cowrie_arm_h) {
+    cowrie_api.sp_close(cowrie_arm_h);
+    cowrie_arm_h = NULL;
+  }
+  cowrie_arm_K = 0;
 }
 
 static void cowrie_pfx_plan_save(const u32* ids, u32 n, u32 restored_start) {
@@ -249,22 +271,28 @@ static void cowrie_restore_layer(u32 i, bool full, u32 pos, LlbShape sh) {
   if (hdr.nl != cowrie_nl || hdr.kv_type != llb_kv_type
       || hdr.d != sh.d || hdr.nh != sh.nh || hdr.nkv != sh.nkv || hdr.hd != sh.hd
       || hdr.lkh != sh.lkh || hdr.lvh != sh.lvh || hdr.sd != sh.sd) {
-    err_fail("cowrie: StatePage shape or kv_type mismatch");
+    cowrie_disarm_restore("StatePage shape or kv_type mismatch");
+    return;
   }
   const uint8_t* is_full_arr = data + sizeof(EurekaStateHdr) + (size_t)hdr.pos * sizeof(u32);
   const u32* r_arr = (const u32*)(is_full_arr + hdr.nl);
   if ((is_full_arr[i] != 0) != full) {
-    err_fail("cowrie: StatePage layer type mismatch");
+    cowrie_disarm_restore("StatePage layer type mismatch");
+    return;
   }
 
   if (full) {
     pass_kv(i, pos, sh);
     size_t rbytes = llb_kv_row_bytes((size_t)sh.nkv * sh.hd);
     size_t kv_bytes = (size_t)hdr.pos * rbytes;
-    if (cowrie_arm_layer_off + 2 * kv_bytes > dlen) err_fail("cowrie: StatePage truncated (KV)");
+    if (cowrie_arm_layer_off + 2 * kv_bytes > dlen) {
+      cowrie_disarm_restore("StatePage truncated (KV)");
+      return;
+    }
     if (!llb_write(pass_kc[i], data + cowrie_arm_layer_off, kv_bytes)
         || !llb_write(pass_vc[i], data + cowrie_arm_layer_off + kv_bytes, kv_bytes)) {
-      err_fail("cowrie: StatePage DMA restore failed (KV)");
+      cowrie_disarm_restore("StatePage DMA restore failed (KV)");
+      return;
     }
     cowrie_arm_layer_off += 2 * kv_bytes;
   } else {
@@ -275,10 +303,14 @@ static void cowrie_restore_layer(u32 i, bool full, u32 pos, LlbShape sh) {
       pass_b[i] = pass_zero(4 * (size_t)cv);
       pass_S[i] = pass_zero((size_t)sh.lvh * sh.sd * sh.sd);
     }
-    if (cowrie_arm_layer_off + nb + ns > dlen) err_fail("cowrie: StatePage truncated (GDN)");
+    if (cowrie_arm_layer_off + nb + ns > dlen) {
+      cowrie_disarm_restore("StatePage truncated (GDN)");
+      return;
+    }
     if (!llb_write(pass_b[i], data + cowrie_arm_layer_off, nb)
         || !llb_write(pass_S[i], data + cowrie_arm_layer_off + nb, ns)) {
-      err_fail("cowrie: StatePage DMA restore failed (GDN)");
+      cowrie_disarm_restore("StatePage DMA restore failed (GDN)");
+      return;
     }
     pass_r[i] = r_arr[i];
     cowrie_arm_layer_off += nb + ns;

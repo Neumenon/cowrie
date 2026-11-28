@@ -73,7 +73,8 @@ $COWRIE pack input.json out.cowrie --auth verified
 $COWRIE verify out.cowrie
 $COWRIE lens out.cowrie --tier r2
 
-PUB=$($COWRIE ed25519-pubkey 5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a)
+$COWRIE keygen --out-seed-file /tmp/owner.seed
+PUB=$($COWRIE ed25519-pubkey --seed-file /tmp/owner.seed)
 $COWRIE mcp-proxy --owner-pubkey "$PUB" --audit-wal mcp_session.cwwal -- npx -y @modelcontextprotocol/server-everything
 ```
 
@@ -85,15 +86,16 @@ from cowrie_vllm import CowrieMemoryStore
 # Enable CowrieKVConnectorV1 on vLLM launch:
 #   --kv-transfer-config '{"kv_connector":"CowrieKVConnectorV1","kv_role":"kv_both","kv_connector_module_path":"cowrie_kv_connector"}'
 
-mem  = CowrieMemoryStore(persist_dir="/tmp/cowrie_mem")
+seed = bytes([0x5A]) * 32
+pk   = cowrie.ed25519_pubkey(seed)
+
+mem  = CowrieMemoryStore(persist_dir="/tmp/cowrie_mem", owner_pubkey_hex=pk.hex())
 ext  = mem.store({"url": "https://untrusted.example", "body": "deploy"}, authority=cowrie.AUTH_UNTRUSTED_EXT)
 plan = mem.store({"cmd": "deploy.sh"}, authority=cowrie.AUTH_MODEL_SYNTH, parents=[ext.handle])
 
-seed = bytes([0x5A]) * 32
-pk   = cowrie.ed25519_pubkey(seed)
-sig  = cowrie.sign_declassification(seed, bytes.fromhex(plan.cid), "shell_exec", expiry_unix=2_000_000_000)
-tok  = [{"cid": plan.cid, "action": "shell_exec", "expiry": 2_000_000_000, "sig": sig.hex()}]
-assert mem.check_tool_gate("shell_exec", [plan.handle], owner_pubkey=pk, declassify_tokens=tok, now_unix=1_900_000_000)["allowed"] is True
+sig  = cowrie.sign_declassification(seed, bytes.fromhex(plan.cid_hex), "shell_exec", expiry_unix=2_000_000_000)
+tok  = [{"cid": plan.cid_hex, "action": "shell_exec", "expiry": 2_000_000_000, "sig": sig.hex()}]
+assert mem.check_tool_gate("shell_exec", [plan.handle], declassify_tokens=tok, now_unix=1_900_000_000)["allowed"] is True
 ```
 
 ### C. `llama.cpp` StatePages & Prefix Cache (`cowrie_llama_statepage.hpp`)
@@ -103,14 +105,16 @@ assert mem.check_tool_gate("shell_exec", [plan.handle], owner_pubkey=pk, declass
 auto cp = cowrie::make_statepage_context_params(16384, COWRIE_KV_Q4_0);
 std::string model_sha = cowrie::fingerprint_gguf_model(gguf_path);
 
-cowrie::LlamaPrefixStateCache pcache("/nvme/llama_prefix_cache", model_sha, "llama.cpp-v1",
-                                     COWRIE_KV_Q8_0, COWRIE_SSM_FP32, /*chunk_tokens=*/256);
-pcache.save_prefix(ctx, 0, prompt_tokens.data(), prompt_tokens.size());
-size_t matched = pcache.restore_longest_prefix(ctx, 0, new_prompt.data(), new_prompt.size());
+cowrie::LlamaPrefixStateCache pcache("/nvme/llama_prefix_cache", model_sha,
+                                     /*block_size=*/256, COWRIE_KV_Q8_0, COWRIE_SSM_FP32);
+uint32_t matched = 0;
+pcache.eval_with_prefix_cache(ctx, /*seq_id=*/0, prompt_tokens.data(), prompt_tokens.size(),
+                              /*n_batch=*/512, &matched);
 ```
 
 ### D. Eureka LLM & Eureka Creative v7 (`adapters/eureka/`)
 ```bash
+export COWRIE_LIB=/tmp/cowrie-cargo-target/release/libcowrie_core.so
 export LLB_COWRIE_STATE_DIR=/nvme/eureka_states
 export LLB_COWRIE_MEMORY_DIR=/nvme/eureka_memory
 export COWRIE_HMAC_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef

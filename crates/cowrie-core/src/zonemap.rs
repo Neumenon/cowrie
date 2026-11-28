@@ -6,21 +6,40 @@
 //! directory in Plane D. Point and narrow-range queries `pread` ONLY matching 16 KB pages,
 //! verifying each page's hardware SHA-NI Merkle leaf and filtering `0x04`/`0x80` taint in O(1).
 
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{FileExt, OpenOptionsExt};
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::canonical::verify_frame_zero_alloc;
 use crate::sha256::{merkle_leaf, parallel_for, shard_merkle_root_from_leaves};
-use crate::shard::{align_16kb, PAGE_ALIGN};
+use crate::shard::{checked_align_16kb, PAGE_ALIGN};
 use crate::trust::is_tainted;
 use crate::CowrieError;
 
 pub const ZONEMAP_MAGIC: &[u8; 4] = b"CWZM";
 pub const ZONE_ENTRY_BYTES: usize = 64; // 4 * i64 (32B) + leaf_sha256 (32B) = 1 CPU cache line!
 const REC_SLOT_BYTES: usize = 20;       // key:i64 + sec:i64 + rel_off:u16 + len:u16
+const MAX_ZONED_PAGES: usize = 4_194_304;
+
+static ZM_TMP_NONCE: AtomicU64 = AtomicU64::new(1);
+
+#[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+const ZM_O_NOFOLLOW: i32 = 0o100000;
+#[cfg(all(target_os = "linux", not(any(target_arch = "aarch64", target_arch = "arm"))))]
+const ZM_O_NOFOLLOW: i32 = 0o400000;
+#[cfg(target_os = "macos")]
+const ZM_O_NOFOLLOW: i32 = 0x0100;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+const ZM_O_NOFOLLOW: i32 = 0;
+
+fn unique_zm_tmp_path(path: &Path) -> PathBuf {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or("shard.cwzm");
+    let seq = ZM_TMP_NONCE.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(".{}.{}.{}.tmp", fname, std::process::id(), seq))
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PageZoneEntry {
@@ -112,12 +131,20 @@ pub fn write_zoned_shard(
         pages.push(page);
     }
 
-    let page_count = pages.len() as u32;
+    let page_count = u32::try_from(pages.len()).map_err(|_| CowrieError::AllocLimit)?;
     let pages_off = PAGE_ALIGN as u64;
-    let zonemap_off = pages_off + (pages.len() * PAGE_ALIGN) as u64;
-    let zm_raw_bytes = zones.len() * ZONE_ENTRY_BYTES;
-    let zm_padded = align_16kb(zm_raw_bytes.max(1));
-    let total_bytes = zonemap_off + (zm_padded as u64);
+    let pages_bytes = (pages.len() as u64)
+        .checked_mul(PAGE_ALIGN as u64)
+        .ok_or(CowrieError::AllocLimit)?;
+    let zonemap_off = pages_off.checked_add(pages_bytes).ok_or(CowrieError::AllocLimit)?;
+    let zm_raw_bytes = zones
+        .len()
+        .checked_mul(ZONE_ENTRY_BYTES)
+        .ok_or(CowrieError::AllocLimit)?;
+    let zm_padded = checked_align_16kb(zm_raw_bytes.max(1))?;
+    let total_bytes = zonemap_off
+        .checked_add(zm_padded as u64)
+        .ok_or(CowrieError::AllocLimit)?;
 
     let mut zm_buf = vec![0u8; zm_padded];
     let mut zone_leaves: Vec<[u8; 32]> = Vec::with_capacity(zones.len());
@@ -145,19 +172,36 @@ pub fn write_zoned_shard(
     hdr[40..48].copy_from_slice(&(zm_raw_bytes as u64).to_le_bytes());
     hdr[48..82].copy_from_slice(&mroot);
 
-    let mut f = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|_| CowrieError::IoError)?;
-    f.write_all(&hdr).map_err(|_| CowrieError::IoError)?;
-    for pg in &pages {
-        f.write_all(pg).map_err(|_| CowrieError::IoError)?;
+    let tmp_path = unique_zm_tmp_path(path);
+    let write_res = (|| -> Result<(), CowrieError> {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp_path)
+            .map_err(|_| CowrieError::IoError)?;
+        f.write_all(&hdr).map_err(|_| CowrieError::IoError)?;
+        for pg in &pages {
+            f.write_all(pg).map_err(|_| CowrieError::IoError)?;
+        }
+        f.write_all(&zm_buf).map_err(|_| CowrieError::IoError)?;
+        f.sync_all().map_err(|_| CowrieError::IoError)?;
+        Ok(())
+    })();
+    if let Err(e) = write_res {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
     }
-    f.write_all(&zm_buf).map_err(|_| CowrieError::IoError)?;
-    f.sync_all().map_err(|_| CowrieError::IoError)?;
+    if fs::rename(&tmp_path, path).is_err() {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(CowrieError::IoError);
+    }
+    if let Some(parent) = path.parent() {
+        let p = if parent.as_os_str().is_empty() { Path::new(".") } else { parent };
+        if let Ok(df) = File::open(p) {
+            let _ = df.sync_all();
+        }
+    }
 
     Ok((total_bytes, page_count, mroot))
 }
@@ -182,8 +226,16 @@ pub struct ZonedShardReader {
 
 impl ZonedShardReader {
     pub fn open(path: &Path) -> Result<Self, CowrieError> {
-        let file = File::open(path).map_err(|_| CowrieError::IoError)?;
-        let flen = file.metadata().map_err(|_| CowrieError::IoError)?.len();
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(ZM_O_NOFOLLOW)
+            .open(path)
+            .map_err(|_| CowrieError::IoError)?;
+        let meta = file.metadata().map_err(|_| CowrieError::IoError)?;
+        if !meta.file_type().is_file() {
+            return Err(CowrieError::InvalidContract);
+        }
+        let flen = meta.len();
         if flen < PAGE_ALIGN as u64 {
             return Err(CowrieError::Truncated);
         }
@@ -196,20 +248,37 @@ impl ZonedShardReader {
         if ver != 1 {
             return Err(CowrieError::UnsupportedVer);
         }
+        if hdr[12..16] != [0, 0, 0, 0] || hdr[82..128].iter().any(|&b| b != 0) {
+            return Err(CowrieError::NonCanonicalFlags);
+        }
         let page_count = u32::from_le_bytes(hdr[8..12].try_into().unwrap()) as usize;
+        if page_count > MAX_ZONED_PAGES {
+            return Err(CowrieError::AllocLimit);
+        }
         let record_count = u64::from_le_bytes(hdr[16..24].try_into().unwrap());
         let pages_off = u64::from_le_bytes(hdr[24..32].try_into().unwrap());
         let zonemap_off = u64::from_le_bytes(hdr[32..40].try_into().unwrap());
-        let zm_raw_bytes = u64::from_le_bytes(hdr[40..48].try_into().unwrap()) as usize;
+        let zm_raw_bytes_u64 = u64::from_le_bytes(hdr[40..48].try_into().unwrap());
+        let zm_raw_bytes = usize::try_from(zm_raw_bytes_u64).map_err(|_| CowrieError::AllocLimit)?;
         let mut merkle_root = [0u8; 34];
         merkle_root.copy_from_slice(&hdr[48..82]);
 
-        if (pages_off as usize) % PAGE_ALIGN != 0 || (zonemap_off as usize) % PAGE_ALIGN != 0 {
+        if pages_off < PAGE_ALIGN as u64
+            || pages_off % (PAGE_ALIGN as u64) != 0
+            || zonemap_off % (PAGE_ALIGN as u64) != 0
+        {
             return Err(CowrieError::UnalignedArena);
+        }
+        let pages_bytes = (page_count as u64)
+            .checked_mul(PAGE_ALIGN as u64)
+            .ok_or(CowrieError::AllocLimit)?;
+        let pages_end = pages_off.checked_add(pages_bytes).ok_or(CowrieError::Truncated)?;
+        if pages_end > zonemap_off || pages_end > flen {
+            return Err(CowrieError::Truncated);
         }
         let exp_zm = page_count.checked_mul(ZONE_ENTRY_BYTES).ok_or(CowrieError::AllocLimit)?;
         if zm_raw_bytes != exp_zm
-            || zonemap_off.checked_add(zm_raw_bytes as u64).map_or(true, |e| e > flen)
+            || zonemap_off.checked_add(zm_raw_bytes_u64).map_or(true, |e| e > flen)
         {
             return Err(CowrieError::Truncated);
         }
@@ -275,7 +344,13 @@ impl ZonedShardReader {
 
         parallel_for(page_indices.len(), |slot_idx| {
             let p_idx = page_indices[slot_idx];
-            let disk_off = self.pages_off + (p_idx as u64) * (PAGE_ALIGN as u64);
+            let Some(disk_off) = (p_idx as u64)
+                .checked_mul(PAGE_ALIGN as u64)
+                .and_then(|o| self.pages_off.checked_add(o))
+            else {
+                bad_hash.store(true, Ordering::Release);
+                return;
+            };
             let mut buf = [0u8; PAGE_ALIGN];
             if self.file.read_exact_at(&mut buf, disk_off).is_err() {
                 failed.store(true, Ordering::Release);
@@ -286,7 +361,8 @@ impl ZonedShardReader {
                 return;
             }
             let cnt = u16::from_le_bytes([buf[0], buf[1]]) as usize;
-            if 4 + cnt * REC_SLOT_BYTES > PAGE_ALIGN {
+            let dir_end = 4 + cnt * REC_SLOT_BYTES;
+            if buf[2] != 0 || buf[3] != 0 || dir_end > PAGE_ALIGN {
                 bad_hash.store(true, Ordering::Release);
                 return;
             }
@@ -305,12 +381,15 @@ impl ZonedShardReader {
                 }
                 let roff = u16::from_le_bytes([buf[s + 16], buf[s + 17]]) as usize;
                 let flen = u16::from_le_bytes([buf[s + 18], buf[s + 19]]) as usize;
-                if roff + flen > PAGE_ALIGN || flen < 8 {
+                if roff < dir_end || roff + flen > PAGE_ALIGN || flen < 8 {
                     bad_hash.store(true, Ordering::Release);
                     return;
                 }
                 let fb = &buf[roff..roff + flen];
-                let auth = fb[5];
+                let Ok((auth, _)) = verify_frame_zero_alloc(fb) else {
+                    bad_hash.store(true, Ordering::Release);
+                    return;
+                };
                 if trusted_only && is_tainted(auth) {
                     continue;
                 }

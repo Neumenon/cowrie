@@ -24,9 +24,9 @@ Every runtime adapter below implements the same five core `v1.2` capabilities ov
 
 ## 3. llama.cpp (`adapters/llama-statepage/cowrie_llama_statepage.hpp`)
 - Header-only C++17 drop-in providing:
-  - `cowrie::statepage::save` / `restore` for split-precision hybrid `Q4_0`/`Q8_0`/`FP16` KV + exact `F32` DeltaNet SSM (`49.7×` cold NVMe / `123.2×` warm on `Qwen3.5-9B`, `KL = 3.99e-04`, plus `3.38 GB/s` cold `O_DIRECT` dual-stream CUDA DMA).
-  - `cowrie::statepage::LlamaPrefixStateCache`: Chunked longest-prefix KV/SSM offloader (`13.72×` speedup on brand-new suffix questions: `9.01 ms vs 123.63 ms` cold prefill, `100%` greedy token parity).
-  - `cowrie::statepage::LlamaCowrieMemory` (`.cwwal` + 47-bit handles + `Ed25519` `DeclassifyToken` gate) and `LlamaZonedShard` (`CWZM`).
+  - `cowrie::save_llama_statepage` / `cowrie::restore_llama_statepage` for split-precision hybrid `Q4_0`/`Q8_0`/`FP16` KV + exact `F32` DeltaNet SSM (`49.7×` cold NVMe / `123.2×` warm on `Qwen3.5-9B`, `KL = 3.99e-04`, plus `3.38 GB/s` cold `O_DIRECT` dual-stream CUDA DMA).
+  - `cowrie::LlamaPrefixStateCache`: Chunked longest-prefix KV/SSM offloader (`13.72×` speedup on brand-new suffix questions: `9.01 ms vs 123.63 ms` cold prefill, `100%` greedy token parity, explicit multi-slot `seq_id`, thread-safe LRU eviction).
+  - `cowrie::LlamaCowrieMemory` (`.cwwal` live replay + 47-bit handles + `Ed25519` `DeclassifyToken` gate) and `cowrie::LlamaZonedShard` (`CWZM`).
 
 ## 4. vLLM 0.15+ (`adapters/vllm/cowrie_kv_connector.py` + `cowrie_vllm.py`)
 - **`CowrieKVConnectorV1`:** Native `KVConnectorBase_V1` packing all layers' paged KV blocks into a single `0600` HMAC-authenticated `.state.cowrie` shard (`80.53 ms vs 453.88 ms` cold prefill = `5.64×` cross-process speedup on `11,755` tokens, chunked-prefill safe, `100%` greedy parity).

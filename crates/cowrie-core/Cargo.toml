@@ -3,6 +3,10 @@ name = "cowrie-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "Cowrie: 16 KB-aligned, content-addressed, trust-tagged binary format for local AI runtimes."
 
 [lib]

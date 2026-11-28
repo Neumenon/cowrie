@@ -184,7 +184,7 @@ int main() {
         auto ts0 = clk::now();
         int rc = cowrie::save_llama_statepage(
             ctx, 0, sp_path, sha_9b, doc_cid, (uint32_t)ws_toks.size(),
-            modes[m].kvq, COWRIE_SSM_FP16, &st_bytes
+            modes[m].kvq, COWRIE_SSM_FP32, &st_bytes
         );
         double save_ms = std::chrono::duration<double, std::milli>(clk::now() - ts0).count();
         if (rc != 0) { fprintf(stderr, "save failed: %s\n", cowrie_err_name(rc)); return 4; }

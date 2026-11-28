@@ -10,8 +10,8 @@
   "stage1_bendtt_kernel_verdict": {
     "status": "ALL PROOFS CHECK",
     "trials": 5,
-    "median_ms": 218.33,
-    "min_ms": 215.05
+    "median_ms": 247.47,
+    "min_ms": 245.03
   },
   "stage2_bendtt_coverage_and_hygiene": {
     "status": "PASS",
@@ -79,6 +79,10 @@
       "plane_b_fence_and_table_vectors": 400,
       "plane_a_wire_and_map_vectors": 600,
       "plane_d_zonemap_wal_statepage_vectors": 600
+    },
+    "native_c_abi_lockstep": {
+      "cwzm_multipage_trials": 50,
+      "cwwal_replay_and_zero_tail_trials": 50
     },
     "rust_c_abi_catches_verified": {
       "F1_four_bracket_fence_breakout_fixed": true,

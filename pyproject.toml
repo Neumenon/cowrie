@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cowrie-ai"
+version = "1.2.0"
+description = "16 KB-aligned, content-addressed, provenance-tagged binary container, KV/SSM StatePage offloader, and MCP taint firewall."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+keywords = ["ai", "vllm", "kv-cache", "mcp", "security", "merkle", "ed25519"]
+dependencies = []
+
+[project.optional-dependencies]
+vllm = ["torch>=2.2", "vllm>=0.15.0"]
+
+[project.entry-points."vllm.general_plugins"]
+cowrie_kv_connector = "cowrie_vllm_adapters.cowrie_kv_connector:register_vllm_plugin"
+
+[tool.setuptools]
+package-dir = { "cowrie" = "python/cowrie", "cowrie_vllm_adapters" = "adapters/vllm" }
+packages = ["cowrie", "cowrie_vllm_adapters"]

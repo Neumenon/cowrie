@@ -331,9 +331,89 @@ for (let t = 0; t < 200; t++) {
 }
 
 // =============================================================================
-// 4. 600 LOCKSTEP VECTORS: MULTI-PAGE `CWZM`, DUAL MERKLE, `.cwwal` & `CWSP`
+// 4. 600 LOCKSTEP VECTORS: `CWZM`, DUAL MERKLE (`CWRF`), `.cwwal` & `CWSP` (BEND <-> WASM)
 // =============================================================================
 let storageChecks = 0;
+
+function makeMinimalStatePage(ctxTokens, payloadByte, hmacKeyStr = null) {
+  const PAGE = 16384;
+  const payload = new Uint8Array(64).fill(payloadByte);
+  const shard = W.packSingleShard(W.encodeJson({ s: ctxTokens }, 0x02, 0x01));
+  void shard;
+  // Use WASM SHA-256 to compute exact 4 MiB leaf (0x00 || payload) -> 0x02 count-bound root
+  const leafIn = new Uint8Array(1 + payload.length);
+  leafIn[0] = 0x00;
+  leafIn.set(payload, 1);
+  const leafHex = W.sha256Hex(leafIn);
+  const rootIn = new Uint8Array(2 + 32);
+  rootIn[0] = 0x02;
+  rootIn[1] = 0x01;
+  for (let i = 0; i < 32; i++) rootIn[2 + i] = parseInt(leafHex.slice(2 * i, 2 * i + 2), 16);
+  const stateShaHex = W.sha256Hex(rootIn);
+  const stateShaBytes = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) stateShaBytes[i] = parseInt(stateShaHex.slice(2 * i, 2 * i + 2), 16);
+
+  // Tensor leaf = SHA-256(0x03 || uvarint(64) || stateShaBytes)
+  const tlIn = new Uint8Array(2 + 32);
+  tlIn[0] = 0x03;
+  tlIn[1] = 64;
+  tlIn.set(stateShaBytes, 2);
+  const tlHex = W.sha256Hex(tlIn);
+  const emptyTreeHex = W.sha256Hex(new Uint8Array(0));
+
+  // Shard mroot = 0x12 0x20 || SHA-256(0x04 || 0x00 || emptyTree || 0x01 || tl)
+  const mrIn = new Uint8Array(1 + 1 + 32 + 1 + 32);
+  mrIn[0] = 0x04;
+  mrIn[1] = 0x00;
+  for (let i = 0; i < 32; i++) mrIn[2 + i] = parseInt(emptyTreeHex.slice(2 * i, 2 * i + 2), 16);
+  mrIn[34] = 0x01;
+  for (let i = 0; i < 32; i++) mrIn[35 + i] = parseInt(tlHex.slice(2 * i, 2 * i + 2), 16);
+  const mrHex = W.sha256Hex(mrIn);
+
+  const total = PAGE + PAGE + 94;
+  const buf = new Uint8Array(total);
+  const dv = new DataView(buf.buffer);
+  const encUtf8 = new TextEncoder();
+  buf.set(encUtf8.encode("CWRF"), 0);
+  buf[4] = 1;
+  buf[5] = 14;
+  dv.setUint16(6, 1, true); // FLAG_STATEPAGE
+  dv.setUint32(8, 0, true);
+  dv.setUint32(12, 1, true);
+  dv.setBigUint64(16, 64n, true);
+  dv.setBigUint64(24, 276n, true);
+  dv.setBigUint64(32, BigInt(PAGE), true);
+  dv.setBigUint64(40, BigInt(PAGE), true);
+  dv.setBigUint64(48, BigInt(2 * PAGE), true);
+
+  buf.set(encUtf8.encode("CWSP"), 64);
+  dv.setUint32(68, ctxTokens, true);
+  buf[72] = 1; // kv_quant
+  buf[73] = 2; // ssm_dtype
+  buf[74] = 1; // parallel merkle 4M
+  buf[75] = 0; // no HMAC
+  dv.setBigUint64(80, BigInt(PAGE), true);
+  dv.setBigUint64(88, BigInt(payload.length), true);
+  buf.set(encUtf8.encode("a".repeat(64)), 96);
+  buf.set(encUtf8.encode("b".repeat(64)), 160);
+  buf.set(encUtf8.encode(stateShaHex), 224);
+  buf.set(encUtf8.encode("wasm-v1"), 288);
+  dv.setUint16(304, 1, true);
+
+  buf.set(payload, PAGE);
+
+  const foff = 2 * PAGE;
+  dv.setBigUint64(foff, BigInt(PAGE), true);
+  dv.setBigUint64(foff + 8, BigInt(payload.length), true);
+  buf.set(stateShaBytes, foff + 16);
+  buf[foff + 48] = 0x12;
+  buf[foff + 49] = 0x20;
+  for (let i = 0; i < 32; i++) buf[foff + 50 + i] = parseInt(mrHex.slice(2 * i, 2 * i + 2), 16);
+  dv.setBigUint64(foff + 82, BigInt(foff), true);
+  buf.set(encUtf8.encode("CWRF"), foff + 90);
+  void hmacKeyStr;
+  return buf;
+}
 
 for (let t = 0; t < 600; t++) {
   // A. Single-page Zone-Map zero false-negative check (`L12`)
@@ -396,9 +476,36 @@ for (let t = 0; t < 600; t++) {
   );
   assert.deepEqual(liveAfterReinsert, [0n, cidX]);
 
-  // D. `StatePage` strict `runtime_id` pinning (`L24` / `F7`)
+  // D. `StatePage` strict `runtime_id` pinning (`L24` / `F7`) + live WASM `CWRF` / `CWSP` cross-check!
   assert.equal(fromB(B.check_statepage_runtime({ $: "Some", value: cidX }, { $: "None" })), false);
   assert.equal(fromB(B.check_statepage_runtime({ $: "Some", value: cidX }, { $: "Some", value: cidX })), true);
+
+  if (t % 2 === 0) {
+    // Live WASM `CWRF` 16 KB shard pack + clean verify + single-bit tamper rejection
+    const fWasm = W.encodeJson({ trial: t, lo: Number(lo), hi: Number(hi) }, 0x02, 0x01);
+    const shard = W.packSingleShard(fWasm);
+    const okRes = W.verifyShard(shard);
+    assert.equal(okRes.root.length, 34);
+    const bad = shard.slice();
+    // Alternate Plane A frame flip vs non-zero padding flip vs trailer flip
+    if (t % 6 === 0) bad[64 + (t % fWasm.length)] ^= 0x01;
+    else if (t % 6 === 2) bad[64 + fWasm.length + 1] = 0xFF;
+    else bad[bad.length - 1] ^= 0x01;
+    let badPassed = false;
+    try { W.verifyShard(bad); badPassed = true; } catch { badPassed = false; }
+    assert.equal(badPassed, false, `WASM verifyShard accepted mutated shard at trial ${t}`);
+  } else {
+    // Live WASM `CWSP` StatePage verify + Plane D footer / payload tamper rejection
+    const sp = makeMinimalStatePage(64 + t, (t * 17) & 0xFF);
+    const okSp = W.verifyStatePageBytes(sp, null, true);
+    assert.equal(okSp.ctxTokens, 64 + t);
+    const badSp = sp.slice();
+    if (t % 4 === 1) badSp[16384 + (t % 64)] ^= 0x01; // payload bitflip
+    else badSp[32768 + 55] ^= 0x01; // Plane D footer Merkle root bitflip
+    let badSpPassed = false;
+    try { W.verifyStatePageBytes(badSp, null, true); badSpPassed = true; } catch { badSpPassed = false; }
+    assert.equal(badSpPassed, false, `WASM verifyStatePageBytes accepted tampered StatePage at trial ${t}`);
+  }
 
   storageChecks++;
 }

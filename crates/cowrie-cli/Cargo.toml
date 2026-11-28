@@ -3,7 +3,11 @@ name = "cowrie-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "cowrie — human inspection, verification, and lens projection CLI for Cowrie shards."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "cowrie — inspection, verification, lens projection, and zero-trust MCP proxy CLI for Cowrie."
 
 [[bin]]
 name = "cowrie"

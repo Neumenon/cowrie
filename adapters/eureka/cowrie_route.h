@@ -44,6 +44,8 @@ typedef struct {
     int         (*wal_open)(const char *, uint8_t, CowrieWalHandle **);
     int         (*wal_append)(CowrieWalHandle *, const uint8_t *, size_t, uint8_t, uint64_t *, uint8_t *);
     size_t      (*wal_len)(const CowrieWalHandle *);
+    size_t      (*wal_live_len)(const CowrieWalHandle *);
+    int         (*wal_live_frame_at)(const CowrieWalHandle *, size_t, CowrieSrvBuf *);
 } CowrieSrvApi;
 
 typedef struct {
@@ -62,6 +64,7 @@ static CowrieMemNode   cowrie_mem[COWRIE_MAX_MEM];
 static size_t          cowrie_mem_n;
 static CowrieWalHandle *cowrie_srv_wal;
 static int             cowrie_disk_loaded;
+static unsigned long   cowrie_tmp_seq;
 static pthread_mutex_t cowrie_mem_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void cowrie_hex34(const uint8_t cid[34], char out[69]) {
@@ -138,14 +141,19 @@ static void cowrie_index_raw_frame_locked(const uint8_t *raw, size_t len) {
         memset(slot, 0, sizeof *slot);
     }
     if (slot) {
+        uint8_t *copy = malloc(len > 0 ? len : 1);
+        if (!copy) {
+            free(r0_str);
+            return;
+        }
+        if (len > 0) memcpy(copy, raw, len);
         free(slot->frame_bytes);
         free(slot->r0);
         strcpy(slot->cid_hex, cid_hex);
         strcpy(slot->handle, handle);
         slot->authority = v_auth;
         slot->epistemic = v_epi;
-        slot->frame_bytes = malloc(len);
-        memcpy(slot->frame_bytes, raw, len);
+        slot->frame_bytes = copy;
         slot->frame_len = len;
         slot->r0 = r0_str;
     } else {
@@ -155,16 +163,18 @@ static void cowrie_index_raw_frame_locked(const uint8_t *raw, size_t len) {
 
 static int cowrie_srv_init(void) {
     if (cowrie_srv.loaded != 0) return cowrie_srv.loaded > 0;
-    const char *cands[5] = {
+    const char *cands[7] = {
         getenv("COWRIE_LIB"),
+        getenv("COWRIE_LIB_PATH"),
         "/tmp/cowrie-cargo-target/release/libcowrie_core.so",
+        "/tmp/cowrie-cargo-target/release/libcowrie_core.dylib",
         "/home/omen/.local/lib/libcowrie_core.so",
         "libcowrie_core.so",
         NULL
     };
     void *dl = NULL;
-    for (int i = 0; cands[i]; i++) {
-        if (!cands[i][0]) continue;
+    for (int i = 0; i < 6; i++) {
+        if (!cands[i] || !cands[i][0]) continue;
         dl = dlopen(cands[i], RTLD_LAZY | RTLD_LOCAL);
         if (dl) break;
     }
@@ -185,6 +195,8 @@ static int cowrie_srv_init(void) {
     cowrie_srv.wal_open            = (int (*)(const char *, uint8_t, CowrieWalHandle **))dlsym(dl, "cowrie_wal_open");
     cowrie_srv.wal_append          = (int (*)(CowrieWalHandle *, const uint8_t *, size_t, uint8_t, uint64_t *, uint8_t *))dlsym(dl, "cowrie_wal_append_frame");
     cowrie_srv.wal_len             = (size_t (*)(const CowrieWalHandle *))dlsym(dl, "cowrie_wal_len");
+    cowrie_srv.wal_live_len        = (size_t (*)(const CowrieWalHandle *))dlsym(dl, "cowrie_wal_live_len");
+    cowrie_srv.wal_live_frame_at   = (int (*)(const CowrieWalHandle *, size_t, CowrieSrvBuf *))dlsym(dl, "cowrie_wal_live_frame_at");
     if (!cowrie_srv.buf_free || !cowrie_srv.err_name || !cowrie_srv.frame_verify || !cowrie_srv.encode_json
         || !cowrie_srv.project_lens || !cowrie_srv.propagate_authority || !cowrie_srv.is_tainted) {
         cowrie_srv.loaded = -1;
@@ -202,7 +214,17 @@ static int cowrie_srv_init(void) {
             if (cowrie_srv.wal_open) {
                 char wpath[1024];
                 snprintf(wpath, sizeof wpath, "%s/memory.cwwal", mdir);
-                cowrie_srv.wal_open(wpath, 1, &cowrie_srv_wal);
+                if (cowrie_srv.wal_open(wpath, 1, &cowrie_srv_wal) == 0 && cowrie_srv_wal
+                    && cowrie_srv.wal_live_len && cowrie_srv.wal_live_frame_at) {
+                    size_t nlive = cowrie_srv.wal_live_len(cowrie_srv_wal);
+                    for (size_t i = 0; i < nlive; i++) {
+                        CowrieSrvBuf fb = {0};
+                        if (cowrie_srv.wal_live_frame_at(cowrie_srv_wal, i, &fb) == 0 && fb.data && fb.len > 0) {
+                            cowrie_index_raw_frame_locked(fb.data, fb.len);
+                            cowrie_srv.buf_free(fb);
+                        }
+                    }
+                }
             }
             DIR *d = opendir(mdir);
             if (d) {
@@ -242,13 +264,14 @@ static uint8_t cowrie_parse_auth_str(const char *s) {
     return 0x04;
 }
 
-static const char *cowrie_auth_name(uint8_t a) {
-    static char buf[32];
-    const char *base = (a & 0x0F) == 0x01 ? "SYS_POLICY"
-        : (a & 0x0F) == 0x02 ? "VERIFIED_TOOL"
-        : (a & 0x0F) == 0x04 ? "UNTRUSTED_EXT"
-        : (a & 0x0F) == 0x08 ? "MODEL_SYNTH" : "MIXED";
-    snprintf(buf, sizeof buf, "%s%s", base, (a & 0x80) ? "|TAINTED" : "");
+static const char *cowrie_auth_name_buf(uint8_t a, char buf[32]) {
+    uint8_t low = a & 0x0F;
+    const char *base = low == 0x01 ? "SYS_POLICY"
+        : low == 0x02 ? "VERIFIED_TOOL"
+        : low == 0x04 ? "UNTRUSTED_EXT"
+        : low == 0x08 ? "MODEL_SYNTH"
+        : (low & 0x04) ? "MIXED|UNTRUSTED" : "MIXED";
+    snprintf(buf, 32, "%s%s", base, (a & 0x80) ? "|TAINTED" : "");
     return buf;
 }
 
@@ -285,6 +308,10 @@ static void handle_cowrie_store(Conn *c, const char *body_s) {
     const jv *pv = json_get(body, "parents");
     size_t p_cap = (pv && pv->type == J_ARR && pv->n > 0) ? pv->n : 1;
     uint8_t *parent_auths = malloc(p_cap);
+    if (!parent_auths) {
+        json_free(body);
+        return err_reply(c, 500, "server_error", "OOM allocating parent authority buffer");
+    }
     size_t nparents = 0;
     pthread_mutex_lock(&cowrie_mem_lock);
     if (pv && pv->type == J_ARR) {
@@ -330,14 +357,24 @@ static void handle_cowrie_store(Conn *c, const char *body_s) {
         chmod(mdir, 0700);
         char fpath[1024], tpath[1024];
         snprintf(fpath, sizeof fpath, "%s/%s.cwfr", mdir, cid_hex);
-        snprintf(tpath, sizeof tpath, "%s/.%s.%d.tmp", mdir, cid_hex, (int)getpid());
+        unsigned long seq_n = ++cowrie_tmp_seq;
+        snprintf(tpath, sizeof tpath, "%s/.%s.%d.%lu.tmp", mdir, cid_hex, (int)getpid(), seq_n);
         int fd = open(tpath, O_WRONLY | O_CREAT | O_EXCL, 0600);
         if (fd >= 0) {
-            ssize_t wr = write(fd, wire.data, wire.len);
-            (void)wr;
-            fsync(fd);
-            close(fd);
-            rename(tpath, fpath);
+            size_t written = 0;
+            int write_ok = 1;
+            while (written < wire.len) {
+                ssize_t wr = write(fd, wire.data + written, wire.len - written);
+                if (wr <= 0) { write_ok = 0; break; }
+                written += (size_t)wr;
+            }
+            if (write_ok && fsync(fd) == 0) {
+                close(fd);
+                if (rename(tpath, fpath) != 0) unlink(tpath);
+            } else {
+                close(fd);
+                unlink(tpath);
+            }
         }
     }
 
@@ -349,11 +386,12 @@ static void handle_cowrie_store(Conn *c, const char *body_s) {
     cowrie_srv.buf_free(wire);
     pthread_mutex_unlock(&cowrie_mem_lock);
 
+    char auth_buf[32];
     sb out = {0};
     sb_add(&out, "{\"cid\":"); json_quote(&out, cid_hex);
     sb_add(&out, ",\"handle\":"); json_quote(&out, handle);
     sb_fmt(&out, ",\"authority\":%u,\"authority_label\":", (unsigned)eff_auth);
-    json_quote(&out, cowrie_auth_name(eff_auth));
+    json_quote(&out, cowrie_auth_name_buf(eff_auth, auth_buf));
     sb_fmt(&out, ",\"tainted\":%s,\"bytes\":%zu,\"wal_entries\":%zu,\"r0\":",
         cowrie_srv.is_tainted(eff_auth) ? "true" : "false", flen, wal_cnt);
     json_quote(&out, r0_dup);
@@ -479,22 +517,26 @@ static int cowrie_eval_gate_jv(
     char out_culprit[96],
     int *out_declassified
 ) {
+    (void)req_pubkey_hex; // NEVER accept caller-supplied trust anchor over HTTP!
     out_culprit[0] = 0;
     if (out_declassified) *out_declassified = 0;
     int acode = cowrie_srv_action_code(action);
     int priv = (acode != 0);
     if (!priv) return 1;
-    if (unsigned_override) return 1;
+    const char *allow_ov = getenv("COWRIE_ALLOW_UNSIGNED_OVERRIDE");
+    if (unsigned_override && allow_ov && strcmp(allow_ov, "1") == 0) return 1;
 
     if (!args || args->type != J_ARR || args->n == 0) {
         snprintf(out_culprit, 96, "<empty_lineage>");
         return 0;
     }
 
-    const char *pk_hex = (req_pubkey_hex && req_pubkey_hex[0]) ? req_pubkey_hex : getenv("COWRIE_OWNER_PUBKEY");
+    // Strictly pin verification to server-configured COWRIE_OWNER_PUBKEY.
+    const char *pk_hex = getenv("COWRIE_OWNER_PUBKEY");
     uint8_t pk[32];
     const uint8_t *pk_ptr = (pk_hex && cowrie_parse_hex_n(pk_hex, pk, 32)) ? pk : NULL;
-    uint64_t now_ts = (uint64_t)time(NULL);
+    time_t now_raw = time(NULL);
+    uint64_t now_ts = (now_raw > 0) ? (uint64_t)now_raw : UINT64_MAX;
 
     int allowed = 1;
     pthread_mutex_lock(&cowrie_mem_lock);

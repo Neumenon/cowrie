@@ -20,9 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "python"))
 sys.path.insert(0, str(ROOT / "adapters" / "vllm"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import cowrie
 from cowrie_vllm import CowrieMemoryStore
+from independent_cowr_oracle import OracleError, verify_and_decode_cowr
 
 
 def expect_err(fn, expected_code: str):
@@ -37,19 +39,25 @@ def main():
     vec_path = ROOT / "tests" / "vectors.json"
     v = json.loads(vec_path.read_text())
 
-    # 1. 50 golden + 100 fuzz canonical frames bit-for-bit CID & metadata verification
+    # 1. 50 golden + 100 fuzz canonical frames verified by BOTH libcowrie_core AND independent pure-Python oracle
     for grp in ("golden", "fuzz"):
         for item in v[grp]:
             raw = bytes.fromhex(item["wire_hex"])
             res = cowrie.verify_frame(raw)
-            assert res["authority"] == item["auth"]
-            assert res["epistemic"] == item["epi"]
-            assert res["cid"].hex() == item["cid_hex"], f"{item['id']} CID mismatch"
+            ores = verify_and_decode_cowr(raw)
+            assert res["authority"] == item["auth"] == ores["authority"]
+            assert res["epistemic"] == item["epi"] == ores["epistemic"]
+            assert res["cid"].hex() == item["cid_hex"] == ores["cid"].hex(), f"{item['id']} CID mismatch"
 
-    # 2. 12 anti-malleability negative fixtures -> exact ERR_* ABI match
+    # 2. 12 anti-malleability negative fixtures -> exact ERR_* ABI match in BOTH C-ABI & independent oracle
     for neg in v["negatives"]:
         raw = bytes.fromhex(neg["wire_hex"])
         expect_err(lambda r=raw: cowrie.verify_frame(r), neg["expected_err"])
+        try:
+            verify_and_decode_cowr(raw)
+            raise AssertionError(f"Independent oracle accepted negative {neg['id']}")
+        except OracleError as oe:
+            assert oe.code == neg["expected_err"], f"oracle {neg['id']}: {oe.code} != {neg['expected_err']}"
 
     # 3. 16 KB shard + dual-tree RFC 6962 Merkle root (Plane A frames + Plane C tensor arena)
     clean_shard = bytes.fromhex(v["clean_shard_hex"])
@@ -108,10 +116,42 @@ def main():
     r0 = cowrie.project_lens(w1, "r0", 1)
     handle_tok = r0.split(" ", 1)[0]
     assert handle_tok.startswith("@") and len(handle_tok) == 11 and handle_tok[1:].isalpha() and handle_tok[1:].islower()
+    assert "[VERIFIED_TOOL|" in r0
     assert "Table[3](speedup,status,suite)" in cowrie.project_lens(w1, "r1", 1)
     r2 = cowrie.project_lens(w1, "r2", 1)
     assert "runs[3]{speedup,status,suite}:" in r2 and "<T:i8[512]@nomic-v2:cos>" in r2
     assert r2.count("<<<END:COWRIE") == 1 and r2.count("<<<COWRIE:R2") == 1
+    # B2-a trust-tiered R2-Compact: compact single-line header for verified, full Mealy fence for untrusted
+    r2c_ok = cowrie.project_r2_compact(w1)
+    assert r2c_ok.startswith("[@") and "|VERIFIED_TOOL]\n" in r2c_ok and "<<<COWRIE:R2" not in r2c_ok
+    w1_ext = cowrie.encode_json(doc, cowrie.AUTH_UNTRUSTED_EXT, cowrie.EPI_OBSERVED)
+    r2c_ext = cowrie.project_r2_compact(w1_ext)
+    assert r2c_ext.count("<<<COWRIE:R2") == 1 and r2c_ext.count("<<<END:COWRIE") == 1
+    # R3 lossless extraction + uniform invalid-tier rejection + exact field extraction
+    r3 = cowrie.project_lens(w1, "r3", 1)
+    assert cowrie.encode_json(r3, cowrie.AUTH_VERIFIED_TOOL, cowrie.EPI_OBSERVED) == w1
+    try:
+        cowrie.project_lens(w1, "r9", 0)
+        raise AssertionError("Expected ValueError on unknown lens tier r9")
+    except ValueError:
+        pass
+    assert cowrie.extract_field(w1, "runs[2].suite") == '"U3-v1.1"'
+    assert cowrie.extract_field(w1, "/runs/0/speedup") == "1.93"
+    expect_err(lambda: cowrie.extract_field(w1, "runs[99].suite"), "ERR_INVALID_CONTRACT")
+    # Lossless $map/$float JSON, R2 null/<missing>/"", int-array preservation, R0 MODEL_SYNTH, resolved_frame_cid
+    w_edge = cowrie.encode_json(
+        '{"lit_b":{"$map":{"$bytes":"cafe"}},"lit_t":{"$map":{"$tensor":"measurement"}},'
+        '"nan_v":{"$float":"NaN"},"ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],'
+        '"tbl":[{"k":1,"v":null},{"k":2},{"k":3,"v":""}]}',
+        cowrie.AUTH_MODEL_SYNTH,
+        cowrie.EPI_OBSERVED,
+    )
+    assert cowrie.encode_json(cowrie.project_lens(w_edge, "r3"), cowrie.AUTH_MODEL_SYNTH, cowrie.EPI_OBSERVED) == w_edge
+    assert "[MODEL_SYNTH|" in cowrie.project_lens(w_edge, "r0")
+    r2_edge = cowrie.project_lens(w_edge, "r2")
+    assert "1|null" in r2_edge and "2|<missing>" in r2_edge and '3|""' in r2_edge
+    assert "f32[16]" not in r2_edge and "15" in r2_edge
+    assert len(cowrie.resolved_frame_cid(clean_shard, 0)) == 34
 
     # 6. Strict UTF-16 surrogate & RFC 8259 number rejections
     for bad_json in (r'"\uD800\u0041"', r'"\uDC00"', r'"\uD800"', "01", "-01", "1."):
@@ -137,9 +177,21 @@ def main():
             )
             info = cowrie.verify_statepage_file(
                 str(sp_file), expected_model_sha=fp_a, expected_kv_quant=1,
-                expected_runtime_id="llama.cpp", expected_ssm_dtype=2
+                expected_runtime_id="llama.cpp", expected_ssm_dtype=2,
+                expected_doc_cid="b" * 64,
             )
             assert info["hmac_verified"] is True and info["ssm_dtype"] == 2
+            assert info["doc_cid"] == "b" * 64
+            # Verify MappedStatePageView.buffer is strictly read-only (prevents SIGSEGV on PROT_READ mmap)
+            with cowrie.MappedStatePageView(
+                str(sp_file), expected_model_sha=fp_a, expected_doc_cid="b" * 64,
+                expected_runtime_id="llama.cpp", expected_kv_quant=1, expected_ssm_dtype=2
+            ) as mpv:
+                assert mpv.buffer.readonly is True
+            expect_err(
+                lambda: cowrie.verify_statepage_file(str(sp_file), expected_model_sha=fp_a, expected_doc_cid="c" * 64),
+                "ERR_INVALID_CONTRACT",
+            )
             expect_err(
                 lambda: cowrie.verify_statepage_file(str(sp_file), expected_model_sha=fp_a, expected_runtime_id="vllm"),
                 "ERR_RUNTIME_MISMATCH",
@@ -171,6 +223,7 @@ def main():
     assert mem.check_tool_gate("shell_exec", ["@nonexistent"])["allowed"] is False  # unknown blocked
     assert mem.check_tool_gate("shell_exec", [r_clean.cid_hex[:8]])["allowed"] is False  # 8-hex prefix blocked
     assert mem.check_tool_gate("shell_exec", [r_sum.cid_hex])["allowed"] is False
+    assert mem.check_tool_gate("shell_exec", [r_sum.cid_hex], owner_override=True)["allowed"] is False  # unsigned override off by default
     assert mem.check_tool_gate("shell_exec", [r_clean.cid_hex])["allowed"] is True
 
     # 9. v1.2 Ed25519 asymmetric declassification tokens, Crash-Safe `.cwwal`, and 16 KB `CWZM` Zone-Maps
@@ -182,6 +235,31 @@ def main():
     assert cowrie.verify_declassification(pk, tainted_cid, "shell_exec", 2_000_000_000, sig, 1_900_000_000) is True
     assert cowrie.verify_declassification(pk, tainted_cid, "shell_exec", 2_000_000_000, sig, 2_000_000_001) is False
     assert cowrie.verify_declassification(pk, tainted_cid, "fs_write", 2_000_000_000, sig, 1_900_000_000) is False
+    # Server-pinned owner_pubkey in CowrieMemoryStore cannot be overridden by attacker-supplied pubkey
+    attacker_seed = bytes([0x99]) * 32
+    attacker_pk = cowrie.ed25519_pubkey(attacker_seed)
+    attacker_sig = cowrie.sign_declassification(attacker_seed, tainted_cid, "shell_exec", 2_000_000_000)
+    mem_pinned = CowrieMemoryStore(owner_pubkey_hex=pk.hex())
+    p_ext = mem_pinned.store({"url": "https://evil.example"}, authority=cowrie.AUTH_UNTRUSTED_EXT)
+    p_sig_atk = cowrie.sign_declassification(attacker_seed, bytes.fromhex(p_ext.cid_hex), "shell_exec", 2_000_000_000)
+    assert mem_pinned.check_tool_gate(
+        "shell_exec", [p_ext.cid_hex],
+        owner_pubkey_hex=attacker_pk.hex(),
+        declassify_tokens=[{"cid": p_ext.cid_hex, "expiry": 2_000_000_000, "sig": p_sig_atk.hex()}],
+        now_unix=1_900_000_000,
+    )["allowed"] is False
+    # Torsion pubkey forged signature rejected
+    forged_sig = bytes([1]) + bytes(63)
+    assert cowrie.verify_declassification(bytes(32), tainted_cid, "shell_exec", 2_000_000_000, forged_sig, 1_900_000_000) is False
+    # Python -O safe ValueError validation (not assert)
+    try:
+        cowrie.ed25519_pubkey(b"short")
+        raise AssertionError("Expected ValueError on short seed")
+    except ValueError:
+        pass
+    # Duplicate JSON key & \u+041 rejected
+    expect_err(lambda: cowrie.encode_json('{"a":1,"a":2}'), "ERR_DUPLICATE_KEY")
+    expect_err(lambda: cowrie.encode_json('"\\u+041"'), "ERR_INVALID_JSON")
 
     with tempfile.TemporaryDirectory() as td:
         wal_path = Path(td) / "live.cwwal"

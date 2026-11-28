@@ -33,6 +33,7 @@ extern "C" {
 #define COWRIE_LENS_R0             0
 #define COWRIE_LENS_R1             1
 #define COWRIE_LENS_R2             2
+#define COWRIE_LENS_R3             3
 #define COWRIE_ACT_READ_ONLY       0
 #define COWRIE_ACT_SHELL_EXEC      1
 #define COWRIE_ACT_CRED_READ       2
@@ -67,18 +68,21 @@ int cowrie_frame_verify(const uint8_t* data, size_t len, uint8_t* out_auth, uint
 int cowrie_encode_json(const uint8_t* json_utf8, size_t json_len, uint8_t authority, uint8_t epistemic, CowrieBuf* out_buf);
 int cowrie_decode_to_json(const uint8_t* data, size_t len, CowrieBuf* out_buf);
 
-/* Plane B: Deterministic progressive lenses (tier: 0=R0, 1=R1, 2=R2) */
+/* Plane B: Deterministic progressive lenses (tier: 0=R0, 1=R1, 2=R2, 3=R3 lossless; >3 -> ERR_INVALID_CONTRACT) */
 int cowrie_project_lens(const uint8_t* frame_data, size_t frame_len, uint8_t tier, size_t tensor_count, CowrieBuf* out_buf);
+int cowrie_project_r2_compact(const uint8_t* frame_data, size_t frame_len, CowrieBuf* out_buf);
+int cowrie_extract_field(const uint8_t* frame_data, size_t frame_len, const uint8_t* path_utf8, size_t path_len, CowrieBuf* out_buf);
 
 /* Plane C/D: 16 KB CWRF shard verification (Plane A + Plane C Merkle) & causal taint */
 int     cowrie_shard_pack_single(const uint8_t* frame_data, size_t frame_len, CowrieBuf* out_buf);
 int     cowrie_shard_verify(const uint8_t* shard_data, size_t shard_len, uint8_t* out_root_34);
+int     cowrie_shard_resolved_frame_cid(const uint8_t* shard_data, size_t shard_len, size_t frame_idx, uint8_t* out_cid_34);
 int     cowrie_statepage_verify_bytes(const uint8_t* data, size_t len, const uint8_t* hmac_key, size_t hmac_len, uint8_t verify_hash, uint32_t* out_ctx_tokens);
 uint8_t cowrie_propagate_authority(uint8_t base_auth, const uint8_t* parent_auths, size_t num_parents);
 uint8_t cowrie_is_tainted(uint8_t authority);
 int     cowrie_sha256_hex(const uint8_t* data, size_t len, char* out_hex_65);
 
-/* Unified sub-ms strided model fingerprinter (file_size + 32 x 64 KiB windows across full weights) */
+/* Unified sub-ms strided model fingerprinter (file_size + 64 x 64 KiB windows across full weights) */
 int     cowrie_model_fingerprint(const char* path_cstr, char* out_hex_65);
 
 /* Plane C Profile A: 16 KB-aligned Hybrid SSM+KV StatePages (atomic O_EXCL 0600 + zero-copy mmap) */
@@ -126,6 +130,18 @@ int cowrie_statepage_open_checked(
 int cowrie_statepage_open_full(
     const char*             path_cstr,
     const char*             expected_model_sha_cstr,
+    const char*             expected_runtime_id_cstr,
+    int                     expected_kv_quant,
+    int                     expected_ssm_dtype,
+    uint8_t                 verify_hash,
+    CowrieStatePageHandle** out_handle
+);
+
+/* Open StatePage enforcing model_sha, doc_cid, runtime_id, kv_quant (-1=any), ssm_dtype (-1=any), ownership, and HMAC/Merkle. */
+int cowrie_statepage_open_strict(
+    const char*             path_cstr,
+    const char*             expected_model_sha_cstr,
+    const char*             expected_doc_cid_cstr,
     const char*             expected_runtime_id_cstr,
     int                     expected_kv_quant,
     int                     expected_ssm_dtype,
@@ -186,6 +202,7 @@ int    cowrie_wal_append_frame(CowrieWalHandle* handle, const uint8_t* frame_dat
 int    cowrie_wal_append_tombstone(CowrieWalHandle* handle, const uint8_t* cid_34, uint8_t fsync_now, uint64_t* out_seq);
 size_t cowrie_wal_len(const CowrieWalHandle* handle);
 size_t cowrie_wal_live_len(const CowrieWalHandle* handle);
+int    cowrie_wal_live_frame_at(const CowrieWalHandle* handle, size_t idx, CowrieBuf* out_buf);
 int    cowrie_wal_compact_shard(const CowrieWalHandle* handle, const char* out_shard_path_cstr, uint8_t* out_root_34);
 void   cowrie_wal_close(CowrieWalHandle* handle);
 

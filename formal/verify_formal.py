@@ -300,9 +300,54 @@ def run_stage4_lockstep_and_c_abi_catches(scratch: Path) -> dict:
     r2_f8_inner = "\n".join(r2_f8.strip().splitlines()[1:-1])
     assert ">>>" not in r2_f8_inner and "<<<" not in r2_f8_inner, f"Catch F8 regression: {r2_f8_inner}"
 
+    # Native `libcowrie_core.so` randomized multi-page CWZM + .cwwal lockstep (50 + 50 trials)
+    native_zm_checks = 0
+    zm_lock_path = scratch / "lockstep_multi.cwzm"
+    zm_recs = []
+    for i in range(400):
+        auth = cowrie.AUTH_UNTRUSTED_EXT if (i % 13 == 0) else cowrie.AUTH_VERIFIED_TOOL
+        fr = cowrie.encode_json({"id": i, "sec": i * 3, "payload": f"row-{i:04d}"}, authority=auth)
+        zm_recs.append((i, i * 3, fr))
+    cowrie.write_zoned_shard(str(zm_lock_path), zm_recs)
+    with cowrie.ZonedShard(str(zm_lock_path)) as zs:
+        for t in range(50):
+            lo = (t * 7) % 400
+            hi = min(399, lo + (t % 29))
+            exp_trusted = sum(1 for k, _, fr in zm_recs if lo <= k <= hi and not cowrie.is_tainted(fr[5]))
+            got_cnt, _ = zs.query_keys(lo, hi, trusted_only=True, verify_merkle=True)
+            assert got_cnt == exp_trusted, f"CWZM lockstep mismatch on [{lo}..{hi}]: got {got_cnt} vs {exp_trusted}"
+            native_zm_checks += 1
+
+    native_wal_checks = 0
+    for t in range(50):
+        wp = scratch / f"lockstep_{t}.cwwal"
+        fa = cowrie.encode_json({"t": t, "v": "a"}, authority=0x02)
+        fb = cowrie.encode_json({"t": t, "v": "b"}, authority=0x02)
+        with cowrie.Wal(str(wp)) as w:
+            w.append_frame(fa, fsync=False)
+            _, cb = w.append_frame(fb, fsync=False)
+            w.append_tombstone(cb, fsync=False)
+            assert w.live_len() == 1
+            if t % 2 == 0:
+                w.append_frame(fb, fsync=True)
+                assert w.live_len() == 2
+                assert w.live_frames() == [fa, fb]
+            else:
+                assert w.live_frames() == [fa]
+        # Append zero-filled 64-byte crash tail and assert clean recovery
+        with open(wp, "ab") as f:
+            f.write(b"\x00" * 64)
+        with cowrie.Wal(str(wp), recover_torn_tail=True) as w2:
+            assert w2.live_len() == (2 if t % 2 == 0 else 1)
+        native_wal_checks += 1
+
     return {
         "compiled_bend_mjs_bytes": kernel_mjs.stat().st_size,
         "lockstep": lockstep_summary,
+        "native_c_abi_lockstep": {
+            "cwzm_multipage_trials": native_zm_checks,
+            "cwwal_replay_and_zero_tail_trials": native_wal_checks,
+        },
         "rust_c_abi_catches_verified": {
             "F1_four_bracket_fence_breakout_fixed": True,
             "F2_cwzm_fence_merkle_authenticated": True,

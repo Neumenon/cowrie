@@ -17,9 +17,11 @@ use crate::canonical::{
 use crate::ed25519::{action_from_code, ed25519_public_key, DeclassificationToken};
 #[cfg(unix)]
 use crate::ivf::{ColocatedIvfReader, IvfSearchHit};
-use crate::lens::{project_r0, project_r1, project_r2};
+use crate::lens::{extract_field_json, project_r0, project_r1, project_r2, project_r2_compact, project_r3};
 use crate::sha256::{content_address, to_hex};
-use crate::shard::{build_shard_16kb, verify_shard_and_localize, verify_statepage_bytes};
+use crate::shard::{
+    build_shard_16kb, resolved_frame_cid, verify_shard_and_localize, verify_statepage_bytes,
+};
 #[cfg(unix)]
 use crate::shard::{fingerprint_model_file, save_statepage_atomic_ext, MappedStatePage};
 use crate::trust::{is_tainted, propagate_authority};
@@ -69,17 +71,16 @@ impl CowrieBuf {
     }
 }
 
-/// Allocate `len` zeroed bytes in Rust/WASM linear memory (free with `cowrie_wasm_free`).
+/// Allocate `len` zeroed, 8-byte aligned bytes in Rust/WASM linear memory (free with `cowrie_wasm_free`).
 #[no_mangle]
 pub extern "C" fn cowrie_wasm_alloc(len: usize) -> *mut u8 {
     if len == 0 {
         return ptr::null_mut();
     }
-    let mut v = vec![0u8; len];
-    let p = v.as_mut_ptr();
-    debug_assert_eq!(v.capacity(), len);
-    std::mem::forget(v);
-    p
+    let Ok(layout) = std::alloc::Layout::from_size_align(len, 8) else {
+        return ptr::null_mut();
+    };
+    unsafe { std::alloc::alloc_zeroed(layout) }
 }
 
 /// Free a buffer previously allocated by `cowrie_wasm_alloc(len)`.
@@ -87,7 +88,9 @@ pub extern "C" fn cowrie_wasm_alloc(len: usize) -> *mut u8 {
 pub unsafe extern "C" fn cowrie_wasm_free(data: *mut u8, len: usize) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         if !data.is_null() && len > 0 {
-            let _ = Vec::from_raw_parts(data, len, len);
+            if let Ok(layout) = std::alloc::Layout::from_size_align(len, 8) {
+                std::alloc::dealloc(data, layout);
+            }
         }
     }));
 }
@@ -234,7 +237,8 @@ pub unsafe extern "C" fn cowrie_decode_to_json(
     })
 }
 
-/// Project a canonical `COWR` frame into a deterministic lens (`tier`: 0 = R0, 1 = R1, 2 = R2).
+/// Project a canonical `COWR` frame into a deterministic lens (`tier`: 0=R0, 1=R1, 2=R2, 3=R3 lossless).
+/// Any `tier > 3` fails closed with `ERR_INVALID_CONTRACT`.
 #[no_mangle]
 pub unsafe extern "C" fn cowrie_project_lens(
     frame_data: *const u8,
@@ -248,6 +252,9 @@ pub unsafe extern "C" fn cowrie_project_lens(
             return CowrieError::Truncated.code();
         }
         *out_buf = CowrieBuf::empty();
+        if tier > 3 {
+            return CowrieError::InvalidContract.code();
+        }
         let slice = if frame_len == 0 { &[] } else { std::slice::from_raw_parts(frame_data, frame_len) };
         let dec = match decode_frame_strict(slice) {
             Ok(d) => d,
@@ -256,10 +263,70 @@ pub unsafe extern "C" fn cowrie_project_lens(
         let rendered = match tier {
             0 => project_r0(slice, &dec, tensor_count),
             1 => project_r1(slice, &dec),
-            _ => project_r2(slice, &dec),
+            2 => project_r2(slice, &dec),
+            3 => project_r3(slice, &dec),
+            _ => return CowrieError::InvalidContract.code(),
         };
         *out_buf = CowrieBuf::from_string(rendered);
         0
+    })
+}
+
+/// Project a canonical `COWR` frame into the trust-tiered `R2-Compact` lens (B2-a):
+/// clean `SYS_POLICY`/`VERIFIED_TOOL` frames receive a compact single-line header, while
+/// untrusted, model-synthesized, or tainted frames fail closed to the full Mealy-escaped `R2` fence.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_project_r2_compact(
+    frame_data: *const u8,
+    frame_len: usize,
+    out_buf: *mut CowrieBuf,
+) -> c_int {
+    ffi_code(|| {
+        if out_buf.is_null() || (frame_data.is_null() && frame_len > 0) {
+            return CowrieError::Truncated.code();
+        }
+        *out_buf = CowrieBuf::empty();
+        let slice = if frame_len == 0 { &[] } else { std::slice::from_raw_parts(frame_data, frame_len) };
+        let dec = match decode_frame_strict(slice) {
+            Ok(d) => d,
+            Err(e) => return e.code(),
+        };
+        *out_buf = CowrieBuf::from_string(project_r2_compact(slice, &dec));
+        0
+    })
+}
+
+/// Strictly verify a `COWR` frame and extract the exact value at `path` (RFC 6901 `/a/0/b` or `a[0].b`)
+/// as lossless typed JSON.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_extract_field(
+    frame_data: *const u8,
+    frame_len: usize,
+    path_utf8: *const u8,
+    path_len: usize,
+    out_buf: *mut CowrieBuf,
+) -> c_int {
+    ffi_code(|| {
+        if out_buf.is_null()
+            || (frame_data.is_null() && frame_len > 0)
+            || (path_utf8.is_null() && path_len > 0)
+        {
+            return CowrieError::Truncated.code();
+        }
+        *out_buf = CowrieBuf::empty();
+        let fslice = if frame_len == 0 { &[] } else { std::slice::from_raw_parts(frame_data, frame_len) };
+        let pslice = if path_len == 0 { &[] } else { std::slice::from_raw_parts(path_utf8, path_len) };
+        let path_str = match std::str::from_utf8(pslice) {
+            Ok(s) => s,
+            Err(_) => return CowrieError::InvalidUtf8.code(),
+        };
+        match extract_field_json(fslice, path_str) {
+            Ok(rendered) => {
+                *out_buf = CowrieBuf::from_string(rendered);
+                0
+            }
+            Err(e) => e.code(),
+        }
     })
 }
 
@@ -281,6 +348,30 @@ pub unsafe extern "C" fn cowrie_shard_verify(
                     ptr::copy_nonoverlapping(rep.computed_root.as_ptr(), out_root_34, 34);
                 }
                 if rep.ok { 0 } else { CowrieError::RootMismatch.code() }
+            }
+            Err(e) => e.code(),
+        }
+    })
+}
+
+/// Compute the repack-stable 34-byte resolved content identifier for `frame_idx` inside a verified `CWRF` shard,
+/// committing to BOTH the frame descriptor CID and every referenced Plane C tensor's Merkle digest and length.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_shard_resolved_frame_cid(
+    shard_data: *const u8,
+    shard_len: usize,
+    frame_idx: usize,
+    out_cid_34: *mut u8,
+) -> c_int {
+    ffi_code(|| {
+        if out_cid_34.is_null() || (shard_data.is_null() && shard_len > 0) {
+            return CowrieError::Truncated.code();
+        }
+        let slice = if shard_len == 0 { &[] } else { std::slice::from_raw_parts(shard_data, shard_len) };
+        match resolved_frame_cid(slice, frame_idx) {
+            Ok(cid) => {
+                ptr::copy_nonoverlapping(cid.as_ptr(), out_cid_34, 34);
+                0
             }
             Err(e) => e.code(),
         }
@@ -387,7 +478,7 @@ pub struct CowrieStatePageHandle {
     state_sha_c: CString,
 }
 
-/// Unified strided 64-hex model fingerprinter (`file_size + 32 x 64 KiB strided windows`, `< 1 ms`).
+/// Unified strided 64-hex model fingerprinter (`file_size + 64 x 64 KiB strided windows`, `< 2 ms`).
 #[no_mangle]
 pub unsafe extern "C" fn cowrie_model_fingerprint(
     path_cstr: *const c_char,
@@ -545,6 +636,30 @@ pub unsafe extern "C" fn cowrie_statepage_open_full(
     verify_hash: u8,
     out_handle: *mut *mut CowrieStatePageHandle,
 ) -> c_int {
+    cowrie_statepage_open_strict(
+        path_cstr,
+        expected_model_sha_cstr,
+        ptr::null(),
+        expected_runtime_id_cstr,
+        expected_kv_quant,
+        expected_ssm_dtype,
+        verify_hash,
+        out_handle,
+    )
+}
+
+/// Strict StatePage opener enforcing `model_sha`, `doc_cid`, `runtime_id`, `kv_quant`, `ssm_dtype`, ownership, and HMAC/Merkle.
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_statepage_open_strict(
+    path_cstr: *const c_char,
+    expected_model_sha_cstr: *const c_char,
+    expected_doc_cid_cstr: *const c_char,
+    expected_runtime_id_cstr: *const c_char,
+    expected_kv_quant: c_int,
+    expected_ssm_dtype: c_int,
+    verify_hash: u8,
+    out_handle: *mut *mut CowrieStatePageHandle,
+) -> c_int {
     ffi_code(|| {
         if path_cstr.is_null() || out_handle.is_null() {
             return CowrieError::InvalidContract.code();
@@ -563,6 +678,15 @@ pub unsafe extern "C" fn cowrie_statepage_open_full(
                 Err(_) => return CowrieError::InvalidUtf8.code(),
             }
         };
+        let exp_doc = if expected_doc_cid_cstr.is_null() {
+            None
+        } else {
+            match CStr::from_ptr(expected_doc_cid_cstr).to_str() {
+                Ok(s) if !s.is_empty() => Some(s),
+                Ok(_) => None,
+                Err(_) => return CowrieError::InvalidUtf8.code(),
+            }
+        };
         let exp_rt = if expected_runtime_id_cstr.is_null() {
             None
         } else {
@@ -572,12 +696,16 @@ pub unsafe extern "C" fn cowrie_statepage_open_full(
                 Err(_) => return CowrieError::InvalidUtf8.code(),
             }
         };
+        if expected_kv_quant > 255 || expected_ssm_dtype > 255 {
+            return CowrieError::InvalidContract.code();
+        }
         let exp_kvq = if expected_kv_quant < 0 { None } else { Some(expected_kv_quant as u8) };
         let exp_ssm = if expected_ssm_dtype < 0 { None } else { Some(expected_ssm_dtype as u8) };
 
-        match MappedStatePage::open_verified_full(
+        match MappedStatePage::open_verified_strict(
             path,
             exp_model,
+            exp_doc,
             exp_rt,
             exp_kvq,
             exp_ssm,
@@ -962,6 +1090,27 @@ pub unsafe extern "C" fn cowrie_wal_len(handle: *const CowrieWalHandle) -> usize
 pub unsafe extern "C" fn cowrie_wal_live_len(handle: *const CowrieWalHandle) -> usize {
     if handle.is_null() { return 0; }
     (*handle).inner.live_frames().len()
+}
+
+/// Copy the `idx`-th live (non-tombstoned) canonical frame from the WAL into `out_buf` (free with `cowrie_buf_free`).
+#[no_mangle]
+pub unsafe extern "C" fn cowrie_wal_live_frame_at(
+    handle: *const CowrieWalHandle,
+    idx: usize,
+    out_buf: *mut CowrieBuf,
+) -> c_int {
+    ffi_code(|| {
+        if handle.is_null() || out_buf.is_null() {
+            return CowrieError::InvalidContract.code();
+        }
+        *out_buf = CowrieBuf::empty();
+        let live = (*handle).inner.live_frames();
+        let Some(frame) = live.get(idx) else {
+            return CowrieError::Truncated.code();
+        };
+        *out_buf = CowrieBuf::from_vec(frame.to_vec());
+        0
+    })
 }
 
 #[no_mangle]

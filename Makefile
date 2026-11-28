@@ -6,6 +6,8 @@ LLAMA_ROOT       ?= /home/omen/prism-llama.cpp
 
 build:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo build --release
+	@chmod 0700 $(CARGO_TARGET_DIR) 2>/dev/null || true
+	@chmod 0755 $(CARGO_TARGET_DIR)/release/libcowrie_core.so $(CARGO_TARGET_DIR)/release/cowrie 2>/dev/null || true
 
 wasm:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) RUSTFLAGS="-C strip=symbols" cargo build -p cowrie-core --target wasm32-unknown-unknown --release

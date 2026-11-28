@@ -4,9 +4,11 @@
 //! worker pool for deterministic multi-core 4 MiB chunked Merkle hashing and IVF reads.
 
 #[cfg(not(target_arch = "wasm32"))]
+use std::cell::Cell;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 #[cfg(not(target_arch = "wasm32"))]
-use std::sync::{Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 
 use crate::canonical::encode_uvarint;
 
@@ -396,12 +398,21 @@ pub fn sha256_hex(data: &[u8]) -> String {
     to_hex(&sha256(data))
 }
 
+#[inline(never)]
+fn zeroize_bytes(buf: &mut [u8]) {
+    for b in buf.iter_mut() {
+        unsafe { core::ptr::write_volatile(b, 0) };
+    }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+}
+
 /// Pure-Rust RFC 2104 HMAC-SHA256 using hardware SHA-NI / ARMv8 SHA2 when available.
 pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     let mut k_pad = [0u8; 64];
     if key.len() > 64 {
-        let kh = sha256(key);
+        let mut kh = sha256(key);
         k_pad[..32].copy_from_slice(&kh);
+        zeroize_bytes(&mut kh);
     } else {
         k_pad[..key.len()].copy_from_slice(key);
     }
@@ -414,12 +425,18 @@ pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
     let mut inner = Sha256::new();
     inner.update(&ipad);
     inner.update(data);
-    let inner_digest = inner.finalize();
+    let mut inner_digest = inner.finalize();
 
     let mut outer = Sha256::new();
     outer.update(&opad);
     outer.update(&inner_digest);
-    outer.finalize()
+    let out = outer.finalize();
+
+    zeroize_bytes(&mut k_pad);
+    zeroize_bytes(&mut ipad);
+    zeroize_bytes(&mut opad);
+    zeroize_bytes(&mut inner_digest);
+    out
 }
 
 /// Constant-time 32-byte digest comparison (immune to timing side channels).
@@ -427,9 +444,9 @@ pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
 pub fn ct_eq_32(a: &[u8; 32], b: &[u8; 32]) -> bool {
     let mut diff = 0u8;
     for i in 0..32 {
-        diff |= a[i] ^ b[i];
+        diff |= core::hint::black_box(a[i] ^ b[i]);
     }
-    diff == 0
+    core::hint::black_box(diff) == 0
 }
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -542,8 +559,35 @@ pub fn shard_merkle_root_from_leaves(
 }
 
 // =========================================================================
-// BOUNDED REUSABLE WORKER POOL (ZERO PER-CALL OS THREAD SPAWN STORM)
+// BOUNDED REUSABLE WORKER POOL (ARC-OWNED, FORK-SAFE & REENTRANCY-SAFE)
 // =========================================================================
+
+#[cfg(not(target_arch = "wasm32"))]
+thread_local! {
+    static IN_PARALLEL_FOR: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct ReentrancyGuard(bool);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ReentrancyGuard {
+    fn enter() -> Self {
+        let prev = IN_PARALLEL_FOR.with(|c| {
+            let p = c.get();
+            c.set(true);
+            p
+        });
+        Self(prev)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for ReentrancyGuard {
+    fn drop(&mut self) {
+        IN_PARALLEL_FOR.with(|c| c.set(self.0));
+    }
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 struct ScopedJob {
@@ -565,6 +609,7 @@ unsafe impl Sync for ScopedJob {}
 #[cfg(not(target_arch = "wasm32"))]
 impl ScopedJob {
     fn drain(&self) {
+        let _guard = ReentrancyGuard::enter();
         loop {
             let idx = self.next.fetch_add(1, Ordering::Relaxed);
             if idx >= self.count {
@@ -590,9 +635,10 @@ impl ScopedJob {
 
 #[cfg(not(target_arch = "wasm32"))]
 struct WorkerPool {
-    queue: Mutex<Vec<usize>>, // raw *const ScopedJob addresses
+    queue: Mutex<Vec<Arc<ScopedJob>>>,
     cv: Condvar,
-    n_workers: usize,
+    n_workers: AtomicUsize,
+    creator_pid: u32,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -602,36 +648,46 @@ static POOL_INNER: OnceLock<WorkerPool> = OnceLock::new();
 fn global_pool() -> &'static WorkerPool {
     static POOL: OnceLock<&'static WorkerPool> = OnceLock::new();
     *POOL.get_or_init(|| {
-        let n_workers = std::thread::available_parallelism()
+        let want_workers = std::thread::available_parallelism()
             .map(|p| p.get())
             .unwrap_or(4)
             .clamp(1, MAX_POOL_WORKERS);
         let pool_ref = POOL_INNER.get_or_init(|| WorkerPool {
             queue: Mutex::new(Vec::with_capacity(64)),
             cv: Condvar::new(),
-            n_workers,
+            n_workers: AtomicUsize::new(0),
+            creator_pid: std::process::id(),
         });
-        for tid in 0..n_workers {
-            let _ = std::thread::Builder::new()
+        let mut spawned = 0usize;
+        for tid in 0..want_workers {
+            let res = std::thread::Builder::new()
                 .name(format!("cowrie-w{}", tid))
-                .spawn(move || loop {
-                    let job_addr = {
-                        let mut q = pool_ref.queue.lock().unwrap();
-                        while q.is_empty() {
-                            q = pool_ref.cv.wait(q).unwrap();
-                        }
-                        q.pop().unwrap()
-                    };
-                    let job = unsafe { &*(job_addr as *const ScopedJob) };
-                    job.drain();
-                    job.worker_finish();
+                .spawn(move || {
+                    IN_PARALLEL_FOR.with(|c| c.set(true));
+                    loop {
+                        let job = {
+                            let mut q = pool_ref.queue.lock().unwrap();
+                            while q.is_empty() {
+                                q = pool_ref.cv.wait(q).unwrap();
+                            }
+                            q.pop().unwrap()
+                        };
+                        job.drain();
+                        job.worker_finish();
+                        drop(job);
+                    }
                 });
+            if res.is_ok() {
+                spawned += 1;
+            }
         }
+        pool_ref.n_workers.store(spawned, Ordering::Release);
         pool_ref
     })
 }
 
-/// Execute `0..count` across the bounded persistent worker pool + calling thread (or sequentially on `wasm32`).
+/// Execute `0..count` across the bounded persistent worker pool + calling thread (or sequentially on `wasm32`,
+/// nested worker calls, spawn exhaustion, or post-`fork()` child processes).
 pub fn parallel_for<F>(count: usize, f: F)
 where
     F: Fn(usize) + Sync,
@@ -649,8 +705,10 @@ where
         if count == 0 {
             return;
         }
-        if count == 1 {
-            f(0);
+        if count == 1 || IN_PARALLEL_FOR.with(|c| c.get()) {
+            for i in 0..count {
+                f(i);
+            }
             return;
         }
         unsafe fn trampoline<F: Fn(usize) + Sync>(ctx: *const (), idx: usize) {
@@ -659,7 +717,15 @@ where
         }
 
         let pool = global_pool();
-        let tickets = (count - 1).min(pool.n_workers);
+        let live_workers = pool.n_workers.load(Ordering::Acquire);
+        // Post-fork child processes do not inherit OS worker threads: fall back inline to prevent deadlock.
+        if pool.creator_pid != std::process::id() || live_workers == 0 {
+            for i in 0..count {
+                f(i);
+            }
+            return;
+        }
+        let tickets = (count - 1).min(live_workers);
         if tickets == 0 {
             for i in 0..count {
                 f(i);
@@ -667,7 +733,7 @@ where
             return;
         }
 
-        let job = ScopedJob {
+        let job = Arc::new(ScopedJob {
             ctx: (&f as *const F) as *const (),
             call: trampoline::<F>,
             count,
@@ -676,13 +742,12 @@ where
             panicked: AtomicBool::new(false),
             done_mu: Mutex::new(false),
             done_cv: Condvar::new(),
-        };
-        let job_addr = (&job as *const ScopedJob) as usize;
+        });
 
         {
             let mut q = pool.queue.lock().unwrap();
             for _ in 0..tickets {
-                q.push(job_addr);
+                q.push(Arc::clone(&job));
             }
         }
         if tickets == 1 {

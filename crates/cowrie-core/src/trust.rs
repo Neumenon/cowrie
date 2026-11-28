@@ -21,12 +21,19 @@ pub fn is_tainted(authority: u8) -> bool {
 
 /// Human-readable label for authority + taint flags.
 pub fn authority_label(authority: u8) -> String {
-    let base = match authority & 0x0F {
+    let low = authority & 0x0F;
+    let base = match low {
         AUTH_SYS_POLICY => "SYS_POLICY",
         AUTH_VERIFIED_TOOL => "VERIFIED_TOOL",
         AUTH_UNTRUSTED_EXT => "UNTRUSTED_EXT",
         AUTH_MODEL_SYNTH => "MODEL_SYNTH",
-        _ => "MIXED",
+        _ => {
+            if (low & AUTH_UNTRUSTED_EXT) != 0 {
+                "MIXED|UNTRUSTED"
+            } else {
+                "MIXED"
+            }
+        }
     };
     if (authority & BIT_TAINTED) != 0 {
         format!("{}|TAINTED", base)

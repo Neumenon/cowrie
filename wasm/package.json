@@ -1,0 +1,27 @@
+{
+  "name": "@cowrie/wasm",
+  "version": "1.2.0",
+  "description": "Zero-dependency WebAssembly SDK for Cowrie canonical framing, R0-R2 lenses, 16 KB CWRF/CWSP Merkle verification, causal taint, and RFC 8032 Ed25519 declassification.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./cowrie.mjs",
+  "types": "./cowrie.d.ts",
+  "exports": {
+    ".": {
+      "types": "./cowrie.d.ts",
+      "import": "./cowrie.mjs"
+    }
+  },
+  "files": [
+    "cowrie.mjs",
+    "cowrie.d.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Neumenon/cowrie.git",
+    "directory": "wasm"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

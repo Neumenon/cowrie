@@ -53,9 +53,13 @@ Fixed 8-byte canonical frame header carrying out-of-band trust and epistemic byt
 - **`MAX_DEPTH = 64`:** Any nested container at depth `> 64` MUST reject immediately with `ERR_MAX_DEPTH`.
 - **Zero-Allocation Wire Verification:** `verify_frame_zero_alloc` validates every canonical rule with zero heap allocations (`[u64; 4]` stack bitmask for `<= 256` keys).
 - **Byte-Bounded Allocation:** Wire counts (`nkeys`, array length, map length, tensor dims) MUST be validated against remaining buffer bytes and arithmetic overflow before allocation (`ERR_ALLOC_LIMIT`).
-- **Strict RFC 8259 JSON Bridge:** Rejects lone/mispaired UTF-16 surrogates (`\uD800\u0041`, `\uDC00`), unescaped `< 0x20` control bytes, and leading-zero numbers (`01`, `-01`); preserves whole floats (`1.0`), `Bytes` (`{"$bytes":"..."}`), and `TensorRef` (`{"$tensor":...}`) losslessly.
+- **Strict RFC 8259 JSON Bridge:** Rejects lone/mispaired UTF-16 surrogates (`\uD800\u0041`, `\uDC00`), unescaped `< 0x20` control bytes, duplicate object keys (`ERR_DUPLICATE_KEY`), and leading-zero numbers (`01`, `-01`); preserves whole floats (`1.0`), non-finite floats (`{"$float":"NaN"|"Infinity"|"-Infinity"}`), `Bytes` (`{"$bytes":"..."}`), `TensorRef` (`{"$tensor":...}`), and literal maps containing reserved `$` keys (`{"$map":{...}}`) losslessly.
 - **No Trailing Bytes:** Decoder MUST consume exact frame length (`ERR_TRAILING_BYTES`).
-- **Content Address (`CID`):** 34-byte multihash `0x12 0x20 || SHA-256(frame_bytes)`.
+- **Identity Scopes (`frame_cid` vs `resolved_frame_cid` vs `shard_root`):**
+  - `frame_cid`: 34-byte multihash `0x12 0x20 || SHA-256(frame_bytes)` — commits strictly to the canonical Plane A frame (including `TAG_TENSOR_REF` descriptors, NOT the Plane C arena bytes).
+  - `resolved_frame_cid(shard, frame_idx)`: repack-stable 34-byte multihash `0x12 0x20 || SHA-256("COWRIE_RESOLVED_FRAME_V1\0" || frame_cid || ref_count || (arena_idx, dtype, shape, tensor_len, tensor_merkle_4m_sha256)*)` — commits to both the descriptor AND every referenced Plane C tensor's bytes; use this as cache/dedup identity for tensor-bearing frames.
+  - `shard_root`: 34-byte dual-tree RFC 6962 Merkle root over all Plane A frames and Plane C tensors in a specific `CWRF` shard.
+- **Legacy v0 Header Compatibility Note:** The archived v0 polyglot codec (`Neumenon/cowrie-legacy`) also prefixed frames with `"COWR\x01"` followed immediately by `flags` and `dict_count` (without `authority`/`epistemic` header bytes). Do not auto-dispatch v0 and v1.x frames by magic alone; any future breaking wire revision MUST bump `version` to `0x02`.
 
 ---
 
@@ -95,13 +99,14 @@ Stores live recurrent SSM + attention KV state at `offset % 16384 == 0`, paired 
 - `ctx_tokens`, `kv_quant` (`0 = FP16/BF16`, `1 = Q4_0`, `2 = Q8_0/FP8`, `3 = F32`), `ssm_dtype` (`0 = FP16`, `1 = BF16`, `2 = FP32`)
 - `hash_mode` (`0 = flat SHA-256`, `1 = parallel 4 MiB chunked RFC 6962 Merkle SHA-256` over bounded `WorkerPool`, accelerated by x86_64 `SHA-NI` and ARMv8 `SHA2`)
 - Optional **RFC 2104 HMAC-SHA256** tag (`[308..340)`, `hmac_flag = 1` at `page0[75]` when `COWRIE_HMAC_KEY` is configured)
+- **HMAC Error Precedence:** When `hmac_flag == 1` (or caller provides an HMAC key), RFC 2104 `HMAC-SHA256` verification over Page-0 `[0..308)` MUST execute on a stack-snapshotted copy BEFORE semantic header parsing (`ERR_AUTH_MAC_MISMATCH` precedes `ERR_INVALID_CONTRACT` / `ERR_MODEL_MISMATCH`).
 - Supports both zero-copy `mmap` (`MappedStatePage`) and 16 KB-aligned `O_DIRECT` into double-buffered `cudaHostAlloc` pinned memory overlapped with dual-stream `cudaMemcpyAsync`.
 
 ### 3.4 Plane C Profile B — Co-Located 16 KB IVF-INT8 Index (`CWIV`, `flags & 0x02`) & `LiveIvfStore`
 1. `centroids[K, D]` (`int8`, 16 KB-aligned)
 2. `cluster_toc[K]` (`(disk_off: u64, disk_len: u64, vec_count: u32, reserved: u32)`, 16 KB-aligned, bounds-checked against `file_len`)
 3. `K` **co-located 16 KB-aligned cluster blocks**: `[embs_c || meta_c || 0x00 pad -> 16 KB]` queried over `WorkerPool` with `AVX2`/`NEON` signed INT8 dot-product kernels and `0x04 | 0x80` trust filtering.
-4. **`LiveIvfStore` (`v1.2`):** Pairs an immutable `CWIV` base shard with a `.cwwal` SIMD delta tail (`WAL_KIND_IVF_VEC = 2`) and LSM-style `compact_to_cwiv()` merge.
+4. **`LiveIvfStore` (`v1.2`):** Pairs an immutable `CWIV` base generation with a `.cwwal` SIMD delta tail (`WAL_KIND_IVF_VEC = 2`) and bounded-memory streaming compaction (`compact_to_cwiv()`). Compaction writes immutable `<base>.gen.<N>.cwiv` one cluster at a time, atomically publishes an 88-byte SHA-256-authenticated generation manifest `<base>.cwgen` (`"CWG1"`, `gen_id`, `applied_wal_seq_exclusive`, `base_gen_sha256`), and then atomically resets `.cwwal` to `CWAL v2` starting at monotonic `base_seq = applied_wal_seq_exclusive`. Recovery skips WAL entries with `seq < applied_wal_seq_exclusive`, guaranteeing exact multiplicity across crashes at any step.
 
 ### 3.5 Plane D Profile C — 16 KB Page-Targeted Scalar Zone-Map Shards (`CWZM`, `v1.2`)
 Packs sorted canonical `COWR` frames into self-verifying `16,384`-byte leaf pages (`[count: u16, res: u16, slots[count] * 20B, frames...]`) and appends a `16 KB`-aligned Plane D Zone-Map directory of **64-byte cache-line entries**:
@@ -110,19 +115,21 @@ Packs sorted canonical `COWR` frames into self-verifying `16,384`-byte leaf page
 - Point and narrow-range queries prune non-overlapping pages in L1 cache and `pread` (`read_exact_at`) matching 16 KB pages, verifying each touched page's `leaf_sha256` via hardware SHA-NI and filtering `(auth & (0x04 | 0x80)) != 0` in `O(1)`.
 
 ### 3.6 Crash-Safe Hash-Chained Framed WAL (`CWAL` / `.cwwal`, `v1.2`)
-Append-only `0600` mutation and audit log beginning with a 32-byte `"CWAL"` v1 genesis header followed by `"CWLR"` records:
+Append-only `0600` mutation and audit log protected by `flock(LOCK_EX)`, beginning with a 32-byte `"CWAL"` genesis header (`ver=1` starting at `seq=0`, or `ver=2` carrying monotonic `base_seq: u64 LE` across compactions) followed by `"CWLR"` records:
 - `[0..4) "CWLR" || [4] kind (0=Frame, 1=Tombstone, 2=IvfVec) || [5..8) 0 || [8..16) seq: u64 LE || [16..20) len: u32 LE || [20..52) prev_sha256 || payload || record_sha256`
-- `open(..., recover_torn_tail = true)` truncates incomplete power-loss tail writes cleanly and rejects any mid-log tampering, unknown `kind > 2`, or sequence gap (`ERR_ROOT_MISMATCH` / `ERR_CORRUPT_TRAILER` / `ERR_INVALID_CONTRACT`).
+- `open(..., recover_torn_tail = true)` truncates incomplete or zero-filled power-loss tail writes cleanly and rejects any mid-log tampering, unknown `kind > 2`, or sequence gap (`ERR_ROOT_MISMATCH` / `ERR_CORRUPT_TRAILER` / `ERR_INVALID_CONTRACT`).
 - Live-frame replay (`live_frames`) is sequential: `Tombstone(cid)` revokes prior `Frame(cid)` records while preserving other frames, and a subsequent `Frame(cid)` at a higher `seq` restores `cid` to the live set.
 
 ---
 
-## 4. Plane B — Deterministic Progressive Lenses (`R0`, `R1`, `R2`)
+## 4. Plane B — Deterministic Progressive Lenses (`R0`–`R3`) & Exact Field Extraction
 
-Lenses are pure functions of `Plane A` (zero model calls):
-- **`R0` (Alpha32 Handle):** `@<10-char Alpha32 ID>` (lowercase ASCII letters `a-z`, $26^{10} \approx 2^{47}$ space, birthday bound `~12M` records) + coarse size bucket + trust tag + title/topic.
-- **`R1` (Structural Atlas):** Schema, authority, field types/lengths, array counts, typed tensor Coordinate Contracts (`<T:dtype[shape]@space>`).
-- **`R2` (Adaptive Attention Lens):** Hoists uniform object tables when `len >= 3` and key density `>= 0.70`, renders `TAG_TENSOR_REF (0x0A)` as `<T:dtype[shape]@space>`, and wraps output in CID-bound fences with 3-state Mealy transducer `<<<` / `>>>` escaping across scalar values, map keys, hoisted table column headers, and `<T:...>` descriptors.
+Lenses are pure functions of `Plane A` (zero model calls); any `tier > 3` fails closed (`ERR_INVALID_CONTRACT`):
+- **`R0` (Alpha32 Handle):** `@<10-char Alpha32 ID>` (lowercase ASCII letters `a-z`, $26^{10} \approx 2^{47}$ space, birthday bound `~12M` records) + coarse size bucket + exact `authority_label` (`SYS_POLICY`, `VERIFIED_TOOL`, `MODEL_SYNTH`, `UNTRUSTED_EXT`, `MIXED|UNTRUSTED`) + title/topic.
+- **`R1` (Structural Atlas):** Schema, authority, field types/lengths, array counts, typed tensor Coordinate Contracts (`<T:dtype[shape]@space>`), and `<T:f64[N]>` for dense float64 vectors (`len >= 16`).
+- **`R2` (Adaptive Attention Lens) & `R2-Compact`:** Hoists uniform object tables when `len >= 3` and key density `>= 0.70`, rendering explicit distinct markers for `null`, `<missing>` absent columns, `""` empty strings, and quoted literal `"null"`/`"<missing>"` strings; keeps integer ID arrays exact inline (eliding only float64 vectors as `<T:f64[N]@inline_elided>`); renders `TAG_TENSOR_REF (0x0A)` as `<T:dtype[shape]@space>`; wraps output in CID-bound fences with 3-state Mealy transducer escaping plus zero-width/Bidi/Tag/ANSI stripping and `<|`/`|>` neutralization. `project_r2_compact` (`cowrie_project_r2_compact` / `--tier r2-compact`) uses a compact single-line header `[@handle|AUTHORITY]` for clean `SYS_POLICY`/`VERIFIED_TOOL` frames and fails closed to the full Mealy fence for `UNTRUSTED_EXT`, `MODEL_SYNTH`, or `BIT_TAINTED` frames.
+- **`R3` (Lossless Extraction) & `extract_field`:** `tier = 3` (`project_r3`) returns 100% round-trip-lossless canonical typed JSON (preserving `Bytes`, `TensorRef`, `NaN`/`±Infinity`, whole floats, and literal `$` map keys via `$map`). `extract_field(frame, path)` (`cowrie_extract_field` / `cowrie get`) resolves exact typed values by RFC 6901 JSON Pointer (`/rows/2/id`) or dot-bracket selector (`rows[2].id`), failing closed with `ERR_INVALID_CONTRACT` on absent keys or out-of-bounds indices.
+- **Pre-Append MCP Virtualization (`mcp-proxy --virtualize` / `--virtualize-bytes <N>`):** Seals oversized MCP responses (`>= 16,384 B` default) into `.cwwal`, replaces `result.content` with a bounded `VIRTUALIZED_TOOL_OUTPUT` structural/text atlas (`project_virtual_atlas`, Mealy-fenced when untrusted), injects read-only `cowrie_get(handle, pointer, grep, lines, offset, max_chars)` (`query_frame_slice`) served locally in `<1 ms`, and preserves `BIT_TAINTED (0x80)` across every slice read.
 
 ---
 

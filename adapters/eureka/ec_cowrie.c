@@ -42,6 +42,7 @@ typedef int            (*fn_sp_save_t)(const char *, const char *, const char *,
 typedef int            (*fn_sp_save_ext_t)(const char *, const char *, const char *, const char *, uint16_t, uint32_t, uint8_t, uint8_t, const uint8_t *, size_t);
 typedef int            (*fn_sp_open_chk_t)(const char *, const char *, int, uint8_t, cw_sp_handle_t **);
 typedef int            (*fn_sp_open_full_t)(const char *, const char *, const char *, int, int, uint8_t, cw_sp_handle_t **);
+typedef int            (*fn_sp_open_strict_t)(const char *, const char *, const char *, const char *, int, int, uint8_t, cw_sp_handle_t **);
 typedef const uint8_t *(*fn_sp_data_t)(const cw_sp_handle_t *);
 typedef size_t         (*fn_sp_len_t)(const cw_sp_handle_t *);
 typedef void           (*fn_sp_close_t)(cw_sp_handle_t *);
@@ -70,6 +71,7 @@ typedef struct {
   fn_sp_save_ext_t        sp_save_ext;
   fn_sp_open_chk_t        sp_open_checked;
   fn_sp_open_full_t       sp_open_full;
+  fn_sp_open_strict_t     sp_open_strict;
   fn_sp_data_t            sp_data;
   fn_sp_len_t             sp_len;
   fn_sp_close_t           sp_close;
@@ -122,13 +124,17 @@ static void cw_load_once(void) {
   }
 
   const char *env_lib = getenv("COWRIE_LIB");
-  const char *cands[5];
+  const char *env_lib_path = getenv("COWRIE_LIB_PATH");
+  const char *cands[8];
   int nc = 0;
   if (env_lib && env_lib[0]) cands[nc++] = env_lib;
+  if (env_lib_path && env_lib_path[0]) cands[nc++] = env_lib_path;
   cands[nc++] = "/tmp/cowrie-cargo-target/release/libcowrie_core.so";
+  cands[nc++] = "/tmp/cowrie-cargo-target/release/libcowrie_core.dylib";
   cands[nc++] = "/home/omen/.local/lib/libcowrie_core.so";
   cands[nc++] = "/usr/local/lib/libcowrie_core.so";
   cands[nc++] = "libcowrie_core.so";
+  cands[nc++] = "libcowrie_core.dylib";
 
   void *h = NULL;
   for (int i = 0; i < nc && !h; i++) {
@@ -152,6 +158,7 @@ static void cw_load_once(void) {
   g_cw.sp_save_ext     = (fn_sp_save_ext_t)dlsym(h, "cowrie_statepage_save_ext");
   g_cw.sp_open_checked = (fn_sp_open_chk_t)dlsym(h, "cowrie_statepage_open_checked");
   g_cw.sp_open_full    = (fn_sp_open_full_t)dlsym(h, "cowrie_statepage_open_full");
+  g_cw.sp_open_strict  = (fn_sp_open_strict_t)dlsym(h, "cowrie_statepage_open_strict");
   g_cw.sp_data         = (fn_sp_data_t)dlsym(h, "cowrie_statepage_data");
   g_cw.sp_len          = (fn_sp_len_t)dlsym(h, "cowrie_statepage_len");
   g_cw.sp_close        = (fn_sp_close_t)dlsym(h, "cowrie_statepage_close");
@@ -246,33 +253,15 @@ static void cw_bytes_to_hex(const uint8_t *in, size_t n, char *out) {
   out[2 * n] = '\0';
 }
 
-static void cw_fallback_hex64(const void *data, size_t len, char out_hex_65[65]) {
-  uint64_t h[4] = {
-    14695981039346656037ULL, 0x9E3779B97F4A7C15ULL,
-    0xBF58476D1CE4E5B9ULL,   0x94D049BB133111EBULL
-  };
-  const uint8_t *p = (const uint8_t *)data;
-  for (size_t i = 0; i < len; i++) {
-    for (int k = 0; k < 4; k++) {
-      h[k] ^= (uint64_t)p[i] ^ ((uint64_t)k << 8);
-      h[k] *= 1099511628211ULL;
-    }
-  }
-  snprintf(out_hex_65, 65, "%016llx%016llx%016llx%016llx",
-           (unsigned long long)h[0], (unsigned long long)h[1],
-           (unsigned long long)h[2], (unsigned long long)h[3]);
-}
-
 int ec_cowrie_sha256_hex(const void *data, size_t len, char out_hex_65[65]) {
   if (!out_hex_65) return -1;
+  out_hex_65[0] = '\0';
   pthread_once(&g_cw_once, cw_load_once);
-  if (g_cw.loaded && g_cw.sha256_hex) {
-    static const uint8_t dummy = 0;
-    const uint8_t *ptr = (data && len > 0) ? (const uint8_t *)data : &dummy;
-    if (g_cw.sha256_hex(ptr, len, out_hex_65) == 0) return 0;
-  }
-  cw_fallback_hex64(data ? data : "", len, out_hex_65);
-  return 0;
+  // Fail CLOSED when libcowrie_core is absent (never downgrade cryptographic SHA-256 to non-crypto FNV-1a).
+  if (!g_cw.loaded || !g_cw.sha256_hex) return -1;
+  static const uint8_t dummy = 0;
+  const uint8_t *ptr = (data && len > 0) ? (const uint8_t *)data : &dummy;
+  return (g_cw.sha256_hex(ptr, len, out_hex_65) == 0) ? 0 : -1;
 }
 
 int ec_cowrie_file_fingerprint(const char *path, char out_hex_65[65]) {
@@ -365,17 +354,20 @@ int ec_cowrie_sp_save_file(
   return -rc;
 }
 
-int ec_cowrie_sp_load_file(
+static int cw_sp_load_file_strict(
     const char *path,
     const char *expected_model_sha_64,
+    const char *expected_doc_cid_64,
     int expected_kv_quant,
     void *out_buf, size_t max_len, size_t *out_actual_len) {
   pthread_once(&g_cw_once, cw_load_once);
   if (!g_cw.loaded || !path || !out_buf) return -1;
   cw_sp_handle_t *h = NULL;
-  int rc = g_cw.sp_open_full
-      ? g_cw.sp_open_full(path, expected_model_sha_64, EC_RUNTIME_ID, expected_kv_quant, -1, 1, &h)
-      : g_cw.sp_open_checked(path, expected_model_sha_64, expected_kv_quant, 1, &h);
+  int rc = g_cw.sp_open_strict
+      ? g_cw.sp_open_strict(path, expected_model_sha_64, expected_doc_cid_64, EC_RUNTIME_ID, expected_kv_quant, -1, 1, &h)
+      : g_cw.sp_open_full
+          ? g_cw.sp_open_full(path, expected_model_sha_64, EC_RUNTIME_ID, expected_kv_quant, -1, 1, &h)
+          : g_cw.sp_open_checked(path, expected_model_sha_64, expected_kv_quant, 1, &h);
   if (rc != 0 || !h) {
     if (rc == EC_COWRIE_ERR_MODEL_MISMATCH ||
         rc == EC_COWRIE_ERR_STATEPAGE_HASH_MISMATCH ||
@@ -401,6 +393,15 @@ int ec_cowrie_sp_load_file(
   g_cw.sp_close(h);
   atomic_fetch_add(&g_sp_hits, 1);
   return 0;
+}
+
+int ec_cowrie_sp_load_file(
+    const char *path,
+    const char *expected_model_sha_64,
+    int expected_kv_quant,
+    void *out_buf, size_t max_len, size_t *out_actual_len) {
+  return cw_sp_load_file_strict(
+      path, expected_model_sha_64, NULL, expected_kv_quant, out_buf, max_len, out_actual_len);
 }
 
 int ec_cowrie_sp_save(
@@ -444,7 +445,7 @@ int ec_cowrie_sp_load(
     return -1;
   }
   size_t actual = 0;
-  int rc = ec_cowrie_sp_load_file(path, expected_model_sha_64, expected_kv_quant, out_buf, expected_len, &actual);
+  int rc = cw_sp_load_file_strict(path, expected_model_sha_64, doc_cid, expected_kv_quant, out_buf, expected_len, &actual);
   if (rc != 0) return rc;
   if (actual != expected_len) return -1;
   return 0;
@@ -553,7 +554,7 @@ uint32_t ec_cowrie_sp_load_longest_prefix(
              dir, ns ? ns : "pfx", (unsigned)nt, doc_cid);
     struct stat st;
     if (stat(path, &st) != 0) continue;
-    if (ec_cowrie_sp_load_file(path, expected_model_sha_64, expected_kv_quant, out_buf, max_len, out_actual_len) == 0) {
+    if (cw_sp_load_file_strict(path, expected_model_sha_64, doc_cid, expected_kv_quant, out_buf, max_len, out_actual_len) == 0) {
       return nt;
     }
   }
@@ -940,7 +941,10 @@ int ec_cowrie_trust_gate_json(
   cw_json_esc(act, e_act, sizeof e_act);
   cw_json_esc(tainted_src, e_src, sizeof e_src);
 
-  if (tainted && !ro && !owner_override) {
+  const char *allow_ov = getenv("COWRIE_ALLOW_UNSIGNED_OVERRIDE");
+  int eff_override = (owner_override && allow_ov && strcmp(allow_ov, "1") == 0) ? 1 : 0;
+
+  if (tainted && !ro && !eff_override) {
     snprintf(out_json, out_cap,
         "{\"ok\":false,\"allowed\":false,\"error\":\"ERR_TAINTED_EXECUTION_BLOCKED\","
         "\"code\":%d,\"action\":\"%s\",\"effective_authority\":%u,\"tainted\":true,"
@@ -956,7 +960,7 @@ int ec_cowrie_trust_gate_json(
       "\"tainted\":%s,\"tainted_source\":\"%s\",\"read_only\":%s,\"owner_override\":%s,"
       "\"checked_args\":%zu,\"unknown_args\":%d}",
       e_act, (unsigned)eff_auth, tainted ? "true" : "false", e_src,
-      ro ? "true" : "false", owner_override ? "true" : "false",
+      ro ? "true" : "false", eff_override ? "true" : "false",
       np, unknown_args);
   return 200;
 }
@@ -974,8 +978,9 @@ int ec_cowrie_trust_gate_signed_json(
   if (ro) {
     return ec_cowrie_trust_gate_json(act, arg_ids, n_args, 0, out_json, out_cap);
   }
-  const char *pk_hex = (owner_pubkey_hex && owner_pubkey_hex[0])
-      ? owner_pubkey_hex : getenv("EC_COWRIE_OWNER_PUBKEY");
+  const char *env_pk = getenv("EC_COWRIE_OWNER_PUBKEY");
+  if (!env_pk || !env_pk[0]) env_pk = getenv("COWRIE_OWNER_PUBKEY");
+  const char *pk_hex = (env_pk && env_pk[0]) ? env_pk : owner_pubkey_hex;
   uint8_t pk[32];
   int has_pk = (pk_hex && cw_hex_to_bytes(pk_hex, pk, 32) && g_cw.loaded && g_cw.declassify_verify);
   int acode = cw_action_code(act);

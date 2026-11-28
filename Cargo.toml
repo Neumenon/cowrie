@@ -9,6 +9,11 @@ resolver = "2"
 version = "1.2.0"
 edition = "2021"
 license = "Apache-2.0"
+repository = "https://github.com/Neumenon/cowrie"
+homepage = "https://github.com/Neumenon/cowrie"
+readme = "README.md"
+keywords = ["ai", "kv-cache", "llm", "merkle", "security"]
+categories = ["encoding", "cryptography", "wasm"]
 
 [profile.release]
 opt-level = 3

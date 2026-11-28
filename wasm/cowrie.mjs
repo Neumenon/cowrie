@@ -15,13 +15,37 @@ export const EPI_OBSERVED = 0x01;
 export const EPI_DERIVED = 0x02;
 export const EPI_ESTIMATED = 0x03;
 
-export const ACTION_CODES = {
+export const ACTION_CODES = Object.freeze({
   read_only: 0,
   shell_exec: 1,
   cred_read: 2,
   fs_write: 3,
   net_exfil: 4,
-};
+});
+
+const U64_MAX = 0xffff_ffff_ffff_ffffn;
+
+function resolveActionCode(action) {
+  if (typeof action !== "string" || !Object.prototype.hasOwnProperty.call(ACTION_CODES, action)) {
+    throw new Error(`Invalid Cowrie action '${String(action)}'`);
+  }
+  return ACTION_CODES[action];
+}
+
+function toU64BigInt(value, fieldName) {
+  let bi;
+  if (typeof value === "bigint") {
+    bi = value;
+  } else if (typeof value === "number" && Number.isInteger(value) && Number.isSafeInteger(value)) {
+    bi = BigInt(value);
+  } else {
+    throw new TypeError(`${fieldName} must be a safe integer or BigInt`);
+  }
+  if (bi < 0n || bi > U64_MAX) {
+    throw new RangeError(`${fieldName} must be in [0, 2^64 - 1]`);
+  }
+  return bi;
+}
 
 export class CowrieWasmError extends Error {
   constructor(code, rc) {
@@ -42,7 +66,9 @@ export function toHex(u8) {
 }
 
 export function fromHex(hex) {
-  if (hex.length % 2 !== 0) throw new Error("Odd hex length");
+  if (typeof hex !== "string" || hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) {
+    throw new Error("Invalid hex string");
+  }
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(2 * i, 2 * i + 2), 16);
   return out;
@@ -60,8 +86,11 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
 
   function cstr(ptr) {
     const m = u8Mem();
+    if (ptr < 0 || ptr >= m.length) {
+      throw new RangeError("Out-of-bounds WASM string pointer");
+    }
     let end = ptr;
-    while (m[end] !== 0) end++;
+    while (end < m.length && m[end] !== 0) end++;
     return dec.decode(m.subarray(ptr, end));
   }
 
@@ -69,14 +98,20 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
     if (rc !== 0) throw new CowrieWasmError(cstr(ex.cowrie_err_name(rc)), rc);
   }
 
-  function withBytes(bytes, fn) {
+  function withBytes(bytes, fn, zeroize = false) {
     const len = bytes.length;
     const ptr = len > 0 ? ex.cowrie_wasm_alloc(len) : 0;
+    if (len > 0 && ptr === 0) {
+      throw new Error("WASM allocation failed");
+    }
     try {
       if (len > 0) u8Mem().set(bytes, ptr);
       return fn(ptr, len);
     } finally {
-      if (len > 0) ex.cowrie_wasm_free(ptr, len);
+      if (len > 0) {
+        if (zeroize) u8Mem().fill(0, ptr, ptr + len);
+        ex.cowrie_wasm_free(ptr, len);
+      }
     }
   }
 
@@ -154,11 +189,45 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
     },
 
     projectLens(frameU8, tier = "r2", tensorCount = 0) {
-      const tCode = tier === "r0" ? 0 : tier === "r1" ? 1 : 2;
+      const tMap = { r0: 0, r1: 1, r2: 2, r3: 3 };
+      if (!Object.prototype.hasOwnProperty.call(tMap, tier)) {
+        throw new Error(`Unknown Cowrie lens tier: ${tier}`);
+      }
+      const tCode = tMap[tier];
       const bufStruct = ex.cowrie_wasm_alloc(12);
       try {
         const rc = withBytes(frameU8, (p, n) =>
           ex.cowrie_project_lens(p, n, tCode, tensorCount, bufStruct)
+        );
+        check(rc);
+        return dec.decode(takeCowrieBuf(bufStruct));
+      } finally {
+        ex.cowrie_wasm_free(bufStruct, 12);
+      }
+    },
+
+    projectR2Compact(frameU8) {
+      const bufStruct = ex.cowrie_wasm_alloc(12);
+      try {
+        const rc = withBytes(frameU8, (p, n) =>
+          ex.cowrie_project_r2_compact(p, n, bufStruct)
+        );
+        check(rc);
+        return dec.decode(takeCowrieBuf(bufStruct));
+      } finally {
+        ex.cowrie_wasm_free(bufStruct, 12);
+      }
+    },
+
+    extractField(frameU8, fieldPath) {
+      if (typeof fieldPath !== "string") {
+        throw new Error("fieldPath must be a string");
+      }
+      const pathBytes = enc.encode(fieldPath);
+      const bufStruct = ex.cowrie_wasm_alloc(12);
+      try {
+        const rc = withBytes(frameU8, (fp, fn) =>
+          withBytes(pathBytes, (pp, pn) => ex.cowrie_extract_field(fp, fn, pp, pn, bufStruct))
         );
         check(rc);
         return dec.decode(takeCowrieBuf(bufStruct));
@@ -190,13 +259,32 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
       }
     },
 
+    resolvedFrameCid(shardU8, frameIdx = 0) {
+      if (!Number.isInteger(frameIdx) || frameIdx < 0) {
+        throw new Error(`Invalid frameIdx: ${frameIdx}`);
+      }
+      const cidPtr = ex.cowrie_wasm_alloc(34);
+      try {
+        const rc = withBytes(shardU8, (p, n) =>
+          ex.cowrie_shard_resolved_frame_cid(p, n, frameIdx, cidPtr)
+        );
+        check(rc);
+        const cid = u8Mem().slice(cidPtr, cidPtr + 34);
+        return { cid, cidHex: toHex(cid) };
+      } finally {
+        ex.cowrie_wasm_free(cidPtr, 34);
+      }
+    },
+
     verifyStatePageBytes(spU8, hmacKey = null, verifyHash = true) {
       const keyBytes = hmacKey ? (typeof hmacKey === "string" ? enc.encode(hmacKey) : hmacKey) : new Uint8Array(0);
       const tokPtr = ex.cowrie_wasm_alloc(4);
       try {
         const rc = withBytes(spU8, (sp, sn) =>
-          withBytes(keyBytes, (kp, kn) =>
-            ex.cowrie_statepage_verify_bytes(sp, sn, kp, kn, verifyHash ? 1 : 0, tokPtr)
+          withBytes(
+            keyBytes,
+            (kp, kn) => ex.cowrie_statepage_verify_bytes(sp, sn, kp, kn, verifyHash ? 1 : 0, tokPtr),
+            true
           )
         );
         check(rc);
@@ -216,10 +304,12 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
     },
 
     ed25519Pubkey(seed32) {
-      if (seed32.length !== 32) throw new Error("Expected 32-byte seed");
+      if (!(seed32 instanceof Uint8Array) || seed32.length !== 32) {
+        throw new Error("Expected 32-byte Uint8Array seed");
+      }
       const outPtr = ex.cowrie_wasm_alloc(32);
       try {
-        check(withBytes(seed32, (sp) => ex.cowrie_ed25519_pubkey(sp, outPtr)));
+        check(withBytes(seed32, (sp) => ex.cowrie_ed25519_pubkey(sp, outPtr), true));
         return u8Mem().slice(outPtr, outPtr + 32);
       } finally {
         ex.cowrie_wasm_free(outPtr, 32);
@@ -227,13 +317,20 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
     },
 
     signDeclassification(seed32, targetCid34, action, expiryUnixSecs) {
-      if (seed32.length !== 32 || targetCid34.length !== 34) throw new Error("Invalid seed or CID length");
+      if (!(seed32 instanceof Uint8Array) || seed32.length !== 32 || !(targetCid34 instanceof Uint8Array) || targetCid34.length !== 34) {
+        throw new Error("Invalid seed or CID length");
+      }
+      const actCode = resolveActionCode(action);
+      const exp = toU64BigInt(expiryUnixSecs, "expiryUnixSecs");
       const sigPtr = ex.cowrie_wasm_alloc(64);
       try {
-        const rc = withBytes(seed32, (sp) =>
-          withBytes(targetCid34, (cp) =>
-            ex.cowrie_declassify_sign(sp, cp, ACTION_CODES[action], BigInt(expiryUnixSecs), sigPtr)
-          )
+        const rc = withBytes(
+          seed32,
+          (sp) =>
+            withBytes(targetCid34, (cp) =>
+              ex.cowrie_declassify_sign(sp, cp, actCode, exp, sigPtr)
+            ),
+          true
         );
         check(rc);
         return u8Mem().slice(sigPtr, sigPtr + 64);
@@ -243,20 +340,20 @@ export async function createCowrieWasm(wasmBytesOrResponse) {
     },
 
     verifyDeclassification(pubkey32, targetCid34, action, expiryUnixSecs, sig64, nowUnixSecs) {
-      if (pubkey32.length !== 32 || targetCid34.length !== 34 || sig64.length !== 64) {
+      if (
+        !(pubkey32 instanceof Uint8Array) || pubkey32.length !== 32 ||
+        !(targetCid34 instanceof Uint8Array) || targetCid34.length !== 34 ||
+        !(sig64 instanceof Uint8Array) || sig64.length !== 64
+      ) {
         throw new Error("Invalid pubkey, CID, or signature length");
       }
+      const actCode = resolveActionCode(action);
+      const exp = toU64BigInt(expiryUnixSecs, "expiryUnixSecs");
+      const now = toU64BigInt(nowUnixSecs, "nowUnixSecs");
       const rc = withBytes(pubkey32, (pkp) =>
         withBytes(targetCid34, (cp) =>
           withBytes(sig64, (sgp) =>
-            ex.cowrie_declassify_verify(
-              pkp,
-              cp,
-              ACTION_CODES[action],
-              BigInt(expiryUnixSecs),
-              sgp,
-              BigInt(nowUnixSecs)
-            )
+            ex.cowrie_declassify_verify(pkp, cp, actCode, exp, sgp, now)
           )
         )
       );

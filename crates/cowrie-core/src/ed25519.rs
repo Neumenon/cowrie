@@ -141,8 +141,26 @@ impl Sha512 {
         for (i, w) in self.h.iter().enumerate() {
             out[8 * i..8 * (i + 1)].copy_from_slice(&w.to_be_bytes());
         }
+        zeroize_bytes(&mut self.buf);
+        zeroize_u64s(&mut self.h);
         out
     }
+}
+
+#[inline(never)]
+fn zeroize_bytes(buf: &mut [u8]) {
+    for b in buf.iter_mut() {
+        unsafe { core::ptr::write_volatile(b, 0) };
+    }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
+}
+
+#[inline(never)]
+fn zeroize_u64s(buf: &mut [u64]) {
+    for w in buf.iter_mut() {
+        unsafe { core::ptr::write_volatile(w, 0) };
+    }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
 pub fn sha512(data: &[u8]) -> [u8; 64] {
@@ -284,7 +302,7 @@ fn fpack(n: &Fe) -> [u8; 32] {
         m[15] = t[15] - 0x7fff - ((m[14] >> 16) & 1);
         let b = (m[15] >> 16) & 1;
         m[14] &= 0xffff;
-        let mask = !(b - 1); // 0 if b==0 (t >= p, pick m), -1 if b==1 (t < p, keep t)
+        let mask = core::hint::black_box(!(b - 1)); // 0 if b==0 (t >= p, pick m), -1 if b==1 (t < p, keep t)
         for i in 0..16 {
             let x = mask & (t[i] ^ m[i]);
             t[i] = m[i] ^ x;
@@ -354,13 +372,21 @@ impl GeP3 {
     }
 
     fn cswap(a: &mut Self, b: &mut Self, bit: i64) {
-        let mask = -bit;
+        let mask = core::hint::black_box(-bit);
         for i in 0..16 {
             let tx = mask & (a.x[i] ^ b.x[i]); a.x[i] ^= tx; b.x[i] ^= tx;
             let ty = mask & (a.y[i] ^ b.y[i]); a.y[i] ^= ty; b.y[i] ^= ty;
             let tz = mask & (a.z[i] ^ b.z[i]); a.z[i] ^= tz; b.z[i] ^= tz;
             let tt = mask & (a.t[i] ^ b.t[i]); a.t[i] ^= tt; b.t[i] ^= tt;
         }
+    }
+
+    /// Returns true iff `[8]self == O` (i.e. `self` lies in the order-8 Curve25519 torsion subgroup).
+    fn is_small_order(&self) -> bool {
+        let p2 = self.add(self);
+        let p4 = p2.add(&p2);
+        let p8 = p4.add(&p4);
+        fpack(&p8.x) == [0u8; 32] && fpack(&fsub(&p8.y, &p8.z)) == [0u8; 32]
     }
 
     fn scalarmult(&self, s: &[u8; 32]) -> Self {
@@ -439,15 +465,15 @@ fn mod_l_wide(wide: &[u8; 64]) -> [u8; 32] {
         let (d0, b0) = rem[0].overflowing_sub(L64[0]);
         let (t1, b1a) = rem[1].overflowing_sub(L64[1]);
         let (d1, b1b) = t1.overflowing_sub(b0 as u64);
-        let b1 = b1a || b1b;
+        let b1 = (b1a as u64) | (b1b as u64);
         let (t2, b2a) = rem[2].overflowing_sub(L64[2]);
-        let (d2, b2b) = t2.overflowing_sub(b1 as u64);
-        let b2 = b2a || b2b;
+        let (d2, b2b) = t2.overflowing_sub(b1);
+        let b2 = (b2a as u64) | (b2b as u64);
         let (t3, b3a) = rem[3].overflowing_sub(L64[3]);
-        let (d3, b3b) = t3.overflowing_sub(b2 as u64);
-        let borrow = b3a || b3b;
+        let (d3, b3b) = t3.overflowing_sub(b2);
+        let borrow = (b3a as u64) | (b3b as u64);
 
-        let mask = (borrow as u64).wrapping_sub(1);
+        let mask = core::hint::black_box(borrow).wrapping_sub(1);
         rem[0] ^= mask & (rem[0] ^ d0);
         rem[1] ^= mask & (rem[1] ^ d1);
         rem[2] ^= mask & (rem[2] ^ d2);
@@ -457,6 +483,7 @@ fn mod_l_wide(wide: &[u8; 64]) -> [u8; 32] {
     for (i, w) in rem.iter().enumerate() {
         out[8 * i..8 * (i + 1)].copy_from_slice(&w.to_le_bytes());
     }
+    zeroize_u64s(&mut rem);
     out
 }
 
@@ -478,8 +505,11 @@ pub fn ed25519_public_key(seed: &[u8; 32]) -> [u8; 32] {
     let mut az = sha512(seed);
     az[0] &= 248;
     az[31] = (az[31] & 63) | 64;
-    let scalar: [u8; 32] = az[..32].try_into().unwrap();
-    GeP3::basepoint().scalarmult(&scalar).to_bytes()
+    let mut scalar: [u8; 32] = az[..32].try_into().unwrap();
+    let pk = GeP3::basepoint().scalarmult(&scalar).to_bytes();
+    zeroize_bytes(&mut az);
+    zeroize_bytes(&mut scalar);
+    pk
 }
 
 /// Sign an arbitrary byte message with a 32-byte `Ed25519` secret seed (`RFC 8032` §5.1.6).
@@ -487,14 +517,14 @@ pub fn ed25519_sign(seed: &[u8; 32], msg: &[u8]) -> [u8; 64] {
     let mut az = sha512(seed);
     az[0] &= 248;
     az[31] = (az[31] & 63) | 64;
-    let a_scalar: [u8; 32] = az[..32].try_into().unwrap();
+    let mut a_scalar: [u8; 32] = az[..32].try_into().unwrap();
     let pk = GeP3::basepoint().scalarmult(&a_scalar).to_bytes();
 
     let mut hr = Sha512::new();
     hr.update(&az[32..64]);
     hr.update(msg);
-    let r_full = hr.finalize();
-    let r_scalar = mod_l_wide(&r_full);
+    let mut r_full = hr.finalize();
+    let mut r_scalar = mod_l_wide(&r_full);
     let r_bytes = GeP3::basepoint().scalarmult(&r_scalar).to_bytes();
 
     let mut hk = Sha512::new();
@@ -524,13 +554,21 @@ pub fn ed25519_sign(seed: &[u8; 32], msg: &[u8]) -> [u8; 64] {
     debug_assert_eq!(carry, 0);
     let s_scalar = mod_l_wide(&s_wide);
 
+    zeroize_bytes(&mut az);
+    zeroize_bytes(&mut a_scalar);
+    zeroize_bytes(&mut r_full);
+    zeroize_bytes(&mut r_scalar);
+    zeroize_u64s(&mut acc);
+    zeroize_bytes(&mut s_wide);
+
     let mut sig = [0u8; 64];
     sig[..32].copy_from_slice(&r_bytes);
     sig[32..].copy_from_slice(&s_scalar);
     sig
 }
 
-/// Strictly verify an `Ed25519` signature (`RFC 8032` §5.1.7, rejecting non-canonical `S >= L` and `y >= p`).
+/// Strictly verify an `Ed25519` signature (`RFC 8032` §5.1.7, rejecting non-canonical `S >= L`,
+/// non-canonical `y >= p`, and all 8 small-order Curve25519 torsion points on both `pubkey` and `R`).
 pub fn ed25519_verify_strict(pubkey: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> bool {
     let r_bytes: &[u8; 32] = sig[..32].try_into().unwrap();
     let s_bytes: &[u8; 32] = sig[32..64].try_into().unwrap();
@@ -539,8 +577,17 @@ pub fn ed25519_verify_strict(pubkey: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> b
     }
     let Some(neg_a) = GeP3::from_bytes_neg_strict(pubkey) else {
         return false;
+    };
+    if neg_a.is_small_order() {
+        return false;
     }
-;
+    let Some(neg_r) = GeP3::from_bytes_neg_strict(r_bytes) else {
+        return false;
+    };
+    if neg_r.is_small_order() {
+        return false;
+    }
+
     let mut hk = Sha512::new();
     hk.update(r_bytes);
     hk.update(pubkey);

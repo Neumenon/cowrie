@@ -16,7 +16,9 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::canonical::{checked_tensor_min_bytes, decode_frame_strict, Value};
+use crate::canonical::{
+    checked_tensor_min_bytes, verify_frame_with_tensor_hook_zero_alloc, Value,
+};
 #[cfg(unix)]
 use crate::sha256::Sha256;
 use crate::sha256::{
@@ -36,8 +38,20 @@ pub const FLAG_STATEPAGE: u16 = 0x0001;
 pub const FLAG_IVF_COLOCATED: u16 = 0x0002;
 
 #[inline]
+pub fn checked_align_16kb(n: usize) -> Result<usize, CowrieError> {
+    n.checked_add(PAGE_ALIGN - 1)
+        .map(|v| v & !(PAGE_ALIGN - 1))
+        .ok_or(CowrieError::AllocLimit)
+}
+
+#[inline]
 pub fn align_16kb(n: usize) -> usize {
-    (n + PAGE_ALIGN - 1) & !(PAGE_ALIGN - 1)
+    checked_align_16kb(n).expect("align_16kb overflow")
+}
+
+#[inline]
+fn u64_to_usize(v: u64) -> Result<usize, CowrieError> {
+    usize::try_from(v).map_err(|_| CowrieError::Truncated)
 }
 
 #[inline]
@@ -231,7 +245,7 @@ pub fn parse_shard_header(shard: &[u8]) -> Result<ShardHeader, CowrieError> {
     if trailer_foff != footer_off {
         return Err(CowrieError::CorruptTrailer);
     }
-    if (plane_c_off as usize) % PAGE_ALIGN != 0 {
+    if plane_c_off % (PAGE_ALIGN as u64) != 0 {
         return Err(CowrieError::UnalignedArena);
     }
     Ok(ShardHeader {
@@ -255,10 +269,10 @@ pub fn verify_shard_and_localize(shard: &[u8]) -> Result<ShardReport, CowrieErro
     if header.plane_a_off != 64 {
         return Err(CowrieError::InvalidContract);
     }
-    let pa_end = (header.plane_a_off as usize)
-        .checked_add(header.plane_a_len as usize)
-        .ok_or(CowrieError::Truncated)?;
-    let pc_off = header.plane_c_off as usize;
+    let pa_off = u64_to_usize(header.plane_a_off)?;
+    let pa_len = u64_to_usize(header.plane_a_len)?;
+    let pa_end = pa_off.checked_add(pa_len).ok_or(CowrieError::Truncated)?;
+    let pc_off = u64_to_usize(header.plane_c_off)?;
     if pa_end > pc_off || pc_off > shard.len() {
         return Err(CowrieError::Truncated);
     }
@@ -269,39 +283,42 @@ pub fn verify_shard_and_localize(shard: &[u8]) -> Result<ShardReport, CowrieErro
         return Err(CowrieError::InvalidContract);
     }
 
-    let mut pos = header.footer_off as usize;
-    let need_footer = (header.frame_count as usize)
+    let footer_off_usize = u64_to_usize(header.footer_off)?;
+    let mut pos = footer_off_usize;
+    let frame_cnt = usize::try_from(header.frame_count).map_err(|_| CowrieError::AllocLimit)?;
+    let tensor_cnt = usize::try_from(header.tensor_count).map_err(|_| CowrieError::AllocLimit)?;
+    let need_footer = frame_cnt
         .checked_mul(44)
-        .and_then(|x| x.checked_add((header.tensor_count as usize).checked_mul(TENSOR_ENTRY_BYTES)?))
+        .and_then(|x| x.checked_add(tensor_cnt.checked_mul(TENSOR_ENTRY_BYTES)?))
         .and_then(|x| x.checked_add(34 + 12))
         .ok_or(CowrieError::Truncated)?;
     if pos.checked_add(need_footer).map_or(true, |end| end != shard.len()) {
         return Err(CowrieError::Truncated);
     }
 
-    let mut frames_entries = Vec::with_capacity(header.frame_count as usize);
-    let mut actual_frame_leaves = Vec::with_capacity(header.frame_count as usize);
+    let mut frames_entries = Vec::with_capacity(frame_cnt);
+    let mut actual_frame_leaves = Vec::with_capacity(frame_cnt);
     let mut bad_frames = Vec::new();
-    let mut expected_cur: usize = header.plane_a_off as usize;
+    let mut expected_cur: usize = pa_off;
 
-    for idx in 0..(header.frame_count as usize) {
+    for idx in 0..frame_cnt {
         let off = u64::from_le_bytes(shard[pos..pos + 8].try_into().unwrap());
         let flen = u32::from_le_bytes(shard[pos + 8..pos + 12].try_into().unwrap());
         let mut expected_leaf = [0u8; 32];
         expected_leaf.copy_from_slice(&shard[pos + 12..pos + 44]);
         pos += 44;
 
-        if (off as usize) != expected_cur {
+        let off_usize = u64_to_usize(off)?;
+        let flen_usize = usize::try_from(flen).map_err(|_| CowrieError::Truncated)?;
+        if off_usize != expected_cur {
             return Err(CowrieError::InvalidContract);
         }
-        let end = (off as usize)
-            .checked_add(flen as usize)
-            .ok_or(CowrieError::Truncated)?;
+        let end = off_usize.checked_add(flen_usize).ok_or(CowrieError::Truncated)?;
         if end > pa_end {
             return Err(CowrieError::Truncated);
         }
         expected_cur = end;
-        let fb = &shard[off as usize..end];
+        let fb = &shard[off_usize..end];
         let actual_leaf = merkle_leaf(fb);
         if actual_leaf != expected_leaf {
             bad_frames.push(idx);
@@ -317,35 +334,34 @@ pub fn verify_shard_and_localize(shard: &[u8]) -> Result<ShardReport, CowrieErro
         return Err(CowrieError::InvalidContract);
     }
 
-    let pc_end = pc_off
-        .checked_add(header.plane_c_len as usize)
-        .ok_or(CowrieError::Truncated)?;
-    if pc_end != header.footer_off as usize {
+    let pc_len = u64_to_usize(header.plane_c_len)?;
+    let pc_end = pc_off.checked_add(pc_len).ok_or(CowrieError::Truncated)?;
+    if pc_end != footer_off_usize {
         return Err(CowrieError::Truncated);
     }
 
-    let mut tensor_entries = Vec::with_capacity(header.tensor_count as usize);
-    let mut actual_tensor_leaves = Vec::with_capacity(header.tensor_count as usize);
+    let mut tensor_entries = Vec::with_capacity(tensor_cnt);
+    let mut actual_tensor_leaves = Vec::with_capacity(tensor_cnt);
     let mut bad_tensors = Vec::new();
     let mut expected_t_cur: usize = pc_off;
 
-    for t_idx in 0..(header.tensor_count as usize) {
+    for t_idx in 0..tensor_cnt {
         let toff = u64::from_le_bytes(shard[pos..pos + 8].try_into().unwrap());
         let tlen = u64::from_le_bytes(shard[pos + 8..pos + 16].try_into().unwrap());
         let mut expected_merkle = [0u8; 32];
         expected_merkle.copy_from_slice(&shard[pos + 16..pos + 48]);
         pos += TENSOR_ENTRY_BYTES;
 
-        if (toff as usize) % PAGE_ALIGN != 0 {
+        if toff % (PAGE_ALIGN as u64) != 0 {
             return Err(CowrieError::UnalignedArena);
         }
-        if (toff as usize) != expected_t_cur {
+        let toff_usize = u64_to_usize(toff)?;
+        let tlen_usize = u64_to_usize(tlen)?;
+        if toff_usize != expected_t_cur {
             return Err(CowrieError::InvalidContract);
         }
-        let t_end = (toff as usize)
-            .checked_add(tlen as usize)
-            .ok_or(CowrieError::Truncated)?;
-        let t_pad_end = align_16kb(t_end);
+        let t_end = toff_usize.checked_add(tlen_usize).ok_or(CowrieError::Truncated)?;
+        let t_pad_end = checked_align_16kb(t_end).map_err(|_| CowrieError::Truncated)?;
         if t_pad_end > pc_end {
             return Err(CowrieError::Truncated);
         }
@@ -354,7 +370,7 @@ pub fn verify_shard_and_localize(shard: &[u8]) -> Result<ShardReport, CowrieErro
         }
         expected_t_cur = t_pad_end;
 
-        let actual_merkle = sha256_parallel_merkle(&shard[toff as usize..t_end]);
+        let actual_merkle = sha256_parallel_merkle(&shard[toff_usize..t_end]);
         if actual_merkle != expected_merkle {
             bad_tensors.push(t_idx);
         }
@@ -374,12 +390,23 @@ pub fn verify_shard_and_localize(shard: &[u8]) -> Result<ShardReport, CowrieErro
     let computed_root = shard_merkle_root_from_leaves(&actual_frame_leaves, &actual_tensor_leaves);
     let ok = (stored_root == computed_root) && bad_frames.is_empty() && bad_tensors.is_empty();
 
-    // If Merkle seal is intact, enforce strict canonical frame decoding AND Coordinate Contract bounds!
+    // If Merkle seal is intact, enforce zero-allocation canonical frame verification AND TensorRef bounds!
     if ok && (header.flags & FLAG_STATEPAGE) == 0 {
         for fe in &frames_entries {
-            let fb = &shard[fe.offset as usize..(fe.offset as usize + fe.len as usize)];
-            let dec = decode_frame_strict(fb)?;
-            validate_value_tensor_refs(&dec.value, &tensor_entries)?;
+            let foff = u64_to_usize(fe.offset)?;
+            let flen = usize::try_from(fe.len).map_err(|_| CowrieError::Truncated)?;
+            let fb = &shard[foff..foff + flen];
+            verify_frame_with_tensor_hook_zero_alloc(fb, |arena_idx, dtype, dims| {
+                let idx = arena_idx as usize;
+                if idx >= tensor_entries.len() {
+                    return Err(CowrieError::InvalidContract);
+                }
+                let min_bytes = checked_tensor_min_bytes(dtype, dims)?;
+                if min_bytes > tensor_entries[idx].len {
+                    return Err(CowrieError::InvalidContract);
+                }
+                Ok(())
+            })?;
         }
     }
 
@@ -393,6 +420,57 @@ pub fn verify_shard_and_localize(shard: &[u8]) -> Result<ShardReport, CowrieErro
         bad_frames,
         bad_tensors,
     })
+}
+
+/// Compute a repack-stable 34-byte resolved content identifier for `frame_idx` inside a verified `CWRF` shard.
+///
+/// Unlike `content_address(frame_bytes)` (which identifies the Plane A frame descriptor alone),
+/// `resolved_frame_cid` commits to BOTH the frame descriptor CID AND the exact byte length, dtype/shape contract,
+/// and 4 MiB Merkle digest of every Plane C tensor referenced via `TAG_TENSOR_REF (0x0A)` in that frame.
+/// Two shards with identical frame descriptors pointing to different tensor bytes produce distinct resolved CIDs,
+/// while repacking the same frame + referenced tensors into a different shard preserves the resolved CID.
+pub fn resolved_frame_cid(shard: &[u8], frame_idx: usize) -> Result<[u8; 34], CowrieError> {
+    let rep = verify_shard_and_localize(shard)?;
+    if !rep.ok {
+        return Err(CowrieError::RootMismatch);
+    }
+    let fe = rep.frames.get(frame_idx).ok_or(CowrieError::InvalidContract)?;
+    let foff = u64_to_usize(fe.offset)?;
+    let flen = usize::try_from(fe.len).map_err(|_| CowrieError::Truncated)?;
+    let fb = shard
+        .get(foff..foff.checked_add(flen).ok_or(CowrieError::Truncated)?)
+        .ok_or(CowrieError::Truncated)?;
+    let frame_cid = crate::sha256::content_address(fb);
+
+    let mut refs: Vec<(u32, u8, Vec<u64>)> = Vec::new();
+    verify_frame_with_tensor_hook_zero_alloc(fb, |arena_idx, dtype, dims| {
+        if (arena_idx as usize) >= rep.tensors.len() {
+            return Err(CowrieError::InvalidContract);
+        }
+        refs.push((arena_idx, dtype, dims.to_vec()));
+        Ok(())
+    })?;
+
+    let mut h = crate::sha256::Sha256::new();
+    h.update(b"COWRIE_RESOLVED_FRAME_V1\0");
+    h.update(&frame_cid);
+    h.update(&(refs.len() as u64).to_le_bytes());
+    for (arena_idx, dtype, dims) in &refs {
+        let te = &rep.tensors[*arena_idx as usize];
+        h.update(&arena_idx.to_le_bytes());
+        h.update(&[*dtype, dims.len() as u8]);
+        for &d in dims {
+            h.update(&d.to_le_bytes());
+        }
+        h.update(&te.len.to_le_bytes());
+        h.update(&te.merkle_4m_sha256);
+    }
+    let digest = h.finalize();
+    let mut out = [0u8; 34];
+    out[0] = 0x12;
+    out[1] = 0x20;
+    out[2..34].copy_from_slice(&digest);
+    Ok(out)
 }
 
 // =========================================================================
@@ -540,7 +618,7 @@ pub fn save_statepage_atomic_ext(
     if !is_lower_hex_64(model_sha.as_bytes()) || !is_lower_hex_64(doc_cid.as_bytes()) {
         return Err(CowrieError::InvalidContract);
     }
-    if runtime_id.len() > 16 || runtime_id.as_bytes().iter().any(|&b| b == 0 || b >= 0x7F) {
+    if runtime_id.len() > 16 || runtime_id.as_bytes().iter().any(|&b| b < 0x20 || b >= 0x7F) {
         return Err(CowrieError::InvalidContract);
     }
 
@@ -549,8 +627,10 @@ pub fn save_statepage_atomic_ext(
     let state_sha = to_hex(&state_merkle_32);
     let state_len = state_bytes.len() as u64;
     let state_offset: u64 = PAGE_ALIGN as u64;
-    let padded_state_len = align_16kb(state_bytes.len());
-    let footer_off = state_offset + (padded_state_len as u64);
+    let padded_state_len = checked_align_16kb(state_bytes.len())?;
+    let footer_off = state_offset
+        .checked_add(padded_state_len as u64)
+        .ok_or(CowrieError::AllocLimit)?;
 
     let env_key = if explicit_hmac_key.is_none() { env_hmac_key() } else { None };
     let active_hmac_key: Option<&[u8]> = explicit_hmac_key.or(env_key.as_deref());
@@ -668,80 +748,26 @@ pub fn parse_statepage_meta_with_hmac(
     buf: &[u8],
     explicit_hmac_key: Option<&[u8]>,
 ) -> Result<StatePageMeta, CowrieError> {
-    let hdr = parse_shard_header(buf)?;
-    if (hdr.flags & FLAG_STATEPAGE) == 0 {
-        return Err(CowrieError::InvalidContract);
-    }
     if buf.len() < PAGE_ALIGN + STATEPAGE_FOOTER_BYTES {
         return Err(CowrieError::Truncated);
     }
-    if &buf[64..68] != STATEPAGE_META_MAGIC {
-        return Err(CowrieError::BadMagic);
-    }
-    let ctx_tokens = u32::from_le_bytes(buf[68..72].try_into().unwrap());
-    let kv_quant = buf[72];
-    let ssm_dtype = buf[73];
-    let hash_mode = buf[74];
-    let hmac_flag = buf[75];
-    if hash_mode > HASH_MODE_PARALLEL_MERKLE_4M
-        || hmac_flag > HMAC_FLAG_PRESENT
-        || buf[76..80].iter().any(|&b| b != 0)
-        || buf[306..308].iter().any(|&b| b != 0)
-    {
+    // Snapshot Page-0 header + HMAC onto stack before parsing to prevent double-fetch TOCTOU on mmap.
+    let mut hdr_snap = [0u8; 340];
+    hdr_snap.copy_from_slice(&buf[0..340]);
+
+    let hmac_flag = hdr_snap[75];
+    if hmac_flag > HMAC_FLAG_PRESENT {
         return Err(CowrieError::NonCanonicalFlags);
     }
     let hmac_present = hmac_flag == HMAC_FLAG_PRESENT;
-    if !hmac_present && buf[308..340].iter().any(|&b| b != 0) {
-        return Err(CowrieError::NonZeroPad);
-    }
-    if buf[340..PAGE_ALIGN].iter().any(|&b| b != 0) {
-        return Err(CowrieError::NonZeroPad);
-    }
 
-    let state_offset = u64::from_le_bytes(buf[80..88].try_into().unwrap());
-    let state_len = u64::from_le_bytes(buf[88..96].try_into().unwrap());
-    if (state_offset as usize) % PAGE_ALIGN != 0 || state_offset != hdr.plane_c_off {
-        return Err(CowrieError::UnalignedArena);
-    }
-    let end = (state_offset as usize)
-        .checked_add(state_len as usize)
-        .ok_or(CowrieError::Truncated)?;
-    let pad_end = align_16kb(end);
-    if pad_end + STATEPAGE_FOOTER_BYTES != buf.len() {
-        return Err(CowrieError::Truncated);
-    }
-    if buf[end..pad_end].iter().any(|&b| b != 0) {
-        return Err(CowrieError::NonZeroPad);
-    }
-
-    // Strict lowercase ASCII hex check: guarantees zero NUL bytes (eliminates FFI CString panic).
-    if !is_lower_hex_64(&buf[96..160])
-        || !is_lower_hex_64(&buf[160..224])
-        || !is_lower_hex_64(&buf[224..288])
-    {
-        return Err(CowrieError::InvalidContract);
-    }
-    let model_sha = std::str::from_utf8(&buf[96..160]).unwrap().to_string();
-    let doc_cid = std::str::from_utf8(&buf[160..224]).unwrap().to_string();
-    let state_sha = std::str::from_utf8(&buf[224..288]).unwrap().to_string();
-
-    let rt_slice = &buf[288..304];
-    let rt_end = rt_slice.iter().position(|&b| b == 0).unwrap_or(16);
-    if rt_slice[rt_end..].iter().any(|&b| b != 0)
-        || rt_slice[..rt_end].iter().any(|&b| b < 0x20 || b >= 0x7F)
-    {
-        return Err(CowrieError::InvalidContract);
-    }
-    let runtime_id = std::str::from_utf8(&rt_slice[..rt_end]).unwrap().to_string();
-    let layout_ver = u16::from_le_bytes(buf[304..306].try_into().unwrap());
-
-    // HMAC-SHA256 gate: fail closed if HMAC key is configured OR file carries HMAC flag.
+    // Verify HMAC-SHA256 FIRST (before parsing untrusted offsets/fields).
     let env_key = if explicit_hmac_key.is_none() { env_hmac_key() } else { None };
     let active_key: Option<&[u8]> = explicit_hmac_key.or(env_key.as_deref());
     match (active_key, hmac_present) {
         (Some(k), true) => {
-            let expected_mac = hmac_sha256(k, &buf[0..308]);
-            let stored_mac: &[u8; 32] = buf[308..340].try_into().unwrap();
+            let expected_mac = hmac_sha256(k, &hdr_snap[0..308]);
+            let stored_mac: &[u8; 32] = hdr_snap[308..340].try_into().unwrap();
             if !ct_eq_32(&expected_mac, stored_mac) {
                 return Err(CowrieError::AuthMacMismatch);
             }
@@ -749,8 +775,105 @@ pub fn parse_statepage_meta_with_hmac(
         (Some(_), false) | (None, true) => {
             return Err(CowrieError::AuthMacMismatch);
         }
-        (None, false) => {}
+        (None, false) => {
+            if hdr_snap[308..340].iter().any(|&b| b != 0) {
+                return Err(CowrieError::NonZeroPad);
+            }
+        }
     }
+
+    // Parse 64-byte CWRF shard header from the verified stack snapshot + EOF trailer.
+    let mut hdr_and_trailer = [0u8; 76];
+    hdr_and_trailer[0..64].copy_from_slice(&hdr_snap[0..64]);
+    hdr_and_trailer[64..76].copy_from_slice(&buf[buf.len() - 12..]);
+    let hdr = parse_shard_header(&hdr_and_trailer)?;
+    if (hdr.flags & FLAG_STATEPAGE) == 0
+        || hdr.frame_count != 0
+        || hdr.tensor_count != 1
+        || hdr.plane_a_off != 64
+        || hdr.plane_a_len != 276
+    {
+        return Err(CowrieError::InvalidContract);
+    }
+    if &hdr_snap[64..68] != STATEPAGE_META_MAGIC {
+        return Err(CowrieError::BadMagic);
+    }
+    let ctx_tokens = u32::from_le_bytes(hdr_snap[68..72].try_into().unwrap());
+    let kv_quant = hdr_snap[72];
+    let ssm_dtype = hdr_snap[73];
+    let hash_mode = hdr_snap[74];
+    if hash_mode > HASH_MODE_PARALLEL_MERKLE_4M
+        || hdr_snap[76..80].iter().any(|&b| b != 0)
+        || hdr_snap[306..308].iter().any(|&b| b != 0)
+    {
+        return Err(CowrieError::NonCanonicalFlags);
+    }
+    if buf[340..PAGE_ALIGN].iter().any(|&b| b != 0) {
+        return Err(CowrieError::NonZeroPad);
+    }
+
+    let state_offset = u64::from_le_bytes(hdr_snap[80..88].try_into().unwrap());
+    let state_len = u64::from_le_bytes(hdr_snap[88..96].try_into().unwrap());
+    if state_offset != PAGE_ALIGN as u64 || state_offset != hdr.plane_c_off {
+        return Err(CowrieError::UnalignedArena);
+    }
+    let state_off_usize = u64_to_usize(state_offset)?;
+    let state_len_usize = u64_to_usize(state_len)?;
+    let end = state_off_usize
+        .checked_add(state_len_usize)
+        .ok_or(CowrieError::Truncated)?;
+    let pad_end = checked_align_16kb(end).map_err(|_| CowrieError::Truncated)?;
+    if pad_end
+        .checked_add(STATEPAGE_FOOTER_BYTES)
+        .map_or(true, |tot| tot != buf.len())
+    {
+        return Err(CowrieError::Truncated);
+    }
+    if hdr.plane_c_len != (pad_end - state_off_usize) as u64 || hdr.footer_off != pad_end as u64 {
+        return Err(CowrieError::InvalidContract);
+    }
+    if buf[end..pad_end].iter().any(|&b| b != 0) {
+        return Err(CowrieError::NonZeroPad);
+    }
+
+    // Strict lowercase ASCII hex check: guarantees zero NUL bytes (eliminates FFI CString panic).
+    if !is_lower_hex_64(&hdr_snap[96..160])
+        || !is_lower_hex_64(&hdr_snap[160..224])
+        || !is_lower_hex_64(&hdr_snap[224..288])
+    {
+        return Err(CowrieError::InvalidContract);
+    }
+    let model_sha = std::str::from_utf8(&hdr_snap[96..160]).unwrap().to_string();
+    let doc_cid = std::str::from_utf8(&hdr_snap[160..224]).unwrap().to_string();
+    let state_sha = std::str::from_utf8(&hdr_snap[224..288]).unwrap().to_string();
+
+    // Validate the 94-byte Plane D footer matches the HMAC-protected header fields & Merkle root.
+    let footer = &buf[pad_end..pad_end + STATEPAGE_FOOTER_BYTES];
+    let f_toff = u64::from_le_bytes(footer[0..8].try_into().unwrap());
+    let f_tlen = u64::from_le_bytes(footer[8..16].try_into().unwrap());
+    let f_merkle: [u8; 32] = footer[16..48].try_into().unwrap();
+    let f_mroot: [u8; 34] = footer[48..82].try_into().unwrap();
+    let f_foff = u64::from_le_bytes(footer[82..90].try_into().unwrap());
+    if f_toff != state_offset || f_tlen != state_len || f_foff != hdr.footer_off || &footer[90..94] != MAGIC_SHARD {
+        return Err(CowrieError::CorruptTrailer);
+    }
+    if hash_mode == HASH_MODE_PARALLEL_MERKLE_4M && to_hex(&f_merkle) != state_sha {
+        return Err(CowrieError::RootMismatch);
+    }
+    let exp_mroot = shard_merkle_root_from_leaves(&[], &[tensor_merkle_leaf(state_len, &f_merkle)]);
+    if f_mroot != exp_mroot {
+        return Err(CowrieError::RootMismatch);
+    }
+
+    let rt_slice = &hdr_snap[288..304];
+    let rt_end = rt_slice.iter().position(|&b| b == 0).unwrap_or(16);
+    if rt_slice[rt_end..].iter().any(|&b| b != 0)
+        || rt_slice[..rt_end].iter().any(|&b| b < 0x20 || b >= 0x7F)
+    {
+        return Err(CowrieError::InvalidContract);
+    }
+    let runtime_id = std::str::from_utf8(&rt_slice[..rt_end]).unwrap().to_string();
+    let layout_ver = u16::from_le_bytes(hdr_snap[304..306].try_into().unwrap());
 
     Ok(StatePageMeta {
         model_sha,
@@ -768,7 +891,7 @@ pub fn parse_statepage_meta_with_hmac(
     })
 }
 
-// Raw Unix libc bindings for zero-copy mmap + POSIX_FADV_DONTNEED + geteuid (zero external crate deps!)
+// Raw Unix libc bindings for zero-copy mmap + POSIX_FADV_DONTNEED (Linux) + geteuid + O_NOFOLLOW
 #[cfg(unix)]
 mod sys {
     extern "C" {
@@ -781,13 +904,23 @@ mod sys {
             offset: i64,
         ) -> *mut std::ffi::c_void;
         pub fn munmap(addr: *mut std::ffi::c_void, length: usize) -> i32;
+        #[cfg(target_os = "linux")]
         pub fn posix_fadvise(fd: i32, offset: i64, len: i64, advice: i32) -> i32;
         pub fn geteuid() -> u32;
     }
     pub const PROT_READ: i32 = 1;
     pub const MAP_PRIVATE: i32 = 2;
     pub const MAP_FAILED: *mut std::ffi::c_void = !0usize as *mut std::ffi::c_void;
+    #[cfg(target_os = "linux")]
     pub const POSIX_FADV_DONTNEED: i32 = 4;
+    #[cfg(all(target_os = "linux", any(target_arch = "aarch64", target_arch = "arm")))]
+    pub const O_NOFOLLOW: i32 = 0o100000;
+    #[cfg(all(target_os = "linux", not(any(target_arch = "aarch64", target_arch = "arm"))))]
+    pub const O_NOFOLLOW: i32 = 0o400000;
+    #[cfg(target_os = "macos")]
+    pub const O_NOFOLLOW: i32 = 0x0100;
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub const O_NOFOLLOW: i32 = 0;
 }
 
 /// Verify an in-memory `StatePage` byte slice (`CWSP` + optional HMAC + 4 MiB Merkle payload).
@@ -799,7 +932,10 @@ pub fn verify_statepage_bytes(
 ) -> Result<StatePageMeta, CowrieError> {
     let meta = parse_statepage_meta_with_hmac(buf, explicit_hmac_key)?;
     if verify_hash {
-        let st = &buf[meta.state_offset as usize..(meta.state_offset + meta.state_len) as usize];
+        let so = u64_to_usize(meta.state_offset)?;
+        let sl = u64_to_usize(meta.state_len)?;
+        let end = so.checked_add(sl).ok_or(CowrieError::Truncated)?;
+        let st = &buf[so..end];
         let got_sha = if meta.hash_mode == HASH_MODE_PARALLEL_MERKLE_4M {
             to_hex(&sha256_parallel_merkle(st))
         } else {
@@ -854,10 +990,7 @@ impl MappedStatePage {
         )
     }
 
-    /// Full security-hardened `StatePage` opener:
-    /// 1. Validates `fstat(fd)`: regular file, owned by `geteuid()` or `root`, not group/world-writable (`mode & 0o022 == 0`).
-    /// 2. Validates 16 KB alignment, `0x00` padding, strict lowercase-hex digests, and optional HMAC-SHA256.
-    /// 3. Enforces `model_sha`, `runtime_id`, `kv_quant`, `ssm_dtype`, and parallel 4 MiB SHA-NI Merkle integrity.
+    /// Full security-hardened `StatePage` opener (delegates to `open_verified_strict` without `doc_cid` pin).
     #[cfg(unix)]
     pub fn open_verified_full(
         path: &Path,
@@ -868,7 +1001,38 @@ impl MappedStatePage {
         explicit_hmac_key: Option<&[u8]>,
         verify_hash: bool,
     ) -> Result<Self, CowrieError> {
-        let file = File::open(path).map_err(|_| CowrieError::IoError)?;
+        Self::open_verified_strict(
+            path,
+            expected_model_sha,
+            None,
+            expected_runtime_id,
+            expected_kv_quant,
+            expected_ssm_dtype,
+            explicit_hmac_key,
+            verify_hash,
+        )
+    }
+
+    /// Strict security-hardened `StatePage` opener:
+    /// 1. Opens with `O_NOFOLLOW` and validates `fstat(fd)`: regular file, owned by `geteuid()` or `root`, mode `& 0o022 == 0`.
+    /// 2. Snapshots Page-0 header onto stack, verifies HMAC-SHA256 first, validates 16 KB alignment, `0x00` padding, and Plane D footer.
+    /// 3. Enforces `model_sha`, `doc_cid` (prevents cross-tenant KV swap), `runtime_id`, `kv_quant`, `ssm_dtype`, and parallel 4 MiB Merkle integrity.
+    #[cfg(unix)]
+    pub fn open_verified_strict(
+        path: &Path,
+        expected_model_sha: Option<&str>,
+        expected_doc_cid: Option<&str>,
+        expected_runtime_id: Option<&str>,
+        expected_kv_quant: Option<u8>,
+        expected_ssm_dtype: Option<u8>,
+        explicit_hmac_key: Option<&[u8]>,
+        verify_hash: bool,
+    ) -> Result<Self, CowrieError> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(sys::O_NOFOLLOW)
+            .open(path)
+            .map_err(|_| CowrieError::IoError)?;
         let fmeta = file.metadata().map_err(|_| CowrieError::IoError)?;
         if !fmeta.file_type().is_file() {
             return Err(CowrieError::InvalidContract);
@@ -881,7 +1045,7 @@ impl MappedStatePage {
             return Err(CowrieError::InvalidContract);
         }
 
-        let len = fmeta.len() as usize;
+        let len = u64_to_usize(fmeta.len())?;
         if len < PAGE_ALIGN + STATEPAGE_FOOTER_BYTES {
             return Err(CowrieError::Truncated);
         }
@@ -916,6 +1080,13 @@ impl MappedStatePage {
             }
         }
 
+        if let Some(exp_doc) = expected_doc_cid {
+            if !exp_doc.is_empty() && meta.doc_cid != exp_doc {
+                unsafe { sys::munmap(raw, len) };
+                return Err(CowrieError::InvalidContract);
+            }
+        }
+
         if let Some(exp_rt) = expected_runtime_id {
             if !exp_rt.is_empty() && meta.runtime_id != exp_rt {
                 unsafe { sys::munmap(raw, len) };
@@ -938,7 +1109,15 @@ impl MappedStatePage {
         }
 
         if verify_hash {
-            let st = &slice[meta.state_offset as usize..(meta.state_offset + meta.state_len) as usize];
+            let so = u64_to_usize(meta.state_offset).map_err(|e| {
+                unsafe { sys::munmap(raw, len) };
+                e
+            })?;
+            let sl = u64_to_usize(meta.state_len).map_err(|e| {
+                unsafe { sys::munmap(raw, len) };
+                e
+            })?;
+            let st = &slice[so..so + sl];
             let got_sha = if meta.hash_mode == HASH_MODE_PARALLEL_MERKLE_4M {
                 to_hex(&sha256_parallel_merkle(st))
             } else {
@@ -984,11 +1163,15 @@ impl Drop for MappedStatePage {
 }
 
 /// Evict a file from the Linux OS page cache (`POSIX_FADV_DONTNEED`) for cold NVMe benchmarking.
+/// No-op on non-Linux Unix targets (e.g., macOS Apple Silicon).
 #[cfg(unix)]
 pub fn evict_page_cache(path: &Path) -> Result<(), CowrieError> {
     let f = File::open(path).map_err(|_| CowrieError::IoError)?;
+    #[cfg(target_os = "linux")]
     unsafe {
         sys::posix_fadvise(f.as_raw_fd(), 0, 0, sys::POSIX_FADV_DONTNEED);
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = f;
     Ok(())
 }
